@@ -14,11 +14,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from fastapi import APIRouter
 
 from .indicators import adx, atr, bollinger_bands, ema, macd, rsi, stochastic
+
+if TYPE_CHECKING:  # Avoid circular import at runtime; see EventDetector.
+    from .event_engine import EventDeduplicator, EventHistory, EventQueue
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -124,11 +127,50 @@ class DetectedEvent:
 
 
 class EventDetector:
-    """Detects market events from OHLCV data using indicator rules.
+    """Detects market events from OHLCV data.
 
-    All indicator imports are resolved at module level — no dynamic
-    imports inside methods.
+    Phase 5 adds optional EventQueue, EventHistory, and EventDeduplicator.
+    If provided, detected events are deduplicated, prioritized, enqueued,
+    and stored in history.
     """
+
+    def __init__(
+        self,
+        deduplicator: "EventDeduplicator | None" = None,
+        queue: "EventQueue | None" = None,
+        history: "EventHistory | None" = None,
+    ) -> None:
+        """Create a detector with optional extensions.
+
+        Args:
+            deduplicator: Instance handling duplicate suppression.
+            queue: In‑memory priority queue for emitted events.
+            history: Persistent in‑memory history store.
+        """
+        self._deduplicator = deduplicator
+        self._queue = queue
+        self._history = history
+
+    def _process_and_route(self, events: list[DetectedEvent], symbol: str) -> None:
+        """Apply deduplication, queue, and history to a list of events.
+
+        This helper is synchronous because the underlying queue/history are
+        thread‑safe (no asyncio required). The detector itself remains sync.
+        """
+        for ev in events:
+            emit = True
+            # Deduplication based on bar index – approximate with event count
+            if self._deduplicator is not None:
+                # Use global counter per detector instance.
+                emit = self._deduplicator.should_emit(
+                    symbol, ev.event_type, getattr(ev, "_bar_index", 0)
+                )
+            if not emit:
+                continue
+            if self._queue is not None:
+                self._queue.enqueue(ev)
+            if self._history is not None:
+                self._history.add(ev)
 
     def detect(
         self,
@@ -138,8 +180,8 @@ class EventDetector:
         """Detect market events from OHLCV data.
 
         Args:
-            ohlcv: OHLCV dicts with keys: open, high, low,
-                close, volume (oldest -> newest).
+            ohlcv: OHLCV dicts with keys: open, high, low, close, volume
+                (oldest → newest).
             prev_state: Previous MarketState from the prior bar.
 
         Returns:
@@ -500,6 +542,9 @@ class EventDetector:
                     )
                 )
 
+        # After detection, route via optional queue/history/dedup
+        if hasattr(self, "_process_and_route"):
+            self._process_and_route(events, symbol)
         return events
 
     def update_state(

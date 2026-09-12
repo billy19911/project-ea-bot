@@ -8,12 +8,20 @@ This package provides:
 - Volatility calculations: ATR, Bollinger Bands, historical volatility
 - Position sizing: Fixed fractional, ATR-based, margin-based
 - Risk metrics: Max drawdown, Sharpe ratio, Sortino ratio, profit factor
+- Phase 5: Event engine — priority, queue, history, deduplication
 
 All calculations are pure-Python and deterministic — no LLM, no randomness.
 """
 
 from __future__ import annotations
 
+from .event_engine import (
+    EVENT_PRIORITY_MAP,
+    EventDeduplicator,
+    EventHistory,
+    EventPriority,
+    EventQueue,
+)
 from .indicators import adx, atr, ema, macd, rsi, sma
 from .position_sizing import atr_position_size
 from .regime import MarketRegime, RegimeResult, detect_regime
@@ -66,4 +74,10 @@ __all__ = [
     "win_rate",
     "value_at_risk",
     "exposure_percent",
+    # Phase 5 extensions
+    "EventPriority",
+    "EVENT_PRIORITY_MAP",
+    "EventQueue",
+    "EventHistory",
+    "EventDeduplicator",
 ]
