@@ -159,16 +159,12 @@ def validate_env() -> list[str]:
         if expected_type is int:
             value = _parse_int(raw, spec.get("default", 0))
             if "validate" in spec and not spec["validate"](value):
-                errors.append(
-                    f"❌ {name}={raw} tidak valid — {spec.get('description', name)}"
-                )
+                errors.append(f"❌ {name}={raw} tidak valid — {spec.get('description', name)}")
             continue
 
         # --- String validation ---
         if "validate" in spec and not spec["validate"](raw):
-            errors.append(
-                f"❌ {name}={raw} tidak valid — {spec.get('description', name)}"
-            )
+            errors.append(f"❌ {name}={raw} tidak valid — {spec.get('description', name)}")
 
     return errors
 

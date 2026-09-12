@@ -26,6 +26,7 @@ except ImportError:  # pragma: no cover
 # Context vars yang akan di-merge ke setiap log line
 trace_ctx = contextvars.ContextVar("trace_ctx", default={})
 
+
 # ---------------------------------------------------------------------------
 # Setup sekali di awal application
 # ---------------------------------------------------------------------------
@@ -108,9 +109,13 @@ def _to_json(obj: Any) -> str:
     """Serialize ke JSON. Fallback ke str() bila orjson tidak ada."""
     try:
         import orjson
-        return orjson.dumps(obj, option=orjson.OPT_APPEND_NEWLINE | orjson.OPT_SERIALIZE_NUMBERS).decode()
+
+        return orjson.dumps(
+            obj, option=orjson.OPT_APPEND_NEWLINE | orjson.OPT_SERIALIZE_NUMBERS
+        ).decode()
     except ImportError:
         import json
+
         return json.dumps(obj, default=str)
 
 

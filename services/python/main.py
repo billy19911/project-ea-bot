@@ -1,15 +1,14 @@
 # FastAPI application entry point
 # Run: uvicorn main:app --reload
 
+from datetime import datetime
+from typing import Optional
+
 from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
 
 app = FastAPI(
-    title="EA Bot API",
-    description="Electronic Assistant Bot API Service",
-    version="1.0.0"
+    title="EA Bot API", description="Electronic Assistant Bot API Service", version="1.0.0"
 )
 
 
@@ -38,9 +37,7 @@ class SignalResponse(BaseModel):
 async def health_check():
     """Health check endpoint"""
     return HealthResponse(
-        status="healthy",
-        timestamp=datetime.utcnow().isoformat(),
-        version="1.0.0"
+        status="healthy", timestamp=datetime.utcnow().isoformat(), version="1.0.0"
     )
 
 
@@ -58,7 +55,7 @@ async def create_signal(signal: SignalRequest):
         id=signal_id,
         status="received",
         signal=signal.dict(),
-        created_at=datetime.utcnow().isoformat()
+        created_at=datetime.utcnow().isoformat(),
     )
 
 
@@ -70,4 +67,5 @@ async def list_signals():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
