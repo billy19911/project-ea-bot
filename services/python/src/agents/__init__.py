@@ -15,6 +15,7 @@ from .base import (
     TechnicalAnalystAgent,
 )
 from .supervisor import DEFAULT_ROUTING_TABLE, SupervisorAgent
+from .synthesis import AgentSynthesizer, SynthesisResult, TradeProposal
 
 __all__ = [
     "AgentRegistry",
@@ -26,4 +27,7 @@ __all__ = [
     "SentimentAnalystAgent",
     "SupervisorAgent",
     "DEFAULT_ROUTING_TABLE",
+    "TradeProposal",
+    "SynthesisResult",
+    "AgentSynthesizer",
 ]

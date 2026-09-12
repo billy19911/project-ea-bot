@@ -199,7 +199,9 @@ class Trade(Base):
     account: Mapped["Account"] = relationship(back_populates="trades")
     position: Mapped[Optional["Position"]] = relationship(back_populates="trades")
     strategy: Mapped[Optional["Strategy"]] = relationship(back_populates="trades")
-    agent_run: Mapped[Optional["AgentRun"]] = relationship(back_populates="trades")  # type: ignore[attr-defined]
+    agent_run: Mapped[Optional["AgentRun"]] = relationship(
+        back_populates="trades"
+    )  # type: ignore[attr-defined]
 
     __table_args__ = (Index("ix_trade_account_time", "account_id", "trade_time"),)
 
@@ -283,8 +285,12 @@ class Order(Base):
 
     # Relationships
     account: Mapped["Account"] = relationship(back_populates="orders")
-    strategy: Mapped[Optional["Strategy"]] = relationship(back_populates="orders")  # type: ignore[attr-defined]
-    agent_run: Mapped[Optional["AgentRun"]] = relationship(back_populates="orders")  # type: ignore[attr-defined]
+    strategy: Mapped[Optional["Strategy"]] = relationship(
+        back_populates="orders"
+    )  # type: ignore[attr-defined]
+    agent_run: Mapped[Optional["AgentRun"]] = relationship(
+        back_populates="orders"
+    )  # type: ignore[attr-defined]
 
     __table_args__ = (
         Index("ix_order_account_symbol", "account_id", "symbol"),
@@ -413,7 +419,9 @@ class AuditLog(Base):
     )
 
     # Relationships
-    user: Mapped[Optional["User"]] = relationship(back_populates="audit_logs")  # type: ignore[attr-defined]
+    user: Mapped[Optional["User"]] = relationship(
+        back_populates="audit_logs"
+    )  # type: ignore[attr-defined]
 
     __table_args__ = (
         Index("ix_audit_user_created", "user_id", "created_at"),
