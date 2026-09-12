@@ -1,96 +1,218 @@
 <!-- SPDX-License-Identifier: CC0-1.0 -->
-<!DOCTYPE html>
-<html lang="id">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>project-ea-bot</title>
-<style>
-  :root {
-    --bg: #0f1117;
-    --fg: #e4e4e7;
-    --accent: #60a5fa;
-    --muted: #71717a;
-  }
-  body {
-    background: var(--bg);
-    color: var(--fg);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    margin: 0;
-    padding: 2rem 1rem;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .card {
-    max-width: 640px;
-    text-align: center;
-  }
-  h1 {
-    font-size: 2rem;
-    margin: 0 0 0.25rem;
-    color: var(--accent);
-  }
-  .tag {
-    display: inline-block;
-    background: #1e293b;
-    color: var(--accent);
-    font-size: 0.8rem;
-    padding: 0.2rem 0.6rem;
-    border-radius: 999px;
-    margin-bottom: 1.5rem;
-  }
-  p {
-    color: var(--muted);
-    margin: 0.5rem 0;
-    line-height: 1.6;
-  }
-  code {
-    background: #1e293b;
-    padding: 0.1rem 0.3rem;
-    border-radius: 4px;
-    font-family: "JetBrains Mono", Consolas, monospace;
-  }
-  ul {
-    text-align: left;
-    color: var(--muted);
-    line-height: 1.8;
-    margin: 1rem 0;
-  }
-  li::marker {
-    color: var(--accent);
-  }
-  .links {
-    margin-top: 2rem;
-    display: flex;
-    gap: 1rem;
-    justify-content: center;
-  }
-  .links a {
-    color: var(--accent);
-    text-decoration: none;
-  }
-  .links a:hover {
-    text-decoration: underline;
-  }
-</style>
-</head>
-<body>
-  <div class="card">
-    <span class="tag">Project EA Bot</span>
-    <h1>project-ea-bot</h1>
-    <p>Monorepo untuk EA Bot — <strong>Node.js API</strong>, <strong>Python service</strong>, dan <strong>Web frontend</strong>.</p>
-    <ul>
-      <li><code>apps/api</code> — Node.js API (Express/Fastify)</li>
-      <li><code>services/python</code> — Python microservice</li>
-      <li><code>packages/shared/config</code> — Shared config types &amp; validation</li>
-      <li><code>docs/logging.md</code> — Panduan structured logging</li>
-    </ul>
-    <div class="links">
-      <a href="docs/logging.md">Logging Guide</a>
-      <a href=".env.example">Environment Variables</a>
-    </div>
-  </div>
-</body>
-</html>
+
+# XynnBot — Autonomous Multi-Agent Trading & Research Platform
+
+<div align="center">
+
+[![Status](https://img.shields.io/badge/status-architecture_foundation-blue.svg)](#status)
+[![Platform](https://img.shields.io/badge/platform-MT5-purple.svg)](#platform)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](#license)
+
+</div>
+
+---
+
+**XynnBot** adalah platform *autonomous trading* yang menggabungkan **deterministic engines** (kode yang enforce safety) dengan **multi-agent AI** (Supervisor + specialist agents) untuk menganalisis pasar, mengelola risiko, dan mengeksekusi trade melalui MetaTrader 5.
+
+Inti sistem: **AI memutuskan dalam batas. Kode menegakkan batas.**
+
+```
+AI  →  Trade Proposal  →  Deterministic Validation  →  Risk Gate  →  Execution
+```
+
+AI tidak pernah langsung kirim order ke MT5. Setiap keputusan melewati validation layer yang deterministic.
+
+---
+
+## Arsitektur
+
+### Cara Kerja Sistem
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Kontrol Layer                          │
+│  Dashboard (Next.js) │ API (Node.js/TypeScript)            │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+        Event Manager   Agent Router   State Manager
+              │              │              │
+              └──────────────┼──────────────┘
+                             ▼
+                    ┌───────────────────┐
+                    │   SUPERVISOR      │
+                    │   AGENT           │
+                    └─────────┬─────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+┌──────────────┐    ┌──────────────────┐    ┌──────────────┐
+│ Market       │    │ Risk Department  │    │ Research     │
+│ Intelligence │    │ (Deterministic)  │    │ Department   │
+└──────┬───────┘    └────────┬─────────┘    └──────┬───────┘
+       │                     │                     │
+       └─────────────────────┼─────────────────────┘
+                             ▼
+                    ┌───────────────────┐
+                    │   RISK GATE       │
+                    │   (HARD LIMITS)   │
+                    └─────────┬─────────┘
+                              ▼
+                    ┌───────────────────┐
+                    │   EXECUTION       │
+                    │   ENGINE          │
+                    └─────────┬─────────┘
+                              ▼
+                          MT5
+```
+
+### Struktur Monorepo
+
+```
+project-ea-bot/
+├── apps/
+│   ├── web/          # Next.js dashboard
+│   └── api/          # Node.js API (Express)
+├── services/
+│   └── python/       # FastAPI service (agents, MT5 connector, risk)
+├── packages/
+│   ├── eslint-config/# Shared lint config
+│   └── shared/       # TypeScript types & utilities
+├── infrastructure/
+│   ├── docker/       # Docker compose & Dockerfiles
+│   └── db/          # PostgreSQL init, backup, restore
+├── .github/
+│   └── workflows/   # CI/CD
+├── docs/
+│   ├── logging.md    # Panduan structured logging
+│   └── development-setup.md
+├── scripts/
+├── config-validate.js
+├── .env.example
+├── README.md         # Ini
+├── CHANGELOG.md
+├── CONSTRAINTS.md
+└── PRD_V1_Autonomous_Multi_Agent_Trading_Research_Platform.md
+```
+
+---
+
+## Tech Stack
+
+| Layer              | Technology                        |
+|--------------------|-----------------------------------|
+| Frontend           | React + Next.js                   |
+| Backend API        | Node.js / TypeScript / Express    |
+| AI Service         | Python / FastAPI                  |
+| LLM Gateway        | 9Router (dengan fallback)         |
+| Database           | PostgreSQL                        |
+| Cache / Queue      | Redis                             |
+| Execution          | MetaTrader 5                      |
+| Container          | Docker (pilihan)                  |
+
+---
+
+## Status & Roadmap
+
+### Phase 0 — Architecture Foundation ✅ *(Selesai)*
+- [x] Monorepo setup (npm workspaces, TypeScript, ESLint, Prettier)
+- [x] Python service foundation (FastAPI, pydantic-settings, SQLAlchemy)
+- [x] Database layer (Prisma + SQLAlchemy, docker-compose blueprint)
+- [x] Logging & config system (structured logging, env validation)
+- [x] Development environment docs & CI/CD blueprint
+- [x] CHANGELOG, CONSTRAINTS.md, PRD V1
+
+### Phase 1 — MT5 Connector *(Berikutnya)*
+- MT5 connection & recovery
+- Account info, symbol, tick, OHLC
+- Positions & orders (paper/demo)
+
+### Phase 2–6 *(Perencanaan)*
+- Deterministic Trading Engine
+- Multi-Agent System (Supervisor + specialist agents)
+- Risk Engine & Risk Gate
+- Execution Engine
+- Dashboard & Observability
+
+---
+
+## Safety First
+
+Sistem ini punya safety mechanism yang tegas:
+
+| Mode          | Deskripsi                                      |
+|---------------|------------------------------------------------|
+| `OFFLINE`     | Tidak ada interaksi AI                         |
+| `BACKTEST`    | Simulasi historis                              |
+| `PAPER`       | Akun demo tanpa uang nyata                     |
+| `DEMO`        | Akun broker demo                               |
+| `LIVE`        | Trading real — butuh explicit enable           |
+| `EMERGENCY_STOP` | Lockdown sistem                              |
+
+Hard risk limits (drawdown, daily loss, exposure, dll) **tidak boleh** diubah oleh LLM. Risk Gate selalu dipanggil sebelum eksekusi.
+
+---
+
+## Getting Started
+
+### Prasyarat
+
+- Node.js (binary, bukan cuma npm)
+- Python 3.11+
+- PostgreSQL (local/remote)
+- Redis (local/remote)
+
+### Setup Singkat
+
+```bash
+# Install dependencies
+cd apps/api && npm install && cd ../web && npm install && cd ../../packages/shared && npm install && cd ../..
+
+# Install Python dependencies
+cd services/python
+.venv/Scripts/activate
+pip install -r requirements.txt
+
+# Konfigurasi environment
+cp .env.example .env
+# Edit .env sesuai environment lokal
+
+# Validasi environment
+node config-validate.js
+
+# Jalankan API (Node.js)
+cd apps/api
+node src/index.ts
+
+# Jalankan Python service (terminal lain)
+cd ../../services/python
+.venv/Scripts/activate
+uvicorn src.main:app --reload
+```
+
+---
+
+## Dokumentasi
+
+| Dokumen | Deskripsi |
+|---------|-----------|
+| [`PRD_V1_...md`](./PRD_V1_Autonomous_Multi_Agent_Trading_Research_Platform.md) | Spesifikasi arsitektur lengkap (PRD V1) |
+| [`docs/logging.md`](./docs/logging.md) | Panduan structured logging (pino / structlog) |
+| [`docs/development-setup.md`](./docs/development-setup.md) | Panduan install dependensi manual (Windows) |
+| [`CHANGELOG.md`](./CHANGELOG.md) | Riwayat versi & perubahan |
+| [`CONSTRAINTS.md`](./CONSTRAINTS.md) | Kendala environment & rekomendasi solusi |
+
+---
+
+## Developer
+
+- **Billy19911** — [GitHub](https://github.com/billy19911)
+
+---
+
+<div align="center">
+
+_Dokumen ini adalah acuan utama fase 0. Untuk desain sistem lengkap, lihat PRD V1._
+
+</div>
