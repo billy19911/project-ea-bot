@@ -1,0 +1,367 @@
+# This is a GitHub Actions workflow for Project EA Bot CI/CD
+# WARNING: Several steps below will NOT work without the Node.js binary installed in the CI environment.
+#           The current development environment lacks 'node' (only npm is available).
+#           Ensure Node.js is available in the runner before enabling these steps.
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+  POSTGRES_VERSION: "15"
+  REDIS_VERSION: "7"
+
+jobs:
+  # ==========================================
+  # CODE QUALITY & LINTING
+  # ==========================================
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------------
+      # ⚠ WARNING: This step requires Node.js binary.
+      #   The current dev environment is MISSING 'node' (only npm is present).
+      #   Without Node.js installed in the runner, this step will fail.
+      #   Fix: ensure NODE_VERSION is available or use setup-node action.
+      # ---------------------------------------------------------
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ---------------------------------------------------------
+      # ⚠ WARNING: Requires Node.js binary to run lint scripts.
+      #   If 'node' is unavailable, frontend lint will fail.
+      # ---------------------------------------------------------
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      # ---------------------------------------------------------
+      # ⚠ WARNING: Requires Node.js binary.
+      #   'npm run lint' executes linting scripts via Node.js.
+      # ---------------------------------------------------------
+      - name: Run frontend lint
+        run: |
+          cd frontend
+          npm run lint
+        # If Node.js is not available, this will fail.
+        # Consider guarding with: if: always() and check output.
+
+      - name: Run backend lint
+        run: |
+          # Ganti dengan tool linting backend yang sesuai (mis. ruff, flake8, pylint)
+          python -m flake8 backend/
+
+  # ==========================================
+  # TYPE CHECKING
+  # ==========================================
+  type-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ---------------------------------------------------------
+      # ⚠ WARNING: Jika backend menggunakan mypy/tipe checking,
+      #   pastikan sudah di-setup di requirements.txt
+      # ---------------------------------------------------------
+      - name: Run type checking
+        run: |
+          # Ganti dengan perintah type checking yang sesuai
+          # python -m mypy backend/
+          echo "Type checking not yet configured"
+
+  # ==========================================
+  # TESTS
+  # ==========================================
+  test:
+    runs-on: ubuntu-latest
+    services:
+      # PostgreSQL service container
+      postgres:
+        image: postgres:${{ env.POSTGRES_VERSION }}
+        env:
+          POSTGRES_USER: ea_bot_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: ea_bot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # Redis service container
+      redis:
+        image: redis:${{ env.REDIS_VERSION }}-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-django pytest-cov
+
+      # ---------------------------------------------------------
+      # ⚠ WARNING: Requires Node.js binary.
+      #   Frontend tests need 'node' to run test runners (Jest/Vitest).
+      #   If not available, frontend test will fail.
+      # ---------------------------------------------------------
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run backend tests
+        env:
+          DATABASE_URL: postgresql://ea_bot_user:test_password@localhost:5432/ea_bot_test
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: test-secret-key-for-ci
+        run: |
+          # Ganti dengan perintah test backend yang sesuai
+          python -m pytest backend/tests/ -v --cov=backend --cov-report=xml
+
+      # ---------------------------------------------------------
+      # ⚠ WARNING: Requires Node.js binary.
+      #   Frontend test runner (Jest/Vitest) requires 'node'.
+      # ---------------------------------------------------------
+      - name: Run frontend tests
+        run: |
+          cd frontend
+          npm test -- --coverage
+        # Hanya akan berhasil jika Node.js binary tersedia di runner.
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          fail_ci_if_error: false
+
+  # ==========================================
+  # BUILD
+  # ==========================================
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------------
+      # ⚠ WARNING: Build step requires Node.js binary.
+      #   Frontend build (Webpack/Vite/etc.) executes via Node.js.
+      #   Without 'node', this entire job fails.
+      # ---------------------------------------------------------
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      # ---------------------------------------------------------
+      # ⚠ WARNING: 'npm run build' requires Node.js binary.
+      #   Build script chains (Babel, TypeScript, Webpack) all need 'node'.
+      # ---------------------------------------------------------
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
+        # Gagal jika Node.js tidak tersedia.
+
+      - name: Collect backend static files
+        run: |
+          # Untuk Django: python manage.py collectstatic --noinput
+          # Untuk FastAPI: disesuaikan
+          echo "Backend static collection not yet configured"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            frontend/dist/
+            backend/static/
+          retention-days: 7
+
+  # ==========================================
+  # SECURITY SCAN (Dependency audit)
+  # ==========================================
+  security:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Python dependency audit
+        run: |
+          pip install pip-audit
+          pip-audit
+
+      # ---------------------------------------------------------
+      # ⚠ WARNING: Requires Node.js binary.
+      #   'npm audit' uses Node.js to parse package-lock.json.
+      # ---------------------------------------------------------
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      # ---------------------------------------------------------
+      # ⚠ WARNING: 'npm audit' requires Node.js binary.
+      # ---------------------------------------------------------
+      - name: Run frontend dependency audit
+        run: |
+          cd frontend
+          npm audit --audit-level=high
+        # Gagal jika Node.js tidak tersedia.
+
+  # ==========================================
+  # DEPLOY (Blueprint — belum diaktifkan)
+  # ==========================================
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [lint, test, build]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------------
+      # Catatan: Step deploy ini adalah blueprint.
+      #   Diadaptasi sesuai deployment target yang sebenarnya
+      #   (mis. VPS, AWS, Azure, atau platform lain).
+      # ---------------------------------------------------------
+
+      - name: Setup deployment environment
+        run: |
+          echo "Deploy step placeholder"
+          echo "Replace with actual deployment steps"
+          echo "Example: SSH to server, pull latest, restart services"
+
+      # Contoh deployment ke VPS via SSH:
+      # - name: Deploy to VPS
+      #   uses: appleboy/ssh-action@v1.0.0
+      #   with:
+      #     host: ${{ secrets.VPS_HOST }}
+      #     username: ${{ secrets.VPS_USER }}
+      #     key: ${{ secrets.VPS_SSH_KEY }}
+      #     script: |
+      #       cd /var/www/project-ea-bot
+      #       git pull origin main
+      #       docker compose up -d --build
+      #       docker compose exec web python manage.py migrate
+      #       docker compose exec web python manage.py collectstatic --noinput
+
+      # Catatan: Jika menggunakan Docker di production,
+      # pastikan Docker tersedia di environment deployment.
+      # Saat ini environment development TIDAK memiliki Docker.
+
+  # ==========================================
+  # NOTIFICATION (Opsional)
+  # ==========================================
+  notify:
+    runs-on: ubuntu-latest
+    needs: [lint, test, build, security]
+    if: always()
+
+    steps:
+      - name: Notify build result
+        run: |
+          # Ganti dengan notifikasi yang sesuai:
+          # - Slack webhook
+          # - Discord webhook
+          # - Email
+          # - Teams webhook
+          echo "CI pipeline finished. Result: ${{ needs.test.result }}"
