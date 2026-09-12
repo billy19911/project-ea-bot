@@ -1,0 +1,36 @@
+# ============================================================================
+# Git ignore untuk project-ea-bot monorepo
+# ============================================================================
+node_modules/
+.env
+.env.local
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+*.tgz
+.cache/
+.ruff/
+.mypy_cache/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs (jika log ditulis ke file, bukan stdout)
+*.log
+
+# Secrets / credentials
+*.pem
+*.key
+secrets/

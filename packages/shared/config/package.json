@@ -1,0 +1,14 @@
+{
+  "name": "shared-config-types",
+  "version": "1.0.0",
+  "private": true,
+  "types": "./src/index.d.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "zod": "^3.23.8",
+    "typescript": "^5.4.5",
+    "@types/node": "^20.14.0"
+  }
+}

@@ -1,0 +1,62 @@
+version: "3.9"
+
+# =============================================================================
+# Project EA Bot — Database Infrastructure
+# =============================================================================
+# PostgreSQL : relational data (users, accounts, trades, strategies, agents,
+#              audit logs). Runs on port 5432.
+# Redis       : cache, session state, event queue, pub/sub. Runs on port 6379.
+#
+# Docker tidak tersedia di development environment ini. File ini berfungsi
+# sebagai dokumentasi konfigurasi. Untuk menjalankan tanpa Docker, install
+# PostgreSQL dan Redis secara manual (lihat /infrastructure/INSTALL.md).
+#
+# Jalankan dengan: docker-compose up -d
+# =============================================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ea-bot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ea_bot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_dev}
+      POSTGRES_DB: ea_bot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ea_bot -d ea_bot"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ea-bot-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ea-bot-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ea-bot-network
+
+networks:
+  ea-bot-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

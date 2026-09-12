@@ -1,0 +1,63 @@
+api:
+  image: node:22-alpine
+  working_dir: /app
+  volumes:
+    - ../../apps/api:/app
+  command: sh -c "npm install && npm run dev"
+  ports:
+    - "3001:3001"
+  environment:
+    - NODE_ENV=development
+    - PORT=3001
+    - HOST=0.0.0.0
+  depends_on:
+    - db
+
+web:
+  image: node:22-alpine
+  working_dir: /app
+  volumes:
+    - ../../apps/web:/app
+  command: sh -c "npm install && npm run dev"
+  ports:
+    - "3000:3000"
+  environment:
+    - NODE_ENV=development
+    - PORT=3000
+    - NEXT_PUBLIC_API_URL=http://localhost:3001
+  depends_on:
+    - api
+
+python:
+  image: python:3.11-slim
+  working_dir: /app
+  volumes:
+    - ../../services/python:/app
+  command: sh -c "pip install -r requirements.txt && uvicorn main:app --reload --host 0.0.0.0 --port 8000"
+  ports:
+    - "8000:8000"
+  environment:
+    - PYTHONUNBUFFERED=1
+    - PYTHONPATH=/app
+
+db:
+  image: postgres:16-alpine
+  environment:
+    POSTGRES_USER: eabot
+    POSTGRES_PASSWORD: eabot_password
+    POSTGRES_DB: eabot
+  ports:
+    - "5432:5432"
+  volumes:
+    - postgres_data:/var/lib/postgresql/data
+
+redis:
+  image: redis:7-alpine
+  ports:
+    - "6379:6379"
+  volumes:
+    - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:

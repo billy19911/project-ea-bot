@@ -1,0 +1,337 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// User & Account — multi-account trading
+// =============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  fullName      String?
+  role          Role      @default(USER)
+  isVerified    Boolean   @default(false)
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  strategies   Strategy[]
+  agentRuns     AgentRun[]
+  auditLogs     AuditLog[]
+}
+
+enum Role {
+  USER
+  ADMIN
+  OPERATOR
+}
+
+model Account {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  provider      String    // e.g. "BINANCE", "OKX", "BYBIT"
+  accountName   String    // display name, e.g. "Binance Spot"
+  apiKey        String    // encrypted at rest
+  apiSecret     String    // encrypted at rest
+  isSandbox     Boolean   @default(true)
+  isActive      Boolean   @default(true)
+  balance       Decimal?  @db.Decimal(20, 8)
+  currency      String    @default("USDT")
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  positions     Position[]
+  trades        Trade[]
+  orders        Order[]
+}
+
+// =============================================================================
+// Symbol — tradable asset definition
+// =============================================================================
+
+model Symbol {
+  id              String    @id @default(cuid())
+  exchange        String    // e.g. "BINANCE", "OKX"
+  symbol          String    // e.g. "BTC/USDT"
+  baseAsset       String
+  quoteAsset      String
+  pricePrecision  Int       @default(8)
+  qtyPrecision    Int       @default(8)
+  minNotional     Decimal?  @db.Decimal(20, 8)
+  status          String    @default("TRADING") // TRADING, PAUSED, DELETED
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([exchange, symbol])
+  @@index([exchange])
+}
+
+// =============================================================================
+// Trade — actual executed trade (filled order)
+// =============================================================================
+
+model Trade {
+  id            String    @id @default(cuid())
+  accountId     String
+  account       Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  symbol        String
+  side          Side      // BUY, SELL
+  orderType     OrderType // MARKET, LIMIT, STOP_MARKET, etc.
+  price         Decimal   @db.Decimal(20, 8)
+  quantity      Decimal   @db.Decimal(20, 8)
+  fee           Decimal?  @db.Decimal(20, 8)
+  feeAsset      String?
+  tradeTime     DateTime  @default(now())
+
+  positionId    String?
+  position      Position? @relation(fields: [positionId], references: [id], onDelete: SetNull)
+
+  strategyId    String?
+  strategy      Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+
+  agentRunId    String?
+  agentRun      AgentRun? @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+
+  notes         String?
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([accountId])
+  @@index([symbol])
+  @@index([tradeTime])
+}
+
+enum Side {
+  BUY
+  SELL
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+  STOP_MARKET
+  STOP_LIMIT
+  TAKE_PROFIT
+  TAKE_PROFIT_MARKET
+  TRAILING_STOP
+}
+
+// =============================================================================
+// Position — open position on an account
+// =============================================================================
+
+model Position {
+  id            String    @id @default(cuid())
+  accountId     String
+  account       Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  symbol        String
+  side          Side
+  entryPrice    Decimal   @db.Decimal(20, 8)
+  currentPrice  Decimal   @db.Decimal(20, 8)
+  quantity      Decimal   @db.Decimal(20, 8)
+  leverage      Int       @default(1)
+  unrealizedPnL Decimal?  @db.Decimal(20, 8)
+  realizedPnL   Decimal?  @db.Decimal(20, 8)
+  margin        Decimal?  @db.Decimal(20, 8)
+  status        PositionStatus @default(OPEN)
+
+  strategyId    String?
+  strategy      Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+
+  agentRunId    String?
+  agentRun      AgentRun? @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+
+  openedAt      DateTime  @default(now())
+  closedAt      DateTime?
+  updatedAt     DateTime  @updatedAt
+
+  trades        Trade[]
+
+  @@unique([accountId, symbol, side])
+  @@index([accountId])
+  @@index([status])
+}
+
+enum PositionStatus {
+  OPEN
+  CLOSED
+  PARTIAL
+  LIQUIDATED
+}
+
+// =============================================================================
+// Order — open/pending/closed order
+// =============================================================================
+
+model Order {
+  id            String    @id @default(cuid())
+  accountId     String
+  account       Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  symbol        String
+  side          Side
+  orderType     OrderType
+  price         Decimal?  @db.Decimal(20, 8)
+  stopPrice     Decimal?  @db.Decimal(20, 8)
+  quantity      Decimal   @db.Decimal(20, 8)
+  filledQty     Decimal   @db.Decimal(20, 8) @default(0)
+  status        OrderStatus @default(NEW)
+
+  strategyId    String?
+  strategy      Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+
+  agentRunId    String?
+  agentRun      AgentRun? @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([accountId])
+  @@index([symbol])
+  @@index([status])
+}
+
+enum OrderStatus {
+  NEW
+  PARTIALLY_FILLED
+  FILLED
+  CANCELED
+  REJECTED
+  EXPIRED
+}
+
+// =============================================================================
+// Strategy — trading strategy definition
+// =============================================================================
+
+model Strategy {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name          String
+  description   String?
+  type          StrategyType
+  config        String?   // JSON config storage
+  isActive      Boolean   @default(true)
+  isPaperTrading Boolean  @default(false)
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  agentRuns     AgentRun[]
+
+  @@unique([userId, name])
+}
+
+enum StrategyType {
+  TREND_FOLLOWING
+  MEAN_REVERSION
+  SCALPING
+  GRID
+  ARBITRAGE
+  MARKET_MAKING
+  CUSTOM
+}
+
+// =============================================================================
+// AgentRun — single execution of an agent/strategy
+// =============================================================================
+
+model AgentRun {
+  id            String    @id @default(cuid())
+  strategyId    String?
+  strategy      Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+
+  userId        String
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  status        AgentRunStatus @default(RUNNING)
+  inputParams   String?   // JSON
+  outputSummary String?   // JSON summary
+  errorMsg      String?
+
+  runs          AgentOutput[]
+
+  @@index([status])
+  @@index([startedAt])
+}
+
+enum AgentRunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  STOPPED
+  PAUSED
+}
+
+// =============================================================================
+// AgentOutput — per-step / per-cycle output from an agent run
+// =============================================================================
+
+model AgentOutput {
+  id            String    @id @default(cuid())
+  agentRunId    String
+  agentRun      AgentRun  @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+
+  step          Int
+  timestamp     DateTime  @default(now())
+  action        String    // BUY, SELL, HOLD, CANCEL, etc.
+  rationale     String?
+  confidence    Float?
+  suggestedTrade String?  // JSON
+  metrics       String?   // JSON metrics snapshot
+
+  @@index([agentRunId])
+  @@index([timestamp])
+}
+
+// =============================================================================
+// AuditLog — system audit trail
+// =============================================================================
+
+model AuditLog {
+  id            String    @id @default(cuid())
+  userId        String?
+  user          User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action        String    // LOGIN, TRADE_EXECUTE, CONFIG_CHANGE, etc.
+  resourceType  String    // USER, ACCOUNT, TRADE, STRATEGY
+  resourceId    String?
+  details       String?   // JSON
+  ipAddress     String?
+  userAgent     String?
+  severity      AuditSeverity @default(INFO)
+
+  createdAt     DateTime  @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+enum AuditSeverity {
+  INFO
+  WARN
+  ERROR
+  CRITICAL
+}

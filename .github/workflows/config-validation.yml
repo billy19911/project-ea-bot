@@ -1,0 +1,58 @@
+# ============================================================================
+# GitHub Actions — Config Validation di setiap push/PR
+# ============================================================================
+# Script ini menjamin environment variable wajib terdefinisi sebelum code
+# di-deploy. Gagal = build gagal, jadi masalah konfigurasi tidak sampai ke
+# production.
+#
+# Cara kerja:
+#   1. Buat .env sementara dari .env.example
+#   2. Isi nilai dummy untuk variable wajib yang tidak boleh kosong di CI
+#   3. Jalankan config:validate
+#   4. Jika gagal → workflow gagal
+# ============================================================================
+
+name: Config Validation
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  validate-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Validate environment configuration
+        run: |
+          set -euo pipefail
+
+          # Buat .env sementara dari .env.example
+          cp .env.example .env
+
+          # Isi nilai dummy untuk variable wajib yang tidak memiliki default
+          # (di CI kita cuma mau memastikan validasi syntax-nya lolos)
+          cat >> .env <<'EOF'
+          DB_HOST=localhost
+          DB_NAME=testdb
+          DB_USER=testuser
+          DB_PASSWORD=testpassword
+          JWT_SECRET=test-secret-change-in-production-32chars
+          SERVICE_NAME=test-service
+          EOF
+
+          # Jalankan validation script
+          npm run config:validate

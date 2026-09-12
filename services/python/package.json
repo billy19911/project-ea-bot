@@ -1,0 +1,10 @@
+{
+  "name": "python-service",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "python src/main.py",
+    "validate": "python src/validate_env.py"
+  },
+  "description": "Python microservice — part of project-ea-bot monorepo"
+}
