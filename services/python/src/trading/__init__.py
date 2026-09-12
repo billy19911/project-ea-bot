@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from .indicators import adx, atr, ema, macd, rsi, sma
 from .position_sizing import atr_position_size
+from .regime import MarketRegime, RegimeResult, detect_regime
 from .risk import (
     exposure_percent,
     max_drawdown,
@@ -51,6 +52,10 @@ __all__ = [
     "bollinger_band_width",
     "price_range_volatility",
     "classify_volatility",
+    # Market Regime
+    "MarketRegime",
+    "RegimeResult",
+    "detect_regime",
     # Position sizing
     "atr_position_size",
     # Risk metrics

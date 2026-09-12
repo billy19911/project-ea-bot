@@ -40,7 +40,7 @@ def bollinger_band_width(
     bands = bollinger_bands(prices, period, std_dev)
     if bands is None:
         return None
-    upper, middle, lower = bands
+    upper, middle, lower = bands.upper, bands.middle, bands.lower
     if middle == 0:
         return None
     return ((upper - lower) / middle) * 100.0
