@@ -12,12 +12,10 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
-    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
     String,
-    Table,
     Text,
     func,
 )

@@ -25,59 +25,43 @@ Ini memungkinkan log aggregator (ELK, Datadog, Grafana Loki, dll.) mem-parsing l
 npm install pino pino-pretty
 ```
 
-### Setup (contoh: `apps/api/src/logger.ts`)
+### Setup
+
+Logger sudah tersedia di `apps/api/src/logger.ts`. Import di file mana saja:
 
 ```ts
-import pino from "pino";
-
-export const logger = pino({
-  // Use pretty-print di development only
-  ...(process.env.NODE_ENV === "development"
-    ? { transport: { target: "pino-pretty", options: { colorize: true } } }
-    : {}),
-  level: process.env.LOG_LEVEL || "info",
-  base: {
-    service: process.env.SERVICE_NAME || "api",
-  },
-  // Semua log otomatis punya timestamp ISO, level, service name
-});
-
-/**
- * Buat child logger untuk sebuah request — membawa traceId.
- */
-export function createRequestLogger(traceId: string, extra?: Record<string, unknown>) {
-  return logger.child({ traceId, ...extra });
-}
+import { logger, createChild } from "./logger";
 ```
 
-### Cara pakai di handler
+### Cara pakai di route handler
+
+Logger di-inject otomatis oleh middleware ke `req.log` (child logger dengan traceId):
 
 ```ts
-import { logger, createRequestLogger } from "../logger";
+app.get('/health', (req, res) => {
+  req.log.info({ statusCode: 200 }, 'health.check');
+  res.json({ status: 'healthy' });
+});
+```
 
-export async function handleRequest(req: Request, res: Response) {
-  const traceId = req.headers["x-trace-id"] as string || crypto.randomUUID();
-  const log = createRequestLogger(traceId, { path: req.url, method: req.method });
+### Child logger untuk non-HTTP context
 
-  log.info({ userId: req.user?.id }, "request.received");
+```ts
+import { logger, createChild } from "./logger";
 
-  try {
-    const result = await doSomething();
-    log.info({ result }, "request.completed");
-    return result;
-  } catch (err) {
-    log.error({ err, traceId }, "request.failed");
-    throw err;
-  }
-}
+const jobLog = createChild({ jobId: "abc-123", type: "cron" });
+jobLog.info("job.started");
+jobLog.error({ err }, "job.failed");
 ```
 
 ### Output sample (production / JSON)
 
 ```json
-{"level":30,"time":1726147200000,"pid":1234,"hostname":"server-1","service":"api","traceId":"abc-123","msg":"request.completed","userId":42}
-{"level":50,"time":1726147201000,"pid":1234,"hostname":"server-1","service":"api","traceId":"abc-123","err":{"type":"Error","message":"timeout"},"msg":"request.failed"}
+{"level":"info","time":1726147200000,"service":"api","traceId":"abc-123","msg":"request.received","method":"GET","path":"/health"}
+{"level":"error","time":1726147201000,"service":"api","traceId":"abc-123","err":{"type":"Error","message":"timeout"},"msg":"request.failed"}
 ```
+
+Di development, outputnya lebih readable berkat `pino-pretty`.
 
 ---
 
@@ -86,54 +70,33 @@ export async function handleRequest(req: Request, res: Response) {
 ### Instalasi
 
 ```bash
-pip install structlog orjson
+pip install structlog python-json-logger orjson
 ```
 
-### Setup (contoh: `services/python/src/logging_setup.py`)
+### Setup
+
+Logger sudah tersedia di `services/python/src/logging_setup.py`. Panggil sekali di awal application:
 
 ```python
-import sys
-import logging
-import structlog
-from pythonjsonlogger import json as json_logger
+from logging_setup import setup_logging, get_logger
 
-def setup_logging() -> None:
-    level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
-
-    structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.UnicodeDecoder(),
-            structlog.processors.JSONRenderer() if os.getenv("NODE_ENV") == "production" else structlog.dev.ConsoleRenderer(),
-        ],
-        wrapper_class=structlog.make_filtering_bound_logger(level),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-
-    # Integrate with stdlib logging so third-party libs also log JSON
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(json_logger.JsonFormatter())
-    root = logging.getLogger()
-    root.addHandler(handler)
-    root.setLevel(level)
+setup_logging()  # harus dipanggil pertama kali
+log = get_logger("my_module")
 ```
 
-### Cara pakai di service code
+### Cara pakai
 
 ```python
 import structlog
-from logging_setup import setup_logging
+from logging_setup import setup_logging, bind_trace, clear_trace
 
+setup_logging()
 logger = structlog.get_logger()
 
 def handle_request(request):
     trace_id = request.headers.get("x-trace-id", str(uuid.uuid4()))
     structlog.contextvars.clear_contextvars()
-    structlog.contextvars.bind_contextvars(trace_id=trace_id, path=request.path)
+    structlog.contextvars.bind_contextvars(trace_id=trace_id, path=request.url.path)
 
     logger.info("request.received", user_id=request.user.id)
 
@@ -149,9 +112,11 @@ def handle_request(request):
 ### Output sample (production / JSON)
 
 ```json
-{"levelname": "INFO", "service": "python-service", "trace_id": "abc-123", "event": "request.completed", "result": "ok", "timestamp": "2024-09-12T10:00:00Z"}
-{"levelname": "ERROR", "service": "python-service", "trace_id": "abc-123", "event": "request.failed", "exc_info": "...", "timestamp": "2024-09-12T10:00:01Z"}
+{"event": "request.received", "level": "info", "service": "python-service", "trace_id": "abc-123", "timestamp": "2024-09-12T10:00:00Z", "user_id": 42}
+{"event": "request.failed", "level": "error", "service": "python-service", "trace_id": "abc-123", "timestamp": "2024-09-12T10:00:01Z"}
 ```
+
+Di development, outputnya lebih readable (ConsoleRenderer).
 
 ---
 
@@ -167,7 +132,7 @@ def handle_request(request):
 
 ## 5. Trace ID
 
-- **Masuk**: Baca header `x-trace-id` dari incoming request.
+- **Masuk**: Baca header `x-trace-id` dari incoming request (Node.js middleware di `apps/api/src/index.ts` sudah handle ini).
 - **Belum ada**: Generate UUID v4 baru.
 - **Keluar**: Sertakan di response header `x-trace-id` dan di semua log lines.
 - **Propagasi**: Jika service A memanggil service B, sertakan `x-trace-id` di HTTP headers.
@@ -177,10 +142,11 @@ def handle_request(request):
 ## 6. Best Practices
 
 1. **Jangan log secrets** — password, token, PII tidak boleh masuk log.
-2. **Gunakan level với purpose**:
+2. **Gunakan level dengan purpose**:
    - `info` — event bisnis penting (request selesai, pembayaran berhasil)
    - `debug` — informasi debugging yang berguna di staging
    - `trace` — sangat detail, hanya di local development
-3. **Wajib ada `msg`** — deskripsi singkat event dalam bahasa Inggris, gunakan dot notation: `user.login.failed`.
+3. **Wajib ada `msg`** — deskripsi singkat event, gunakan dot notation: `user.login.failed`.
 4. **Sertakan context** — user ID, trace ID, endpoint, duration (ms).
 5. **Error log wajib pakai `err`** — di pino: `logger.error({ err, msg: "..." })`; di structlog: `logger.error("...", exc_info=True)`.
+6. **Gunakan child logger per request** — jadi semua log dalam satu request punya traceId yang sama.

@@ -15,7 +15,6 @@
 import contextvars
 import logging
 import os
-import sys
 from typing import Any
 
 try:
@@ -153,8 +152,10 @@ if __name__ == "__main__":
     setup_logging()
     log = get_logger("demo")
 
-    log.trace("ini trace — biasanya tidak muncul kecuali LOG_LEVEL=trace")
-    log.debug("ini debug — muncul kalau LOG_LEVEL=debug")
+    # Di environment default (LOG_LEVEL=info) log.trace tidak tersedia
+    # karena BoundLoggerFilteringAtInfo tidak expose method trace.
+    # Coba log level yang sesuai dengan config saat ini.
+    log.debug("ini debug — muncul kalau LOG_LEVEL=debug atau lebih rendah")
     log.info("hello from python service", user_id=42, trace_id="abc-123")
     log.warn("ini warning")
     log.error("ini error", code=500)
