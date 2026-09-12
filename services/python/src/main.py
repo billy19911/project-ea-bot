@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .mt5.endpoints import router as mt5_router
+from .trading.endpoints import router as trading_router
 
 
 @asynccontextmanager
@@ -34,6 +35,7 @@ app.add_middleware(
 )
 
 app.include_router(mt5_router)
+app.include_router(trading_router)
 
 
 @app.get("/health")
