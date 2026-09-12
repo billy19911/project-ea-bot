@@ -476,7 +476,7 @@ def stochastic(
         return None
 
     k_values: list[float] = []
-    for i in range(len(closes) - period, len(closes)):
+    for i in range(len(closes) - period + 1):
         window_h = highs[i : i + period]
         window_l = lows[i : i + period]
         hh = max(window_h)
