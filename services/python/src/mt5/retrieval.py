@@ -21,14 +21,21 @@ try:
 except Exception:  # pragma: no cover
     mt5 = None  # type: ignore[assignment]
 
+# MT5 official timeframe constant values (used as fallback when the
+# MetaTrader5 package is not installed, e.g. on non-Windows dev machines).
+_MT5_TIMEFRAME_VALUES = {
+    "M1": 1,
+    "M5": 5,
+    "M15": 15,
+    "M30": 30,
+    "H1": 16385,
+    "H4": 16388,
+    "D1": 16408,
+}
+
 _TIMEFRAME_MAP = {
-    "M1": mt5.TIMEFRAME_M1 if mt5 else 0,
-    "M5": mt5.TIMEFRAME_M5 if mt5 else 0,
-    "M15": mt5.TIMEFRAME_M15 if mt5 else 0,
-    "M30": mt5.TIMEFRAME_M30 if mt5 else 0,
-    "H1": mt5.TIMEFRAME_H1 if mt5 else 0,
-    "H4": mt5.TIMEFRAME_H4 if mt5 else 0,
-    "D1": mt5.TIMEFRAME_D1 if mt5 else 0,
+    name: getattr(mt5, f"TIMEFRAME_{name}", value) if mt5 else value
+    for name, value in _MT5_TIMEFRAME_VALUES.items()
 }
 
 

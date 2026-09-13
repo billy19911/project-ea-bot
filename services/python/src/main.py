@@ -16,6 +16,9 @@ from .trading.events import router as events_router
 async def lifespan(app: FastAPI):
     """Application lifespan — startup and shutdown hooks."""
     # Startup
+    from .agents.base import TechnicalAnalystAgent
+
+    agent_registry.register(TechnicalAnalystAgent())
     yield
     # Shutdown
 
@@ -39,15 +42,6 @@ app.add_middleware(
 app.include_router(mt5_router)
 app.include_router(trading_router)
 app.include_router(events_router)
-
-
-# Agent registry singleton — registered at startup
-@app.on_event("startup")
-async def register_default_agents():
-    """Register core agents into the singleton registry."""
-    from .agents.base import TechnicalAnalystAgent
-
-    agent_registry.register(TechnicalAnalystAgent())
 
 
 @app.get("/health")

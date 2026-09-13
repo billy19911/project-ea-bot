@@ -96,15 +96,16 @@ export function setupWSConnection(ws: SecureWebSocket, req: Request): void {
 /**
  * Heartbeat interval handler — ping all active connections
  */
-export function setupWSHeartbeat(wss: WSServer<SecureWebSocket>): NodeJS.Timer {
+export function setupWSHeartbeat(wss: WSServer): NodeJS.Timer {
   return setInterval(() => {
-    wss.clients.forEach((ws: SecureWebSocket) => {
-      if (ws.isAlive === false) {
-        ws.terminate();
+    wss.clients.forEach((ws) => {
+      const sws = ws as SecureWebSocket;
+      if (sws.isAlive === false) {
+        sws.terminate();
         return;
       }
-      ws.isAlive = false;
-      ws.ping();
+      sws.isAlive = false;
+      sws.ping();
     });
   }, 30000); // 30 seconds
 }

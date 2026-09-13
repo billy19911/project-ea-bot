@@ -39,19 +39,19 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: services/python/requirements.txt
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r services/python/requirements.txt
 
       # ---------------------------------------------------------
       # ⚠ WARNING: Requires Node.js binary to run lint scripts.
@@ -59,7 +59,7 @@ jobs:
       # ---------------------------------------------------------
       - name: Install frontend dependencies
         run: |
-          cd frontend
+          cd apps/web
           npm ci
 
       # ---------------------------------------------------------
@@ -68,7 +68,7 @@ jobs:
       # ---------------------------------------------------------
       - name: Run frontend lint
         run: |
-          cd frontend
+          cd apps/web
           npm run lint
         # If Node.js is not available, this will fail.
         # Consider guarding with: if: always() and check output.
@@ -76,7 +76,7 @@ jobs:
       - name: Run backend lint
         run: |
           # Ganti dengan tool linting backend yang sesuai (mis. ruff, flake8, pylint)
-          python -m flake8 backend/
+          python -m flake8 services/python/
 
   # ==========================================
   # TYPE CHECKING
@@ -96,7 +96,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r services/python/requirements.txt
 
       # ---------------------------------------------------------
       # ⚠ WARNING: Jika backend menggunakan mypy/tipe checking,
@@ -105,7 +105,7 @@ jobs:
       - name: Run type checking
         run: |
           # Ganti dengan perintah type checking yang sesuai
-          # python -m mypy backend/
+          # python -m mypy services/python/
           echo "Type checking not yet configured"
 
   # ==========================================
@@ -144,19 +144,19 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: services/python/requirements.txt
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r services/python/requirements.txt
           pip install pytest pytest-django pytest-cov
 
       # ---------------------------------------------------------
@@ -166,17 +166,17 @@ jobs:
       # ---------------------------------------------------------
       - name: Install frontend dependencies
         run: |
-          cd frontend
+          cd apps/web
           npm ci
 
       - name: Run backend tests
         env:
-          DATABASE_URL: postgresql://ea_bot_user:test_password@localhost:5432/ea_bot_test
+          DATABASE_URL: postgresql://ea_bot_user:***@localhost:5432/ea_bot_test
           REDIS_URL: redis://localhost:6379/0
           SECRET_KEY: test-secret-key-for-ci
         run: |
           # Ganti dengan perintah test backend yang sesuai
-          python -m pytest backend/tests/ -v --cov=backend --cov-report=xml
+          python -m pytest services/python/tests/ -v --cov=services/python --cov-report=xml
 
       # ---------------------------------------------------------
       # ⚠ WARNING: Requires Node.js binary.
@@ -184,7 +184,7 @@ jobs:
       # ---------------------------------------------------------
       - name: Run frontend tests
         run: |
-          cd frontend
+          cd apps/web
           npm test -- --coverage
         # Hanya akan berhasil jika Node.js binary tersedia di runner.
 
@@ -215,7 +215,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -225,11 +225,11 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r services/python/requirements.txt
 
       - name: Install frontend dependencies
         run: |
-          cd frontend
+          cd apps/web
           npm ci
 
       # ---------------------------------------------------------
@@ -238,7 +238,7 @@ jobs:
       # ---------------------------------------------------------
       - name: Build frontend
         run: |
-          cd frontend
+          cd apps/web
           npm run build
         # Gagal jika Node.js tidak tersedia.
 
@@ -253,8 +253,8 @@ jobs:
         with:
           name: build-artifacts
           path: |
-            frontend/dist/
-            backend/static/
+            apps/web/dist/
+            services/python/static/
           retention-days: 7
 
   # ==========================================
@@ -275,7 +275,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r services/python/requirements.txt
 
       - name: Run Python dependency audit
         run: |
@@ -293,7 +293,7 @@ jobs:
 
       - name: Install frontend dependencies
         run: |
-          cd frontend
+          cd apps/web
           npm ci
 
       # ---------------------------------------------------------
@@ -301,7 +301,7 @@ jobs:
       # ---------------------------------------------------------
       - name: Run frontend dependency audit
         run: |
-          cd frontend
+          cd apps/web
           npm audit --audit-level=high
         # Gagal jika Node.js tidak tersedia.
 

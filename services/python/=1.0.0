@@ -1,0 +1,34 @@
+Collecting openai
+  Downloading openai-3.13.0-py3-none-any.whl.metadata (41 kB)
+     ---------------------------------------- 41.7/41.7 kB 2.0 MB/s eta 0:00:00
+Requirement already satisfied: anyio<5,>=4.10.0 in c:\xampp\htdocs\project-ea-bot\services\python\.venv\lib\site-packages (from openai) (4.15.1)
+Collecting httpx2<3,>=2.7.0 (from openai)
+  Using cached httpx2-2.12.0-py3-none-any.whl.metadata (9.5 kB)
+Collecting jiter<1,>=0.16.0 (from openai)
+  Downloading jiter-0.17.0-cp311-cp311-win_amd64.whl.metadata (5.3 kB)
+Requirement already satisfied: pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,<3,>=1.10.13 in c:\xampp\htdocs\project-ea-bot\services\python\.venv\lib\site-packages (from openai) (2.13.5)
+Collecting sniffio (from openai)
+  Using cached sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+Requirement already satisfied: typing-extensions<5,>=4.14 in c:\xampp\htdocs\project-ea-bot\services\python\.venv\lib\site-packages (from openai) (4.16.0)
+Requirement already satisfied: idna>=2.8 in c:\xampp\htdocs\project-ea-bot\services\python\.venv\lib\site-packages (from anyio<5,>=4.10.0->openai) (3.19)
+Collecting httpcore2==2.12.0 (from httpx2<3,>=2.7.0->openai)
+  Using cached httpcore2-2.12.0-py3-none-any.whl.metadata (25 kB)
+Collecting truststore>=0.10 (from httpx2<3,>=2.7.0->openai)
+  Using cached truststore-0.10.4-py3-none-any.whl.metadata (4.4 kB)
+Requirement already satisfied: h11>=0.16 in c:\xampp\htdocs\project-ea-bot\services\python\.venv\lib\site-packages (from httpcore2==2.12.0->httpx2<3,>=2.7.0->openai) (0.16.0)
+Requirement already satisfied: annotated-types>=0.6.0 in c:\xampp\htdocs\project-ea-bot\services\python\.venv\lib\site-packages (from pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,<3,>=1.10.13->openai) (0.8.0)
+Requirement already satisfied: pydantic-core==2.46.5 in c:\xampp\htdocs\project-ea-bot\services\python\.venv\lib\site-packages (from pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,<3,>=1.10.13->openai) (2.46.5)
+Requirement already satisfied: typing-inspection>=0.4.2 in c:\xampp\htdocs\project-ea-bot\services\python\.venv\lib\site-packages (from pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,<3,>=1.10.13->openai) (0.4.4)
+Downloading openai-3.13.0-py3-none-any.whl (2.0 MB)
+   ---------------------------------------- 2.0/2.0 MB 10.6 MB/s eta 0:00:00
+Using cached httpx2-2.12.0-py3-none-any.whl (95 kB)
+Using cached httpcore2-2.12.0-py3-none-any.whl (83 kB)
+Downloading jiter-0.17.0-cp311-cp311-win_amd64.whl (231 kB)
+   --------------------------------------- 231.4/231.4 kB 13.8 MB/s eta 0:00:00
+Using cached sniffio-1.3.1-py3-none-any.whl (10 kB)
+Using cached truststore-0.10.4-py3-none-any.whl (18 kB)
+Installing collected packages: truststore, sniffio, jiter, httpcore2, httpx2, openai
+Successfully installed httpcore2-2.12.0 httpx2-2.12.0 jiter-0.17.0 openai-3.13.0 sniffio-1.3.1 truststore-0.10.4
+
+[notice] A new release of pip is available: 24.0 -> 26.2.1
+[notice] To update, run: C:\xampp\htdocs\project-ea-bot\services\python\.venv\Scripts\python.exe -m pip install --upgrade pip
