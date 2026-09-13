@@ -1,37 +1,43 @@
 <!-- SPDX-License-Identifier: CC0-1.0 -->
 
-# XynnBot — Autonomous Multi-Agent Trading & Research Platform
-
 <div align="center">
 
-[![Status](https://img.shields.io/badge/status-architecture_foundation-blue.svg)](#status)
-[![Platform](https://img.shields.io/badge/platform-MT5-purple.svg)](#platform)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](#license)
+# XynnBot
+
+### Autonomous Multi-Agent Trading &amp; Research Platform
+
+[![Status](https://img.shields.io/badge/status-in_development-orange.svg)](#status--roadmap)
+[![Platform](https://img.shields.io/badge/platform-MT5-6f42c1.svg)](#tech-stack)
+[![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-339933.svg)](#prasyarat)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776AB.svg)](#prasyarat)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](#lisensi)
 
 </div>
 
 ---
 
-**XynnBot** adalah platform *autonomous trading* yang menggabungkan **deterministic engines** (kode yang enforce safety) dengan **multi-agent AI** (Supervisor + specialist agents) untuk menganalisis pasar, mengelola risiko, dan mengeksekusi trade melalui MetaTrader 5.
+## Tentang
 
-Inti sistem: **AI memutuskan dalam batas. Kode menegakkan batas.**
+**XynnBot** adalah platform *autonomous trading* yang menggabungkan **deterministic engines** (kode yang menegakkan safety) dengan **multi-agent AI** (Supervisor + specialist agents) untuk menganalisis pasar, mengelola risiko, dan mengeksekusi trade melalui MetaTrader 5.
+
+> **Inti filosofi:** AI memutuskan dalam batas. Kode menegakkan batas.
 
 ```
-AI  →  Trade Proposal  →  Deterministic Validation  →  Risk Gate  →  Execution
+AI  →  Trade Proposal  →  Deterministic Validation  →  Risk Gate  →  Execution  →  MT5
 ```
 
-AI tidak pernah langsung kirim order ke MT5. Setiap keputusan melewati validation layer yang deterministic.
+AI **tidak pernah** langsung mengirim order ke MT5. Setiap keputusan melewati validation layer yang deterministic dan Risk Gate berbasis hard limit.
 
 ---
 
 ## Arsitektur
 
-### Cara Kerja Sistem
+### Alur Sistem
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      Kontrol Layer                          │
-│  Dashboard (Next.js) │ API (Node.js/TypeScript)            │
+│  Dashboard (Next.js) │ API (Node.js / TypeScript)           │
 └────────────────────────────┬────────────────────────────────┘
                              │
               ┌──────────────┼──────────────┐
@@ -48,7 +54,7 @@ AI tidak pernah langsung kirim order ke MT5. Setiap keputusan melewati validatio
         ┌─────────────────────┼─────────────────────┐
         ▼                     ▼                     ▼
 ┌──────────────┐    ┌──────────────────┐    ┌──────────────┐
-│ Market       │    │ Risk Department  │    │ Research     │
+│ Market       │    │ Risk Department  │    │ Research      │
 │ Intelligence │    │ (Deterministic)  │    │ Department   │
 └──────┬───────┘    └────────┬─────────┘    └──────┬───────┘
        │                     │                     │
@@ -72,83 +78,138 @@ AI tidak pernah langsung kirim order ke MT5. Setiap keputusan melewati validatio
 ```
 project-ea-bot/
 ├── apps/
-│   ├── web/          # Next.js dashboard
-│   └── api/          # Node.js API (Express)
+│   ├── web/                    # Next.js dashboard
+│   │   └── app/                # ai-control, strategy, observability pages
+│   └── api/                    # Node.js API (Express + Prisma)
+│       ├── src/
+│       ├── prisma/
+│       └── test/
 ├── services/
-│   └── python/       # FastAPI service (agents, MT5 connector, risk)
+│   └── python/                 # FastAPI service
+│       └── src/
+│           ├── agents/         # Supervisor, analysts, synthesis
+│           ├── trading/        # Event engine, market regime, indicators
+│           ├── risk/            # Risk engine, money management, risk gate
+│           ├── execution/      # Execution engine
+│           ├── mt5/             # MT5 connector & connection manager
+│           ├── llm/             # 9Router LLM gateway
+│           ├── monitoring/      # Position monitor
+│           ├── research/        # Research engine
+│           ├── paper/           # Paper trading simulation
+│           ├── demo/            # Demo trading & stability
+│           ├── memory/          # Trade memory
+│           ├── review/          # Trade review
+│           └── live_readiness/  # Live readiness evaluator & gate
 ├── packages/
-│   ├── eslint-config/# Shared lint config
-│   └── shared/       # TypeScript types & utilities
+│   ├── eslint-config/          # Shared lint config
+│   └── shared/                 # TypeScript types & utilities
+│       └── src/
 ├── infrastructure/
-│   ├── docker/       # Docker compose & Dockerfiles
-│   └── db/          # PostgreSQL init, backup, restore
+│   ├── docker/                 # docker-compose, Dockerfiles
+│   └── db/                     # PostgreSQL init, backup, restore
 ├── .github/
-│   └── workflows/   # CI/CD
+│   └── workflows/              # CI/CD
 ├── docs/
-│   ├── logging.md    # Panduan structured logging
-│   └── development-setup.md
+│   ├── logging.md              # Panduan structured logging
+│   └── development-setup.md    # Panduan install manual (Windows)
 ├── scripts/
+│   └── setup.js
+├── telegram/                   # Telegram bot integration
 ├── config-validate.js
 ├── .env.example
-├── README.md         # Ini
 ├── CHANGELOG.md
 ├── CONSTRAINTS.md
-└── PRD_V1_Autonomous_Multi_Agent_Trading_Research_Platform.md
+├── PRD_V1_Autonomous_Multi_Agent_Trading_Research_Platform.md
+└── README.md                   # ← Anda di sini
 ```
 
 ---
 
 ## Tech Stack
 
-| Layer              | Technology                        |
-|--------------------|-----------------------------------|
-| Frontend           | React + Next.js                   |
-| Backend API        | Node.js / TypeScript / Express    |
-| AI Service         | Python / FastAPI                  |
-| LLM Gateway        | 9Router (dengan fallback)         |
-| Database           | PostgreSQL                        |
-| Cache / Queue      | Redis                             |
-| Execution          | MetaTrader 5                      |
-| Container          | Docker (pilihan)                  |
+| Layer              | Technology                          |
+|--------------------|-------------------------------------|
+| Frontend           | React + Next.js                     |
+| Backend API        | Node.js / TypeScript / Express      |
+| AI Service         | Python / FastAPI                    |
+| LLM Gateway        | 9Router (dengan fallback)           |
+| Database           | PostgreSQL + Prisma (Node) / SQLAlchemy (Python) |
+| Cache / Queue      | Redis                               |
+| Execution          | MetaTrader 5                         |
+| Container          | Docker (opsional)                   |
 
 ---
 
-## Status & Roadmap
+## Status &amp; Roadmap
 
-### Phase 0 — Architecture Foundation ✅ *(Selesai)*
+### Phase 0 — Architecture Foundation ✅
 - [x] Monorepo setup (npm workspaces, TypeScript, ESLint, Prettier)
 - [x] Python service foundation (FastAPI, pydantic-settings, SQLAlchemy)
 - [x] Database layer (Prisma + SQLAlchemy, docker-compose blueprint)
 - [x] Logging & config system (structured logging, env validation)
 - [x] Development environment docs & CI/CD blueprint
-- [x] CHANGELOG, CONSTRAINTS.md, PRD V1
 
-### Phase 1 — MT5 Connector *(Berikutnya)*
-- MT5 connection & recovery
-- Account info, symbol, tick, OHLC
-- Positions & orders (paper/demo)
+### Phase 1–6 — Trading Core ✅
+- [x] MT5 connector (connection manager, data models, paper trading API)
+- [x] Deterministic Trading Engine
+- [x] Event Engine (class-based EventDetector, priority, dedup, queue, history)
+- [x] Market Regime Engine
 
-### Phase 2–6 *(Perencanaan)*
-- Deterministic Trading Engine
-- Multi-Agent System (Supervisor + specialist agents)
-- Risk Engine & Risk Gate
-- Execution Engine
-- Dashboard & Observability
+### Phase 7–13 — AI & Risk ✅
+- [x] Supervisor Agent (routing policy, concurrency, token budget)
+- [x] 9Router LLM Layer
+- [x] Market Agents (Structure, Momentum, Volatility, News)
+- [x] Risk Engine (account / position / portfolio risk)
+- [x] Money Management
+- [x] Supervisor Synthesis
+- [x] Deterministic Risk Gate (hard limits)
+
+### Phase 14–17 — Execution & Monitoring ✅
+- [x] Execution Engine (validation, sending, confirmation, retry, dedup)
+- [x] Position Monitor
+- [x] Trade Memory
+- [x] Trade Review
+
+### Phase 18–20 — Research & Simulation ✅
+- [x] Research Engine
+- [x] Paper Trading
+- [x] Demo Trading & stability validation
+
+### Phase 21–26 — Frontend ✅
+- [x] Dashboard Foundation
+- [x] Trading Dashboard
+- [x] AI Control Center
+- [x] Strategy Center
+- [x] Research Center
+- [x] System Settings
+
+### Phase 27 — Observability ✅
+- [x] Metrics, alerts, dan observability dashboard
+
+### Phase 28–30 — Security & Live Readiness ✅
+- [x] Security hardening
+- [x] Paper & demo validation
+- [x] Live readiness checklist
+
+### Berikutnya
+- Live trading enablement (explicit `LIVE` mode activation)
+- Hardening & end-to-end integration testing
+- Deployment ke staging / production
 
 ---
 
 ## Safety First
 
-Sistem ini punya safety mechanism yang tegas:
+Sistem ini punya safety mechanism yang tegas. AI **tidak pernah** diberi akses langsung ke eksekusi MT5.
 
-| Mode          | Deskripsi                                      |
-|---------------|------------------------------------------------|
-| `OFFLINE`     | Tidak ada interaksi AI                         |
-| `BACKTEST`    | Simulasi historis                              |
-| `PAPER`       | Akun demo tanpa uang nyata                     |
-| `DEMO`        | Akun broker demo                               |
-| `LIVE`        | Trading real — butuh explicit enable           |
-| `EMERGENCY_STOP` | Lockdown sistem                              |
+| Mode              | Deskripsi                                |
+|-------------------|------------------------------------------|
+| `OFFLINE`         | Tidak ada interaksi AI                   |
+| `BACKTEST`        | Simulasi historis                        |
+| `PAPER`           | Akun demo tanpa uang nyata               |
+| `DEMO`            | Akun broker demo                         |
+| `LIVE`            | Trading real — butuh explicit enable     |
+| `EMERGENCY_STOP`  | Lockdown sistem                          |
 
 Hard risk limits (drawdown, daily loss, exposure, dll) **tidak boleh** diubah oleh LLM. Risk Gate selalu dipanggil sebelum eksekusi.
 
@@ -158,37 +219,56 @@ Hard risk limits (drawdown, daily loss, exposure, dll) **tidak boleh** diubah ol
 
 ### Prasyarat
 
-- Node.js (binary, bukan cuma npm)
-- Python 3.11+
-- PostgreSQL (local/remote)
-- Redis (local/remote)
+- **Node.js** ≥ 18.0.0 (binary, bukan cuma npm)
+- **Python** 3.11+
+- **PostgreSQL** (local/remote)
+- **Redis** (local/remote)
+- **MetaTrader 5** terminal (untuk eksekusi)
 
 ### Setup Singkat
 
 ```bash
-# Install dependencies
-cd apps/api && npm install && cd ../web && npm install && cd ../../packages/shared && npm install && cd ../..
+# 1. Clone repository
+git clone <repo-url> project-ea-bot
+cd project-ea-bot
 
-# Install Python dependencies
+# 2. Install Node.js dependencies (monorepo)
+npm install
+
+# 3. Install Python dependencies
 cd services/python
-.venv/Scripts/activate
+python -m venv .venv
+.venv/Scripts/activate          # Windows
+# source .venv/bin/activate     # Linux/macOS
 pip install -r requirements.txt
+cd ../..
 
-# Konfigurasi environment
+# 4. Konfigurasi environment
 cp .env.example .env
 # Edit .env sesuai environment lokal
 
-# Validasi environment
+# 5. Validasi environment
 node config-validate.js
 
-# Jalankan API (Node.js)
+# 6. Jalankan API (Node.js)
 cd apps/api
-node src/index.ts
+npm run dev
+```
 
-# Jalankan Python service (terminal lain)
-cd ../../services/python
-.venv/Scripts/activate
+Terminal kedua — jalankan Python service:
+
+```bash
+cd services/python
+.venv/Scripts/activate          # Windows
+# source .venv/bin/activate     # Linux/macOS
 uvicorn src.main:app --reload
+```
+
+Terminal ketiga — jalankan dashboard:
+
+```bash
+cd apps/web
+npm run dev
 ```
 
 ---
@@ -205,6 +285,12 @@ uvicorn src.main:app --reload
 
 ---
 
+## Lisensi
+
+Distribusi under **MIT License**. Lihat detail di header setiap file (`SPDX-License-Identifier`).
+
+---
+
 ## Developer
 
 - **Billy19911** — [GitHub](https://github.com/billy19911)
@@ -213,6 +299,6 @@ uvicorn src.main:app --reload
 
 <div align="center">
 
-_Dokumen ini adalah acuan utama fase 0. Untuk desain sistem lengkap, lihat PRD V1._
+_Dokumen ini adalah acuan utama project. Untuk desain sistem lengkap, lihat **PRD V1**._
 
 </div>

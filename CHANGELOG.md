@@ -1,40 +1,91 @@
 # Changelog
 
-Semua notasi perubahan terakhir ada di bawah. Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Semua perubahan penting pada project ini dicatat di dokumen ini.
+
+Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Planned
+- End-to-end integration testing
+- Staging / production deployment hardening
+- Explicit live-trading enablement
+
+---
+
+## [1.0.0] - 2026-09-14
+
+### Added
+
+#### Phase 28–30 — Security & Live Readiness
+- Security hardening untuk API, service Python, dan konfigurasi runtime.
+- Validasi paper trading dan demo trading.
+- Live readiness evaluator, gate, dan checklist sebelum mode `LIVE` dapat diaktifkan.
+
+#### Phase 27 — Observability
+- Metrics dan alerting untuk monitoring sistem.
+- Observability dashboard pada aplikasi web.
+
+#### Phase 21–26 — Frontend
+- Dashboard Foundation berbasis Next.js.
+- Trading Dashboard.
+- AI Control Center.
+- Strategy Center.
+- Research Center.
+- System Settings.
+
+#### Phase 18–20 — Research & Simulation
+- Research Engine.
+- Paper Trading simulation dengan akun dan simulated execution.
+- Demo Trading dan stability validation.
+
+#### Phase 15–17 — Monitoring, Memory & Review
+- Position Monitor.
+- Trade Memory.
+- Trade Review.
+
+#### Phase 14 — Execution Engine
+- Validasi order sebelum eksekusi.
+- Pengiriman order, confirmation, retry, dan duplicate prevention.
+
+#### Phase 10–13 — Risk & Supervisor Synthesis
+- Risk Engine untuk risiko account, position, dan portfolio.
+- Money Management / position sizing.
+- Supervisor synthesis untuk menggabungkan hasil analyst agents.
+- Deterministic Risk Gate dengan hard risk limits.
+
+#### Phase 7–9 — AI Layer
+- SupervisorAgent dengan routing policy, concurrency, dan token budget.
+- 9Router LLM gateway dengan registry provider.
+- Market agents: Structure, Momentum, Volatility, dan News.
+
+#### Phase 4–6 — Trading Intelligence
+- Market Regime Engine.
+- Event Engine dengan EventDetector class-based.
+- Priority processing, deduplication, queue, dan event history.
+
+#### Phase 1–3 — MT5 & Trading Foundation
+- MT5 connector layer: connection manager, data models, retrieval, dan endpoints.
+- Paper trading API.
+- Deterministic Trading Engine, indicators, trend, volatility, dan event processing.
+
+#### Phase 0 — Architecture Foundation
+- Monorepo npm workspaces: Next.js dashboard, Express API, FastAPI service, dan shared TypeScript package.
+- Foundation Python: FastAPI, pydantic-settings, SQLAlchemy, pytest, dan pre-commit.
+- Database layer: Prisma, SQLAlchemy, Docker Compose, migration, init, backup, dan restore tools.
+- Structured logging dan environment validation.
+- Development setup guide, CI/CD blueprint, constraints, PRD, dan environment template.
+
+### Security
+- Deterministic validation dan Risk Gate menjadi jalur wajib sebelum order dapat dieksekusi.
+- Hard limits untuk drawdown, daily loss, dan exposure tetap berada di kode; tidak dapat diubah oleh LLM.
+- Mode `LIVE` memerlukan explicit enablement dan live-readiness validation.
+
+---
 
 ## [0.1.0-alpha] - 2026-09-12
 
 ### Added
-- Inisialisasi repository monorepo (backend, frontend, workers)
-- Struktur project dasar dan README
-- Dokumentasi development setup (docs/development-setup.md)
-- Dokumentasi kendala environment (CONSTRAINTS.md)
-- Blueprint CI/CD pipeline (GitHub Actions)
-- Template environment configuration (.env.example)
-- Requirements.txt untuk dependency Python
-- Package.json untuk dependency Node.js/frontend
-
-### Changed
-- N/A (initial release)
-
-### Deprecated
-- N/A
-
-### Removed
-- N/A
-
-### Fixed
-- N/A
-
-### Security
-- N/A
-
----
-
-## [Unreleased]
-
-### Added
-- (belum ada)
-
-### Changed
-- (belum ada)
+- Initial monorepo repository structure.
+- README, development setup documentation, constraints documentation, dan CI/CD blueprint.
+- Environment template dan dependency manifests untuk Node.js serta Python.
