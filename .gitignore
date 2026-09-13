@@ -30,6 +30,15 @@ Thumbs.db
 # Logs (jika log ditulis ke file, bukan stdout)
 *.log
 
+# Next.js build output
+.next/
+
+# Tool skill caches (prisma composer dll)
+apps/api/.agents/
+apps/api/.claude/
+apps/api/.cursor/
+apps/api/.devin/
+
 # Secrets / credentials
 *.pem
 *.key

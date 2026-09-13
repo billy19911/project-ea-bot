@@ -70,7 +70,8 @@ export function createChild(
   bindings: Record<string, unknown>,
   childName?: string
 ): pino.Logger {
-  return logger.child(bindings, childName);
+  const merged = childName ? { ...bindings, name: childName } : bindings;
+  return logger.child(merged);
 }
 
 // ---------------------------------------------------------------------------
