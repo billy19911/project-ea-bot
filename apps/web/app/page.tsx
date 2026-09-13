@@ -56,6 +56,7 @@ export default function Home() {
         <button className={`${styles.navItem} ${section === 'settings' ? styles.active : ''}`} onClick={() => setSection('settings')}><span>⚙</span> System Settings</button>
         <a href="/ai-control" className={styles.navItem}><span>🧠</span> AI Control Center</a>
         <a href="/strategy" className={styles.navItem}><span>📡</span> Strategy Center</a>
+        <a href="/observability" className={styles.navItem}><span>📊</span> Observability</a>
         <div className={styles.sidebarBottom}><span className={styles.greenDot} /> Sistem aktif<div className={styles.version}>v1.0.0 · Paper mode</div></div>
       </aside>
       <main className={styles.main}>

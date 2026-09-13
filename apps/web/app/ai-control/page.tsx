@@ -84,6 +84,7 @@ export default function AIControlPage() {
         </div>
         <div className={styles.workspaceLabel}>KONTROL</div>
         <a href="/" className={styles.navItem}><span>←</span> Kembali</a>
+        <a href="/observability" className={styles.navItem}><span>📊</span> Observability</a>
         <div className={styles.sidebarBottom}>
           <span className={styles.greenDot} /> Supervisor aktif
           <div className={styles.version}>Phase 23 · Live</div>

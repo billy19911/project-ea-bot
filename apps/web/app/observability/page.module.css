@@ -1,0 +1,473 @@
+/* Observability Dashboard — Phase 27 */
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  background: #f5f7fb;
+}
+
+/* ── Sidebar (shared style with AI Control) ── */
+.sidebar {
+  background: #101828;
+  color: #d8dee9;
+  padding: 24px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.brandMark {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  background: #1f6feb;
+  color: #fff;
+  border-radius: 10px;
+  font-weight: 800;
+}
+
+.brand div {
+  display: flex;
+  flex-direction: column;
+}
+
+.brand strong { color: #fff; }
+.brand small,
+.sidebarBottom,
+.version,
+.workspaceLabel,
+.eyebrow { color: #667085; font-size: 12px; }
+
+.sidebar .workspaceLabel,
+.sidebar .version { color: #98a2b3; }
+
+.navItem {
+  color: #c9d3e3;
+  text-align: left;
+  padding: 11px 12px;
+  border-radius: 10px;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+}
+
+.navItem span { margin-right: 8px; }
+
+.navItem:hover,
+.navItem.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.sidebarBottom {
+  margin-top: auto;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+}
+
+.greenDot {
+  width: 8px;
+  height: 8px;
+  display: inline-block;
+  background: #17b26a;
+  border-radius: 999px;
+  margin-right: 8px;
+}
+
+/* ── Main ── */
+.main {
+  min-width: 0;
+  padding: 24px 28px;
+  overflow-y: auto;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.topbar div:first-child {
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar h1 { margin: 0; font-size: 28px; }
+
+.topActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.envBadge {
+  background: #e8f0fe;
+  color: #1f6feb;
+  padding: 8px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pageBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Tabs ── */
+.tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid #e4e7ec;
+  margin-bottom: 4px;
+}
+
+.tabs button {
+  background: none;
+  border: none;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #667085;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: all 0.15s;
+}
+
+.tabs button:hover { color: #172033; }
+
+.tabs button.tabActive {
+  color: #1f6feb;
+  border-bottom-color: #1f6feb;
+}
+
+/* ── KPI Grid ── */
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+}
+
+.kpiCard {
+  background: white;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.kpiCard small {
+  display: block;
+  color: #667085;
+  font-size: 12px;
+}
+
+.kpiCard strong {
+  display: block;
+  font-size: 20px;
+  margin-top: 4px;
+  color: #172033;
+}
+
+/* ── Card ── */
+.card {
+  background: white;
+  border: 1px solid #e4e7ec;
+  border-radius: 14px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.card h2,
+.card h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ── Table ── */
+.tableWrapper { overflow-x: auto; }
+
+.table {
+  width: 100%;
+  font-size: 13px;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #eef2f6;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table th {
+  background: #f8fafc;
+  color: #475467;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.table td strong { display: block; color: #172033; }
+
+.table td code {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  background: #f8fafc;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.msgCell {
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Badges ── */
+.badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+/* Severity */
+.severityCritical { background: #d92d2010; color: #d92d20; border: 1px solid #d92d2040; }
+.severityHigh { background: #fef3f2; color: #d92d20; }
+.severityMedium { background: #fffaeb; color: #b54708; }
+.severityLow { background: #f2f4f7; color: #475467; }
+
+/* Status */
+.statusActive { background: #ecfdf3; color: #067647; }
+.statusIdle { background: #f2f4f7; color: #475467; }
+.statusError { background: #fef3f2; color: #d92d20; }
+
+/* ── Text colors ── */
+.textSuccess { color: #067647; }
+.textWarning { color: #b54708; }
+.textDanger { color: #d92d20; font-weight: 700; }
+.textMuted { color: #667085; font-style: italic; }
+
+/* ── Agent grid ── */
+.agentGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.agentCard {
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.agentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.agentMeta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: #667085;
+  flex-wrap: wrap;
+}
+
+/* ── Supervisor info grid ── */
+.supervisorInfo {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.supervisorInfo > div {
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.supervisorInfo > div small {
+  display: block;
+  color: #667085;
+  font-size: 12px;
+}
+
+.supervisorInfo > div strong {
+  display: block;
+  font-size: 18px;
+  margin-top: 4px;
+}
+
+/* ── Token summary ── */
+.tokenSummary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.tokenSummary > div {
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.tokenSummary > div small {
+  display: block;
+  color: #667085;
+  font-size: 12px;
+}
+
+.tokenSummary > div strong {
+  display: block;
+  font-size: 18px;
+  margin-top: 4px;
+}
+
+/* ── Error list ── */
+.errorList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.errorItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #fecdca;
+  background: #fffbfa;
+  border-radius: 12px;
+}
+
+.errorIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #d92d20;
+  color: white;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.errorContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.errorHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.errorHeader strong { color: #172033; }
+.errorHeader code { font-family: 'Courier New', monospace; font-size: 11px; color: #667085; }
+
+.errorContent p {
+  margin: 0;
+  color: #344054;
+  font-size: 13px;
+}
+
+/* ── Empty state ── */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px;
+  color: #667085;
+  font-size: 14px;
+}
+
+.emptyState span { font-size: 28px; }
+
+.emptyRow {
+  text-align: center;
+  color: #98a2b3;
+  font-style: italic;
+  padding: 24px 0 !important;
+}
+
+/* ── Controls ── */
+.autoRefreshLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #667085;
+  cursor: pointer;
+}
+
+.autoRefreshLabel input {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.refreshBtn {
+  background: #f2f4f7;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #344054;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.refreshBtn:hover { background: #e4e7ec; }
+
+.lastRefresh {
+  font-size: 11px;
+  color: #98a2b3;
+}
+
+/* ── Responsive ── */
+@media (max-width: 1100px) {
+  .kpiGrid { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 920px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { position: static; }
+  .kpiGrid { grid-template-columns: repeat(2, 1fr); }
+  .supervisorInfo { grid-template-columns: 1fr; }
+  .tokenSummary { grid-template-columns: repeat(2, 1fr); }
+}
