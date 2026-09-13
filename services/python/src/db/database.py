@@ -72,13 +72,15 @@ def get_db() -> Generator[Session, None, None]:
 @contextmanager
 def session_scope() -> Generator[Session, None, None]:
     """Context manager that commits on success, rolls back on exception."""
-    with get_db() as db:
-        try:
-            yield db
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
+    db = SessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def init_db() -> None:

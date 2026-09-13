@@ -1,11 +1,18 @@
 /**
  * Express API server for EA Bot — dengan structured logging + observability (Phase 27)
+ * Phase 28: Security hardening — auth, authorization, audit logs, rate limiting, API security
  */
 
 import { randomUUID } from 'crypto';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import { logger, createChild } from './logger';
+import { authenticate, authorize, generateToken, AuthRequest } from './middleware/auth';
+import { auditMiddleware, fetchAuditLogs } from './middleware/audit';
+import { validatePayload, sanitizeInput, securityHeaders, preventParameterPollution } from './middleware/security';
+import { generalLimiter, authLimiter } from './middleware/rateLimiter';
+import { validateSecrets, redactSecrets } from './middleware/secrets';
 import {
   register,
   httpRequestDuration,
@@ -27,9 +34,32 @@ import {
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Phase 28: Validate secrets on startup
+validateSecrets();
+
+// Phase 28: Security headers via helmet
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+    },
+  },
+}));
+
 // Middleware: parse JSON dan attach logger ke request
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+
+// Phase 28: Security middleware
+app.use(securityHeaders);
+app.use(validatePayload);
+app.use(sanitizeInput);
+app.use(preventParameterPollution);
+
+// Phase 28: Audit logging
+app.use(auditMiddleware);
 
 // Middleware: inject child logger per request + traceId
 app.use((req, res, next) => {
@@ -38,6 +68,9 @@ app.use((req, res, next) => {
   res.setHeader('x-trace-id', traceId);
   next();
 });
+
+// Phase 28: Rate limiting after trace context
+app.use(generalLimiter);
 
 // ── Phase 27: HTTP metrics middleware ────────────────────────────────────────
 app.use((req, res, next) => {
@@ -83,6 +116,27 @@ function normalizeRoute(path: string): string {
     .replace(/\/STR-\d+/g, '/:id')              // strategy IDs
     .replace(/\/sig_\d+/g, '/:id');             // signal IDs
 }
+
+// ── Phase 28: Authentication ────────────────────────────────────────────────
+app.post('/auth/token', authLimiter, (req, res) => {
+  // Development-only token minting. Production must use an external IdP.
+  if (process.env.NODE_ENV === 'production' || process.env.DEV_AUTH_ENABLED !== 'true') {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  const { userId, role } = req.body || {};
+  if (typeof userId !== 'string' || !['admin', 'user', 'readonly'].includes(role)) {
+    res.status(400).json({ error: 'userId and valid role required' });
+    return;
+  }
+  res.json({ token: generateToken(userId, role) });
+});
+
+// ── Phase 28: Audit log access (admin only) ─────────────────────────────────
+app.get('/audit-logs', authenticate, authorize('admin'), async (req, res) => {
+  const limit = Math.min(Math.max(parseInt(String(req.query.limit || '100'), 10) || 100, 1), 1000);
+  res.json({ logs: await fetchAuditLogs(limit), count: limit });
+});
 
 // ── Prometheus /metrics endpoint ────────────────────────────────────────────
 app.get('/metrics', async (_req, res) => {
