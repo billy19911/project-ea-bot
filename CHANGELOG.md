@@ -6,6 +6,15 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan ve
 
 ## [Unreleased]
 
+### Added
+- **EPIC 01 — Architecture Normalization**:
+  - `Department` dan `DepartmentLead` abstraction (PRD V2 §5.2).
+  - Extended metadata pada `BaseAgent` (`role`, `permissions`, `dependencies`, `model_policy`, `timeout_seconds`).
+  - Query helper di `AgentRegistry` (`get_by_role`, `get_by_permission`, `export_metadata`, `validate_permissions`).
+  - `SupervisorAgent` auto-delegation ke `department_lead` sebelum fallback ke specialist langsung.
+  - Guard helpers dan `AgentPermissionError` di `agents.permissions` (`require_permission`, `submit_to_risk_gate`, `propose_execution`, `send_to_mt5`).
+  - `ARCHITECTURE_MAP.md` sebagai central index arsitektur dan dokumentasi.
+
 ### Planned
 - End-to-end integration testing
 - Staging / production deployment hardening

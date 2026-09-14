@@ -285,6 +285,12 @@ npm run dev
 
 ---
 
+## Arsip: EPIC 00–30
+
+Lihat [`ARCHITECTURE_MAP.md`](./ARCHITECTURE_MAP.md) untuk checklist, diagram, dan roadmap lengkap.
+
+---
+
 ## Lisensi
 
 Distribusi under **MIT License**. Lihat detail di header setiap file (`SPDX-License-Identifier`).
