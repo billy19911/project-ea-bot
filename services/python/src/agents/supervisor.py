@@ -297,10 +297,30 @@ class SupervisorAgent(BaseAgent):
         if agent_list:
             # Use provided agents if available
             target_names = [a.name for a in agent_list]
+            # If the provided list contains department leads, route through them
+            # instead of directly invoking specialists.
+            lead_names = [
+                a.name for a in agent_list if getattr(a, "agent_type", "") == "department_lead"
+            ]
+            if lead_names:
+                target_names = lead_names
             # Build a name->agent map for direct invocation.
             agent_map: dict[str, BaseAgent] = {a.name: a for a in agent_list}
         else:
-            target_names = self.match_routes(event_type)
+            # EPIC 01: when department leads are registered, Supervisor delegates
+            # to leads first and never directly to specialists. If no leads are
+            # available, preserve the legacy routing-table behaviour.
+            lead_names: list[str] = []
+            if registry is not None:
+                try:
+                    lead_names = [
+                        agent.name
+                        for agent in registry.get_by_type("department_lead")
+                        if agent.can_handle(event_type, context)
+                    ]
+                except Exception:  # pragma: no cover - defensive fallback
+                    lead_names = []
+            target_names = lead_names if lead_names else self.match_routes(event_type)
             agent_map = {}
 
         # ── Phase 7: sort, filter, apply policy ────────────────────────

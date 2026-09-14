@@ -85,6 +85,26 @@ class AgentRegistry:
         names = self._by_type.get(agent_type, [])
         return [self._agents[n] for n in names if n in self._agents]
 
+    def get_by_role(self, role: str) -> list["BaseAgent"]:
+        """Get all agents whose ``role`` equals ``role``."""
+        return [agent for agent in self._agents.values() if agent.role == role]
+
+    def get_by_permission(self, permission: str) -> list["BaseAgent"]:
+        """Get all agents that list ``permission`` in ``permissions``."""
+        return [agent for agent in self._agents.values() if permission in agent.permissions]
+
+    def export_metadata(self) -> dict[str, dict[str, Any]]:
+        """Export full metadata dict keyed by agent name."""
+        return {name: agent.to_dict() for name, agent in self._agents.items()}
+
+    def validate_permissions(self, name: str, required: list[str]) -> bool:
+        """Check that registered agent ``name`` has all ``required`` permissions."""
+        agent = self.get(name)
+        if agent is None:
+            return False
+        perms = set(agent.permissions)
+        return all(p in perms for p in required)
+
     def count(self) -> int:
         """Number of registered agents."""
         return len(self._agents)
@@ -134,11 +154,21 @@ class BaseAgent(ABC):
         agent_type: str,
         description: str = "",
         priority: AgentPriority = AgentPriority.NORMAL,
+        role: str = "",
+        permissions: list[str] | None = None,
+        dependencies: list[str] | None = None,
+        model_policy: dict[str, str] | None = None,
+        timeout_seconds: int = 30,
     ) -> None:
         self.name = name
         self.agent_type = agent_type
         self.description = description
         self.priority = priority
+        self.role = role
+        self.permissions = permissions or []
+        self.dependencies = dependencies or []
+        self.model_policy = model_policy or {}
+        self.timeout_seconds = timeout_seconds
         self.capabilities: list[AgentCapability] = []
         self.created_at = datetime.now(timezone.utc).isoformat()
 
@@ -170,6 +200,11 @@ class BaseAgent(ABC):
             "agent_type": self.agent_type,
             "description": self.description,
             "priority": self.priority.value,
+            "role": self.role,
+            "permissions": self.permissions,
+            "dependencies": self.dependencies,
+            "model_policy": self.model_policy,
+            "timeout_seconds": self.timeout_seconds,
             "capabilities": [c.name for c in self.capabilities],
             "created_at": self.created_at,
         }
