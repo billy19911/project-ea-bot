@@ -93,8 +93,9 @@ def test_propose_execution_rejects_unauthorized():
 
 def test_send_to_mt5_requires_permission():
     agent = _StubAgent("executor", permissions=["SEND_TO_MT5"])
-    result = send_to_mt5(agent, {"ticket": 1, "action": "OPEN"})
-    assert result == {"sent": True, "agent": "executor", "ticket": 1, "action": "OPEN"}
+    result = send_to_mt5(agent, {"symbol": "EURUSD", "side": "BUY", "volume": 1.0})
+    assert result["success"] is True
+    assert result["order_id"] is not None
 
 
 def test_send_to_mt5_rejects_unauthorized():

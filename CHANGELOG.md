@@ -7,6 +7,18 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan ve
 ## [Unreleased]
 
 ### Added
+- **EPIC 04 — Market Intelligence Department**:
+  - `MarketLead` sebagai Department Lead untuk intelligence aggregation dan consensus synthesis.
+  - 5 spesialis analis: `TechnicalAnalyst`, `StructureAnalyst`, `MomentumAnalyst`, `VolatilityAnalyst`, `NewsSentimentAnalyst`.
+  - `AnalystReport` dan `CommitteeDecision` schema dengan directional consensus dan agreement/conflict tracking.
+  - 10 unit test komprehensif (`test_market_intelligence.py`), 100% green.
+- **EPIC 03 — Risk Gate**:
+  - Validasi deterministic risk proposal dengan RiskThreshold.
+  - Comprehensive unit test suite (`test_risk_gate.py`).
+- **EPIC 02 — MT5 Write Guard**:
+  - `MT5WriteGuard` class dengan validasi volume, monetary loss harian, dan max exposure.
+  - `guarded_execute_order` integration wrapper untuk MT5 connector.
+  - Permission enforcement `SEND_TO_MT5` sebelum order dikirim.
 - **EPIC 01 — Architecture Normalization**:
   - `Department` dan `DepartmentLead` abstraction (PRD V2 §5.2).
   - Extended metadata pada `BaseAgent` (`role`, `permissions`, `dependencies`, `model_policy`, `timeout_seconds`).

@@ -43,7 +43,7 @@ class AgentPermissionError(RuntimeError):
 
 
 def require_permission(agent: "BaseAgent", permission: str) -> None:
-    """Raise ``AgentPermissionError`` if ``agent`` does not have ``permission``."""
+    """Raise ``AgentPermissionError`` if ``agent`` lacks ``permission``."""
     if permission not in getattr(agent, "permissions", []):
         raise AgentPermissionError(agent.name, permission)
 
@@ -59,13 +59,34 @@ def can_invoke(agent: "BaseAgent", permission: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def submit_to_risk_gate(agent: "BaseAgent", payload: dict[str, Any]) -> dict[str, Any]:
+def submit_to_risk_gate(
+    agent: "BaseAgent",
+    payload: dict[str, Any],
+    risk_gate: Any = None,
+    account_state: dict[str, Any] | None = None,
+    current_positions: list[dict[str, Any]] | None = None,
+    market_info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Submit a trade proposal to the deterministic Risk Gate.
 
     Only agents with ``SUBMIT_TO_RISK_GATE`` may call this.
+    If ``risk_gate`` is provided, it runs full deterministic validation.
     """
     require_permission(agent, PERM_SUBMIT_TO_RISK_GATE)
-    # Stub: in production this will call risk.gate.RiskGate.validate()
+    if risk_gate is not None:
+        decision = risk_gate.validate_proposal(
+            proposal=payload,
+            account_state=account_state or {},
+            current_positions=current_positions or [],
+            market_info=market_info or {},
+        )
+        return {
+            "accepted": decision.approved,
+            "agent": agent.name,
+            "reason": decision.reason,
+            "checks_passed": decision.checks_passed,
+            "metrics_snapshot": decision.metrics_snapshot,
+        }
     return {"accepted": True, "agent": agent.name}
 
 
@@ -75,7 +96,8 @@ def propose_execution(agent: "BaseAgent", proposal: dict[str, Any]) -> dict[str,
     Only agents with ``PROPOSE_EXECUTION`` may call this.
     """
     require_permission(agent, PERM_PROPOSE_EXECUTION)
-    # Stub: in production this will enqueue the proposal for Risk Gate then Execution
+    # Stub: in production this will enqueue the proposal for Risk Gate then
+    # Execution
     return {"accepted": True, "proposer": agent.name, **proposal}
 
 
@@ -87,5 +109,8 @@ def send_to_mt5(agent: "BaseAgent", order: dict[str, Any]) -> dict[str, Any]:
     Execution Engine can be the sole component with MT5 write access.
     """
     require_permission(agent, PERM_SEND_TO_MT5)
-    # Stub: in production this will call execution.engine.ExecutionEngine.execute_order()
-    return {"sent": True, "agent": agent.name, **order}
+    # Use guarded_execute_order for safe MT5 writes
+    from mt5.connector import guarded_execute_order
+
+    result = guarded_execute_order(agent=agent, order=order)
+    return result
