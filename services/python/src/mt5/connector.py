@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from .schemas import OHLC, AccountInfo, Order, Position, SymbolInfo, Tick
+from .write_guard import MT5WriteGuard
 
 # ---------------------------------------------------------------------------
 # Simulation constants
@@ -209,7 +210,9 @@ def get_symbols() -> list[SymbolInfo]:
                 ask=_jitter(ask, spread),
                 spread=int(spread * (100 if digits <= 2 else 10000)),
                 digits=digits,
-                contract_size=100000 if sym not in ("XAUUSD", "XAGUSD", "BTCUSD", "ETHUSD") else 1,
+                contract_size=(
+                    100000 if sym not in ("XAUUSD", "XAGUSD", "BTCUSD", "ETHUSD") else 1
+                ),
                 point=0.00001 if digits == 5 else 0.01,
                 trade_mode="FULL",
                 currency_profit="USD",
@@ -256,7 +259,7 @@ def get_symbol_info(symbol: str) -> Optional[SymbolInfo]:
         ask=_jitter(ask, spread),
         spread=int(spread * (100 if digits <= 2 else 10000)),
         digits=digits,
-        contract_size=100000 if symbol not in ("XAUUSD", "XAGUSD", "BTCUSD", "ETHUSD") else 1,
+        contract_size=(100000 if symbol not in ("XAUUSD", "XAGUSD", "BTCUSD", "ETHUSD") else 1),
         point=0.00001 if digits == 5 else 0.01,
         trade_mode="FULL",
         currency_profit="USD",
@@ -371,7 +374,7 @@ def get_positions() -> list[Position]:
                     profit=p.profit,
                     unrealized_pnl=p.profit,
                     margin=p.margin,
-                    entry="POSITION_ENTRY_IN" if p.entry == 0 else "POSITION_ENTRY_OUT",
+                    entry=("POSITION_ENTRY_IN" if p.entry == 0 else "POSITION_ENTRY_OUT"),
                     status="OPEN",
                     time=datetime.fromtimestamp(p.time),
                     time_update=datetime.fromtimestamp(p.time_update),
@@ -477,7 +480,7 @@ def execute_order(request) -> dict:
             result = mt5.order_send(request_obj)
             return {
                 "success": result.retcode == mt5.TRADE_RETCODE_DONE,
-                "order_id": result.order if result.retcode == mt5.TRADE_RETCODE_DONE else None,
+                "order_id": (result.order if result.retcode == mt5.TRADE_RETCODE_DONE else None),
                 "message": result.comment,
                 "price": result.price,
                 "executed_at": datetime.now(),
@@ -501,4 +504,54 @@ def execute_order(request) -> dict:
         "message": "PAPER ORDER EXECUTED — simulated, no real funds at risk",
         "price": price,
         "executed_at": _now(),
+    }
+
+
+def guarded_execute_order(
+    agent,
+    order: dict,
+    guard: Optional[MT5WriteGuard] = None,
+    executor=execute_order,
+    positions: Optional[list[dict]] = None,
+    account_state: Optional[dict] = None,
+) -> dict:
+    """Execute order only after MT5 write guard approval.
+
+    This is the safe write path for MT5 execution. Raw execute_order remains
+    available for paper/demo compatibility, but live agent flows should call
+    this wrapper so permission and monetary checks run before order_send.
+    """
+    active_guard = guard or MT5WriteGuard()
+    validation = active_guard.validate_order(
+        agent=agent,
+        order=order,
+        positions=positions,
+        account_state=account_state,
+    )
+    if not validation["valid"]:
+        return {
+            "success": False,
+            "order_id": None,
+            "message": validation["reason"],
+            "reason": validation["reason"],
+            "price": None,
+            "executed_at": None,
+            "checked": validation["checked"],
+        }
+
+    normalized_order = dict(order)
+    if "quantity" not in normalized_order and "volume" in normalized_order:
+        normalized_order["quantity"] = normalized_order["volume"]
+
+    result = executor(normalized_order)
+    if isinstance(result, dict):
+        result.setdefault("checked", validation["checked"])
+    return result or {
+        "success": False,
+        "order_id": None,
+        "message": "MT5 executor returned no result",
+        "reason": "MT5 executor returned no result",
+        "price": None,
+        "executed_at": None,
+        "checked": validation["checked"],
     }

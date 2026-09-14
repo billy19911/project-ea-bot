@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from agents.base import BaseAgent
-from agents.permissions import require_permission
+from agents.permissions import AgentPermissionError, require_permission
 
 # ---------------------------------------------------------------------------
 # Validation result dataclass
@@ -121,8 +121,6 @@ class MT5WriteGuard:
         validations: list[ValidationResult] = []
 
         # 1. Permission check
-        from agents.permissions import AgentPermissionError
-
         try:
             require_permission(agent, "SEND_TO_MT5")
             validations.append(ValidationResult(True, checked=["permission"]))
@@ -149,16 +147,24 @@ class MT5WriteGuard:
         # Combine results
         failed = [v for v in validations if not v.valid]
         if failed:
+            all_checked = []
+            for v in validations:
+                if v.valid and v.checked:
+                    all_checked.extend(v.checked)
             return {
                 "valid": False,
                 "reason": failed[0].reason,
-                "checked": [v.checked for v in validations if v.valid],
+                "checked": all_checked,
             }
 
+        all_checked = []
+        for v in validations:
+            if v.valid and v.checked:
+                all_checked.extend(v.checked)
         return {
             "valid": True,
             "reason": "",
-            "checked": [v.checked for v in validations if v.valid],
+            "checked": all_checked,
         }
 
     def send_order(
