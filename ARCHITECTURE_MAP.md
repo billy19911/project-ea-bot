@@ -30,6 +30,7 @@
 | EPIC 05 | Risk Intelligence Department (advisory only) | `src/risk/intelligence.py` | **Complete** |
 | EPIC 07 | Deterministic Risk & Safety (KillSwitch, CircuitBreaker) | `src/risk/` | **Complete** |
 | EPIC 08 | Execution Engine (OrderBuilder, RecoveryEngine) | `src/execution/` | **Complete** |
+| EPIC 09 | Position Monitoring (lifecycle, trailing, abnormal detection) | `src/monitoring/` | **Complete** |
 
 ---
 

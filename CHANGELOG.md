@@ -1,5 +1,4 @@
 # Changelog
-
 Semua perubahan penting pada project ini dicatat di dokumen ini.
 
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -11,29 +10,27 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan ve
   - `KillSwitch` — deterministic emergency stop (07.07)
   - `CircuitBreaker` — auto-trip on repeated failures (07.08)
   - `RiskLead` sebagai Department Lead untuk risk aggregation dan advisory decisions.
-  - 4 spesialis analis: `AccountRiskAnalyst`, `PositionRiskAnalyst`, `PortfolioRiskAnalyst`, `DrawdownAnalyst`.
+  - 4 specialist analis: `AccountRiskAnalyst`, `PositionRiskAnalyst`, `PortfolioRiskAnalyst`, `DrawdownAnalyst`.
   - `RiskAssessmentReport` dan `RiskCommitteeDecision` schema dengan scoring, warnings, dan recommendations.
   - Separation test: membuktikan AI risk advice tidak memiliki izin memodifikasi batasan deterministik atau mengeksekusi order MT5.
   - 9 unit test komprehensif (`test_risk_intelligence.py`), 100% green.
-- **EPIC 04 — Market Intelligence Department**:
-  - `MarketLead` sebagai Department Lead untuk intelligence aggregation dan consensus synthesis.
-  - 5 spesialis analis: `TechnicalAnalyst`, `StructureAnalyst`, `MomentumAnalyst`, `VolatilityAnalyst`, `NewsSentimentAnalyst`.
-  - `AnalystReport` dan `CommitteeDecision` schema dengan directional consensus dan agreement/conflict tracking.
-  - 10 unit test komprehensif (`test_market_intelligence.py`), 100% green.
-- **EPIC 03 — Risk Gate**:
-  - Validasi deterministic risk proposal dengan RiskThreshold.
-  - Comprehensive unit test suite (`test_risk_gate.py`).
-- **EPIC 02 — MT5 Write Guard**:
-  - `MT5WriteGuard` class dengan validasi volume, monetary loss harian, dan max exposure.
-  - `guarded_execute_order` integration wrapper untuk MT5 connector.
-  - Permission enforcement `SEND_TO_MT5` sebelum order dikirim.
-- **EPIC 01 — Architecture Normalization**:
-  - `Department` dan `DepartmentLead` abstraction (PRD V2 §5.2).
-  - Extended metadata pada `BaseAgent` (`role`, `permissions`, `dependencies`, `model_policy`, `timeout_seconds`).
-  - Query helper di `AgentRegistry` (`get_by_role`, `get_by_permission`, `export_metadata`, `validate_permissions`).
-  - `SupervisorAgent` auto-delegation ke `department_lead` sebelum fallback ke specialist langsung.
-  - Guard helpers dan `AgentPermissionError` di `agents.permissions` (`require_permission`, `submit_to_risk_gate`, `propose_execution`, `send_to_mt5`).
-  - `ARCHITECTURE_MAP.md` sebagai central index arsitektur dan dokumentasi.
+
+- **EPIC 08 — Execution Engine**:
+  - `OrderBuilder` — deterministically build OrderRequest from trade proposal (08.03)
+    Normalize symbol, prefixes/suffixes, map side/order_type, lot/volume, SL/TP, auto-quote fill
+  - `ExecutionRecoveryEngine` — mismatch detection and execution blocking (08.07)
+    Audit orphan positions, missing ledger items, volume mismatches
+    State machine: NORMAL -> WARN_MISMATCH -> BLOCKED_CRITICAL
+  - 38 unit tests (`test_order_builder.py`)
+  - Full test suite: 648 passed
+
+- **EPIC 09 — Position Monitoring**:
+  - `PositionMonitor` real-time position oversight (09.01)
+  - SL/TP management dan dynamic updates (09.02)
+  - ATR-based dynamic trailing stop (09.03)
+  - Abnormal price movement detection (>3x ATR threshold) (09.04)
+  - Risk change monitoring dan exit events generation (09.05, 09.06)
+  - 35 unit tests (`test_position_monitor.py`), 100% green
 
 ### Planned
 - End-to-end integration testing
