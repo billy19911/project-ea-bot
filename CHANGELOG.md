@@ -7,6 +7,12 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan ve
 ## [Unreleased]
 
 ### Added
+- **EPIC 05 — Risk Intelligence Department**:
+  - `RiskLead` sebagai Department Lead untuk risk aggregation dan advisory decisions.
+  - 4 spesialis analis: `AccountRiskAnalyst`, `PositionRiskAnalyst`, `PortfolioRiskAnalyst`, `DrawdownAnalyst`.
+  - `RiskAssessmentReport` dan `RiskCommitteeDecision` schema dengan scoring, warnings, dan recommendations.
+  - Separation test: membuktikan AI risk advice tidak memiliki izin memodifikasi batasan deterministik atau mengeksekusi order MT5.
+  - 9 unit test komprehensif (`test_risk_intelligence.py`), 100% green.
 - **EPIC 04 — Market Intelligence Department**:
   - `MarketLead` sebagai Department Lead untuk intelligence aggregation dan consensus synthesis.
   - 5 spesialis analis: `TechnicalAnalyst`, `StructureAnalyst`, `MomentumAnalyst`, `VolatilityAnalyst`, `NewsSentimentAnalyst`.

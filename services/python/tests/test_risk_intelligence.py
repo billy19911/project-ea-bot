@@ -59,7 +59,7 @@ def test_account_risk_analyst():
 
 
 def test_position_risk_analyst():
-    """PositionRiskAnalyst evaluates open position exposure and concentration."""
+    """PositionRiskAnalyst evaluates exposure and concentration."""
     analyst = PositionRiskAnalyst()
     report = analyst.analyze(
         {
@@ -76,7 +76,7 @@ def test_position_risk_analyst():
 
 
 def test_portfolio_risk_analyst():
-    """PortfolioRiskAnalyst checks correlations and total portfolio exposure."""
+    """PortfolioRiskAnalyst checks correlations and exposure."""
     analyst = PortfolioRiskAnalyst()
     report = analyst.analyze(
         {
@@ -106,7 +106,7 @@ def test_drawdown_analyst():
 
 
 def test_risk_lead_synthesis():
-    """RiskLead synthesizes all specialist reports into a committee decision."""
+    """RiskLead synthesizes specialist reports into a decision."""
     lead = RiskLead()
     lead.create_department()
     decision = lead.synthesize(
@@ -136,7 +136,7 @@ def test_risk_lead_synthesis():
 
 
 def test_risk_lead_separation_cannot_alter_hard_limits():
-    """AI risk advice cannot override deterministic hard limits (Separation Test)."""
+    """AI risk advice cannot override deterministic hard limits."""
     lead = RiskLead()
     lead.create_department()
     # RiskLead has no permissions to send orders or bypass limits
