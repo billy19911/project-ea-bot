@@ -2,8 +2,17 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import styles from './page.module.css';
+import { apiFetch } from '../../lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+// API routes require a Bearer token (PRD_V2 §28). The app has no login UI yet,
+// so the "Run Cycle" action stays disabled until a token is present in
+// localStorage under this key (mirroring the `ea-bot-settings` convention used
+// on the home page). Do NOT invent a login flow here.
+const AUTH_TOKEN_KEY = 'ea-bot-token';
+
+type CycleResult =
+  | { kind: 'ok'; traceId: string; decision: string; status: string }
+  | { kind: 'error'; message: string };
 
 type Tab =
   | 'overview'
@@ -55,10 +64,18 @@ export default function ControlPlanePage() {
   const [data, setData] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState('');
+  const [runningCycle, setRunningCycle] = useState(false);
+  const [cycle, setCycle] = useState<CycleResult | null>(null);
+  const [hasToken, setHasToken] = useState(false);
+
+  useEffect(() => {
+    // Read only; no login UI exists yet (see AUTH_TOKEN_KEY comment above).
+    setHasToken(!!localStorage.getItem(AUTH_TOKEN_KEY));
+  }, []);
 
   const fetchJson = useCallback(async (path: string) => {
     try {
-      const res = await fetch(`${API_BASE}${path}`);
+      const res = await apiFetch(`${path}`);
       if (!res.ok) return null;
       return await res.json();
     } catch {
@@ -99,6 +116,39 @@ export default function ControlPlanePage() {
     setTimeout(() => setNotice(''), 2500);
   };
 
+  const runCycle = async () => {
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    if (!token) return; // Button is disabled without a token; guard defensively.
+    const traceId = crypto.randomUUID();
+    setRunningCycle(true);
+    setCycle(null);
+    try {
+      const res = await apiFetch(`/pipeline/run`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Trace-Id': traceId,
+        },
+        body: JSON.stringify({ symbol: 'EURUSD', timeframe: 'M15' }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCycle({ kind: 'error', message: body?.error || `HTTP ${res.status}` });
+        return;
+      }
+      setCycle({
+        kind: 'ok',
+        traceId: body?.trace_id || traceId,
+        decision: body?.decision ?? body?.verdict ?? '—',
+        status: body?.status ?? '—',
+      });
+    } catch {
+      setCycle({ kind: 'error', message: 'Tidak dapat menghubungi API.' });
+    } finally {
+      setRunningCycle(false);
+    }
+  };
+
   return (
     <div className={styles.shell}>
       <aside className={styles.sidebar}>
@@ -136,6 +186,15 @@ export default function ControlPlanePage() {
             <button
               className={styles.tab}
               style={{ marginLeft: 10 }}
+              onClick={runCycle}
+              disabled={!hasToken || runningCycle}
+              title={hasToken ? 'Jalankan satu siklus pipeline' : 'Membutuhkan token di localStorage (ea-bot-token)'}
+            >
+              {runningCycle ? '⏳ Running…' : '▶ Run Cycle'}
+            </button>
+            <button
+              className={styles.tab}
+              style={{ marginLeft: 10 }}
               onClick={() => { fetchAll(); showNotice('Data refreshed dari API.'); }}
             >
               ↻ Refresh
@@ -144,6 +203,17 @@ export default function ControlPlanePage() {
         </header>
 
         {notice && <div className={styles.notice}>{notice}</div>}
+        {cycle && (
+          cycle.kind === 'ok' ? (
+            <div className={styles.notice}>
+              Cycle OK · decision <strong>{cycle.decision}</strong> · status <strong>{cycle.status}</strong> · trace <code className={styles.mono}>{cycle.traceId}</code>
+            </div>
+          ) : (
+            <div className={styles.notice} style={{ background: '#fef3f2', borderColor: '#fecdca', color: '#b42318' }}>
+              Cycle gagal: {cycle.message}
+            </div>
+          )
+        )}
         {loading ? (
           <div className={styles.loading}>Memuat data control plane…</div>
         ) : (

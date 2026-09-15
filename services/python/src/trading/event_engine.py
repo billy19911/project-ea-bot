@@ -2,11 +2,15 @@
 """Event Engine — priority, queue, history, deduplication for detected events.
 
 Phase 5 extensions:
-- EventPriority enum (LOW/MEDIUM/HIGH/CRITICAL)
+- EventPriority enum (BACKGROUND/LOW/NORMAL/MEDIUM/HIGH/CRITICAL)
 - EVENT_PRIORITY_MAP for all EventTypes
 - EventQueue with priority ordering and max_size
 - EventHistory with filtering and max_size
 - EventDeduplicator to prevent duplicate events within N bars
+
+PRD_V2 §15 defines the priority ladder CRITICAL > HIGH > NORMAL > LOW >
+BACKGROUND. ``MEDIUM`` is retained as an intermediate level for backward
+compatibility with existing event mappings (it sits between NORMAL and HIGH).
 """
 
 from __future__ import annotations
@@ -21,12 +25,19 @@ from .events import DetectedEvent, EventTypes
 
 
 class EventPriority(Enum):
-    """Priority levels for market events. Higher value = higher priority."""
+    """Priority levels for market events. Higher value = higher priority.
 
+    Ladder (lowest → highest): BACKGROUND, LOW, NORMAL, MEDIUM, HIGH,
+    CRITICAL. ``BACKGROUND`` events (analytics/housekeeping) are skipped by
+    the scheduler under backpressure (see PRD_V2 §15).
+    """
+
+    BACKGROUND = 0
     LOW = 1
-    MEDIUM = 2
-    HIGH = 3
-    CRITICAL = 4
+    NORMAL = 2
+    MEDIUM = 3
+    HIGH = 4
+    CRITICAL = 5
 
 
 # Priority mapping covering every EventTypes member.
@@ -52,10 +63,10 @@ EVENT_PRIORITY_MAP: dict[EventTypes, EventPriority] = {
     EventTypes.MOMENTUM_BULLISH: EventPriority.MEDIUM,
     EventTypes.MOMENTUM_BEARISH: EventPriority.MEDIUM,
     EventTypes.MOMENTUM_DIVERGENCE: EventPriority.MEDIUM,
-    # --- Trend: MEDIUM (neutral is LOW) ---
+    # --- Trend: MEDIUM (neutral is NORMAL) ---
     EventTypes.TREND_BULLISH: EventPriority.MEDIUM,
     EventTypes.TREND_BEARISH: EventPriority.MEDIUM,
-    EventTypes.TREND_NEUTRAL: EventPriority.LOW,
+    EventTypes.TREND_NEUTRAL: EventPriority.NORMAL,
     EventTypes.TREND_STRENGTHENING: EventPriority.MEDIUM,
     EventTypes.TREND_WEAKENING: EventPriority.MEDIUM,
     # --- RSI / Stochastic extremes: MEDIUM ---
@@ -63,14 +74,25 @@ EVENT_PRIORITY_MAP: dict[EventTypes, EventPriority] = {
     EventTypes.RSI_OVERSOLD: EventPriority.MEDIUM,
     EventTypes.STOCH_OVERBOUGHT: EventPriority.MEDIUM,
     EventTypes.STOCH_OVERSOLD: EventPriority.MEDIUM,
-    # --- Candlestick pattern: LOW ---
-    EventTypes.DOJI: EventPriority.LOW,
+    # --- Candlestick pattern: BACKGROUND (analytics/housekeeping) ---
+    EventTypes.DOJI: EventPriority.BACKGROUND,
 }
 
 
+# Ordered priority ladder, lowest → highest (PRD_V2 §15).
+PRIORITY_ORDER: tuple[EventPriority, ...] = (
+    EventPriority.BACKGROUND,
+    EventPriority.LOW,
+    EventPriority.NORMAL,
+    EventPriority.MEDIUM,
+    EventPriority.HIGH,
+    EventPriority.CRITICAL,
+)
+
+
 def get_priority(event_type: EventTypes) -> EventPriority:
-    """Return priority for an event type (default MEDIUM)."""
-    return EVENT_PRIORITY_MAP.get(event_type, EventPriority.MEDIUM)
+    """Return priority for an event type (default NORMAL)."""
+    return EVENT_PRIORITY_MAP.get(event_type, EventPriority.NORMAL)
 
 
 @dataclass

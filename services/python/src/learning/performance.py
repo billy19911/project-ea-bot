@@ -54,13 +54,34 @@ class BucketStats:
         }
 
 
+@dataclass
+class NoTradeRecord:
+    """A single recorded WAIT/NO_TRADE decision outcome."""
+
+    would_have_won: bool
+    reason: str = ""
+    session: Optional[str] = None
+    hour: Optional[int] = None
+    regime: Optional[str] = None
+    setup: Optional[str] = None
+
+
 class PerformanceTracker:
     """Track performance by time, session, regime, and setup (14.08–14.11)."""
 
-    def __init__(self, min_sample_size: int = 5) -> None:
-        """Initialize tracker with minimum sample-size safeguard."""
+    def __init__(self, min_sample_size: int = 5, max_history: int = 10000) -> None:
+        """Initialize tracker with minimum sample-size and history bounds.
+
+        Args:
+            min_sample_size: Minimum trades before a bucket is statistically
+                meaningful (default 5).
+            max_history: Maximum trade/no-trade records retained; oldest are
+                evicted on overflow (default 10000).
+        """
         self.min_sample_size = min_sample_size
+        self.max_history = max(1, int(max_history))
         self._trades: list[TradeRecord] = []
+        self._no_trades: list[NoTradeRecord] = []
         self._hours: dict[int, BucketStats] = {}
         self._sessions: dict[str, BucketStats] = {}
         self._regimes: dict[str, BucketStats] = {}
@@ -93,6 +114,66 @@ class PerformanceTracker:
             self._update_bucket(self._regimes, regime, record)
         if setup is not None:
             self._update_bucket(self._setups, setup, record)
+        # Enforce bounded history; rebuild derived buckets on overflow so they
+        # stay consistent with the retained trades.
+        self._evict(self._trades, self._recompute_trade_buckets)
+
+    def record_no_trade_decision(
+        self,
+        would_have_won: bool,
+        reason: str = "",
+        session: Optional[str] = None,
+        hour: Optional[int] = None,
+        regime: Optional[str] = None,
+        setup: Optional[str] = None,
+    ) -> None:
+        """Record the outcome of a WAIT/NO_TRADE decision (14.11 no-trade quality).
+
+        Args:
+            would_have_won: True if the skipped trade would have won (i.e. the
+                no-trade decision missed a gain); False if taking the trade
+                would have lost (i.e. the no-trade decision avoided a loss).
+            reason: Optional reason label for the no-trade decision.
+            session: Optional trading session label.
+            hour: Optional hour of day.
+            regime: Optional market regime label.
+            setup: Optional setup label.
+        """
+        self._no_trades.append(
+            NoTradeRecord(
+                would_have_won=bool(would_have_won),
+                reason=reason,
+                session=session,
+                hour=hour,
+                regime=regime,
+                setup=setup,
+            )
+        )
+        self._evict(self._no_trades, None)
+
+    def _evict(self, records: list[Any], recompute: Any) -> None:
+        """Enforce bounded history, rebuilding derived state if needed."""
+        if len(records) <= self.max_history:
+            return
+        del records[: len(records) - self.max_history]
+        if recompute is not None:
+            recompute()
+
+    def _recompute_trade_buckets(self) -> None:
+        """Rebuild hour/session/regime/setup buckets from retained trades."""
+        self._hours = {}
+        self._sessions = {}
+        self._regimes = {}
+        self._setups = {}
+        for record in self._trades:
+            if record.hour is not None:
+                self._update_bucket(self._hours, record.hour, record)
+            if record.session is not None:
+                self._update_bucket(self._sessions, record.session, record)
+            if record.regime is not None:
+                self._update_bucket(self._regimes, record.regime, record)
+            if record.setup is not None:
+                self._update_bucket(self._setups, record.setup, record)
 
     @staticmethod
     def _update_bucket(buckets: dict[Any, BucketStats], key: Any, record: TradeRecord) -> None:
@@ -135,8 +216,40 @@ class PerformanceTracker:
         worst = min(eligible.items(), key=lambda kv: kv[1].avg_pnl)
         return ((best[0], best[1].avg_pnl), (worst[0], worst[1].avg_pnl))
 
+    def no_trade_quality(self) -> Optional[float]:
+        """Quality of WAIT/NO_TRADE decisions as a percentage (0–100).
+
+        Quality = share of no-trade decisions that were *correct*: taking the
+        trade would have lost (``would_have_won`` is False). Returns ``None``
+        when there are no no-trade decisions to score.
+        """
+        if not self._no_trades:
+            return None
+        correct = sum(1 for nt in self._no_trades if not nt.would_have_won)
+        return round(correct / len(self._no_trades) * 100.0, 2)
+
+    def breakdowns(self) -> dict[str, dict[str, dict[str, Any]]]:
+        """Performance breakdowns by session, hour, regime, and setup.
+
+        Returns a dict keyed by dimension, each mapping bucket label →
+        bucket stats dict. Empty dimensions yield an empty dict.
+        """
+        return {
+            "by_session": {str(k): v.to_dict() for k, v in self._sessions.items()},
+            "by_hour": {str(k): v.to_dict() for k, v in self._hours.items()},
+            "by_regime": {str(k): v.to_dict() for k, v in self._regimes.items()},
+            "by_setup": {str(k): v.to_dict() for k, v in self._setups.items()},
+        }
+
     def supervisor_kpis(self) -> dict[str, Any]:
-        """Supervisor KPI learning: win rate, profit factor, expectancy (14.11)."""
+        """Supervisor KPI learning: win rate, profit factor, expectancy (14.11).
+
+        PRD §18.3/§32.23: includes no-trade decision quality and performance
+        breakdowns by session, hour, regime, and setup. All values are derived
+        deterministically from the bounded trade/no-trade history.
+        """
+        breakdowns = self.breakdowns()
+        no_trade_quality = self.no_trade_quality()
         if not self._trades:
             return {
                 "total_trades": 0,
@@ -145,7 +258,9 @@ class PerformanceTracker:
                 "expectancy": 0.0,
                 "max_drawdown": 0.0,
                 "false_signals": 0,
-                "no_trade_quality": 0.0,
+                "no_trade_decisions": len(self._no_trades),
+                "no_trade_quality": no_trade_quality if no_trade_quality is not None else 0.0,
+                "breakdowns": breakdowns,
             }
         wins = [t for t in self._trades if t.pnl > 0]
         losses = [t for t in self._trades if t.pnl < 0]
@@ -170,5 +285,7 @@ class PerformanceTracker:
             "expectancy": round(expectancy, 4),
             "max_drawdown": round(max_dd, 4),
             "false_signals": false_signals,
-            "no_trade_quality": 0.0,
+            "no_trade_decisions": len(self._no_trades),
+            "no_trade_quality": no_trade_quality if no_trade_quality is not None else 0.0,
+            "breakdowns": breakdowns,
         }

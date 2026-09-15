@@ -17,10 +17,12 @@ from __future__ import annotations
 
 from .event_engine import (
     EVENT_PRIORITY_MAP,
+    PRIORITY_ORDER,
     EventDeduplicator,
     EventHistory,
     EventPriority,
     EventQueue,
+    get_priority,
 )
 from .indicators import adx, atr, ema, macd, rsi, sma
 from .position_sizing import atr_position_size
@@ -77,6 +79,8 @@ __all__ = [
     # Phase 5 extensions
     "EventPriority",
     "EVENT_PRIORITY_MAP",
+    "PRIORITY_ORDER",
+    "get_priority",
     "EventQueue",
     "EventHistory",
     "EventDeduplicator",

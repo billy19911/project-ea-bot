@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import styles from './page.module.css';
+import { apiFetch } from '../../lib/api';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 interface ErrorRecord {
@@ -59,8 +60,6 @@ function statusClass(status: string): string {
   }
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-
 // ── Component ───────────────────────────────────────────────────────────────
 export default function ObservabilityPage() {
   const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
@@ -74,9 +73,9 @@ export default function ObservabilityPage() {
   const fetchData = useCallback(async () => {
     try {
       const [metricsRes, supervisorRes, errorsRes] = await Promise.allSettled([
-        fetch(`${API_BASE}/observability/metrics`).then(r => r.json()),
-        fetch(`${API_BASE}/ai-control/status`).then(r => r.json()),
-        fetch(`${API_BASE}/observability/errors?limit=50`).then(r => r.json()),
+        apiFetch(`/observability/metrics`).then(r => r.json()),
+        apiFetch(`/ai-control/status`).then(r => r.json()),
+        apiFetch(`/observability/errors?limit=50`).then(r => r.json()),
       ]);
 
       if (metricsRes.status === 'fulfilled') setMetrics(metricsRes.value);

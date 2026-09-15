@@ -3,7 +3,15 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 ### Added
-- **EPIC 07 ‑ Deterministic Risk & Safety**:
+- **PRD_V2 Conformance Pass (Run 9)**:
+  - Pipeline + scheduler, Telegram gateway, dan model discovery diselaraskan dengan PRD_V2.
+  - API wiring: seluruh route non-publik kini memerlukan Bearer token; public allowlist `/health`, `/metrics`, `/auth/token` (§28).
+  - Brain §7–§17 (reasoning, routing, memory) dan safety §19/§22–§24/§14/§28/§29 diterapkan.
+  - Polish §15/§18/§26/§27, reconciliation, dan research realism.
+  - Unifikasi metrics/trace; helper web `apps/web/lib/api.ts` mengirim `Authorization` + `X-Trace-Id` dari `localStorage('ea-bot-token')` di seluruh halaman dashboard (home, ai-control, observability, control-plane).
+  - Suite test Node deterministik: `apps/api` menambah `npm test` (`build` + `node --test`) dan test guard produksi `JWT_SECRET`.
+
+- **EPIC 07 ‑ Deterministic Risk & Safety**:
   - `KillSwitch` — deterministic emergency stop (07.07)
   - `CircuitBreaker` — auto‑trip on repeated failures (07.08)
   - `RiskLead` sebagai Department Lead untuk risk aggregation dan advisory decisions.

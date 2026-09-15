@@ -1,6 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const jwt = require('jsonwebtoken');
+
+// Deterministic: ensure the module under test never falls back to the legacy
+// dev secret, regardless of the ambient environment this test runs in.
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'unit-test-secret-not-the-legacy-one';
 
 const auth = require('../dist/middleware/auth.js');
 const secrets = require('../dist/middleware/secrets.js');
@@ -33,6 +39,18 @@ test('production rejects tokens signed with the legacy development secret', asyn
     if (oldSecret === undefined) delete process.env.JWT_SECRET;
     else process.env.JWT_SECRET = oldSecret;
   }
+});
+
+test('production requires JWT_SECRET and refuses to boot without it', () => {
+  const apiDir = path.join(__dirname, '..');
+  const result = spawnSync(process.execPath, ['-e', "require('./dist/middleware/auth.js')"], {
+    cwd: apiDir,
+    env: { ...process.env, NODE_ENV: 'production', JWT_SECRET: '' },
+    encoding: 'utf8',
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr || '', /JWT_SECRET is required in production/);
 });
 
 test('secret redaction removes nested sensitive values without mutating source', () => {

@@ -8,10 +8,11 @@ auto-halted and the kill switch is triggered. Manual reset required.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Callable
 
 from .kill_switch import KillSwitch
 
@@ -85,6 +86,11 @@ class CircuitBreaker:
     last_failure_at: str | None = None
     kill_switch: KillSwitch | None = None
     events: list[BreakerEvent] = field(default_factory=list)
+    # Monotonic epoch of the last failure — used for the OPEN → HALF_OPEN
+    # cooldown. Not part of ``to_dict`` (kept internal for observability).
+    last_failure_epoch: float | None = None
+    # Injectable clock (monotonic seconds) so the cooldown is testable.
+    time_fn: Callable[[], float] = field(default=time.monotonic, repr=False)
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -105,6 +111,7 @@ class CircuitBreaker:
 
         self.consecutive_failures += 1
         self.last_failure_at = self._now()
+        self.last_failure_epoch = self.time_fn()
         self.events.append(BreakerEvent(self._now(), True, reason, detail))
 
         if self.consecutive_failures >= self.failure_threshold:
@@ -137,6 +144,32 @@ class CircuitBreaker:
             True when the breaker is CLOSED, False when OPEN.
         """
         return self.state == BreakerState.CLOSED
+
+    def check_allow(self) -> bool:
+        """Check whether a call is allowed, applying the HALF_OPEN cooldown.
+
+        If the breaker is OPEN and ``reset_window_seconds`` have elapsed since
+        the last failure, the breaker transitions to HALF_OPEN (a limited
+        trial) and allows the call. A subsequent success closes the breaker; a
+        subsequent failure re-opens it.
+
+        Returns:
+            True when a call may proceed (CLOSED or fresh HALF_OPEN), else False.
+        """
+        if self.state == BreakerState.OPEN:
+            if self._cooldown_elapsed():
+                self.state = BreakerState.HALF_OPEN
+                return True
+            return False
+        return True
+
+    def _cooldown_elapsed(self) -> bool:
+        """True when the reset window has elapsed since the last failure."""
+        if self.last_failure_epoch is None:
+            # Trip without a recorded failure epoch (e.g. manual trip) — treat
+            # the trip as immediate so a half-open trial is not blocked forever.
+            return True
+        return (self.time_fn() - self.last_failure_epoch) >= self.reset_window_seconds
 
     def reset(self) -> None:
         """Manually reset the breaker.

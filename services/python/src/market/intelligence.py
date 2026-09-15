@@ -22,7 +22,12 @@ class AnalystReport:
 
 @dataclass
 class CommitteeDecision:
-    """Synthesized market decision."""
+    """Synthesized market decision.
+
+    The decision is produced by deterministic, *evidence-weighted* synthesis
+    (see :meth:`MarketLead.synthesize`), never by majority vote. The outcome
+    is explainable via ``rationale`` and any ``dissent`` is recorded.
+    """
 
     department: str
     direction: str
@@ -30,6 +35,8 @@ class CommitteeDecision:
     reports: list[AnalystReport] = field(default_factory=list)
     agreements: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
+    rationale: str = ""
+    dissent: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict."""
@@ -48,11 +55,22 @@ class CommitteeDecision:
             ],
             "agreements": self.agreements,
             "conflicts": self.conflicts,
+            "rationale": self.rationale,
+            "dissent": self.dissent,
         }
 
 
 class TechnicalAnalyst(BaseAgent):
-    """Technical analysis specialist."""
+    """Technical analysis specialist.
+
+    Note (PRD_V2 §25): this is intentionally *distinct* from
+    :class:`agents.base.TechnicalAnalystAgent`. They are not trivially
+    deduplicable — they differ in registered name ("Technical Analyst" vs
+    "technical_analyst"), agent_type ("analyst" vs "technical") and return
+    contract (:class:`AnalystReport` for the market-department committee vs a
+    plain signal dict for the supervisor). Merging them would break the
+    department-committee API, so both are kept.
+    """
 
     def __init__(self):
         super().__init__(
@@ -266,7 +284,15 @@ class MarketLead(BaseAgent):
         return self.department
 
     def synthesize(self, market_data: dict[str, Any]) -> CommitteeDecision:
-        """Synthesize consensus from specialists."""
+        """Synthesize a deterministic, evidence-weighted consensus.
+
+        Mirrors :meth:`DepartmentLead._resolve_consensus`: the winning
+        direction is the one supported by the greatest *evidence weight*
+        (``reliability × confidence``), never the greatest headcount. Ties
+        break deterministically by direction priority, so the same inputs
+        always yield the same output. The result is explainable via
+        ``rationale`` and any dissenting analysts are recorded in ``dissent``.
+        """
         if not self.department:
             self.create_department()
 
@@ -275,18 +301,69 @@ class MarketLead(BaseAgent):
             report = specialist.analyze(market_data)
             reports.append(report)
 
-        directions = [r.direction for r in reports]
-        direction = max(set(directions), key=directions.count)
-        confidence = sum(r.confidence for r in reports) / len(reports)
+        direction, confidence, rationale, dissent = self._weighted_consensus(reports)
+
+        # For backward compatibility, keep ``agreements``/``conflicts`` but
+        # derive them from the new (non-vote) semantics.
+        agreements = [f"{direction} supported by weighted evidence"]
+        conflicts = list(dissent)
 
         return CommitteeDecision(
             department="market",
             direction=direction,
             confidence=confidence,
             reports=reports,
-            agreements=["Analysis complete"],
-            conflicts=[],
+            agreements=agreements,
+            conflicts=conflicts,
+            rationale=rationale,
+            dissent=dissent,
         )
+
+    @staticmethod
+    def _weighted_consensus(
+        reports: list[AnalystReport],
+    ) -> tuple[str, float, str, list[str]]:
+        """Resolve direction by evidence weight; return rationale + dissent.
+
+        Weight for a report is ``reliability × confidence``. Reports with a
+        non-positive weight or a neutral direction do not vote. When no report
+        carries directional weight the outcome is NEUTRAL. Ties are broken by a
+        fixed direction priority (BULLISH, then BEARISH) so results are stable.
+        """
+        directional = [r for r in reports if r.direction in ("BULLISH", "BEARISH")]
+        if not directional:
+            return (
+                "NEUTRAL",
+                0.0,
+                "No directional evidence; consensus is NEUTRAL",
+                [],
+            )
+
+        weights: dict[str, float] = {}
+        contributors: dict[str, list[AnalystReport]] = {}
+        for report in directional:
+            weight = max(0.0, float(report.reliability) * float(report.confidence))
+            weights[report.direction] = weights.get(report.direction, 0.0) + weight
+            contributors.setdefault(report.direction, []).append(report)
+
+        # Deterministic tie-break: fixed direction order.
+        priority = {"BULLISH": 0, "BEARISH": 1}
+        winner = sorted(weights.items(), key=lambda kv: (-kv[1], priority.get(kv[0], 99)))[0][0]
+
+        winning_weight = weights.get(winner, 0.0)
+        total_weight = sum(weights.values())
+        confidence = (winning_weight / total_weight) if total_weight > 0 else 0.0
+
+        winners = contributors.get(winner, [])
+        dissent = [r.analyst for r in directional if r.direction != winner]
+
+        rationale = (
+            f"{winner} selected by evidence weight "
+            f"({winning_weight:.3f} of {total_weight:.3f} total; "
+            f"{len(winners)} supporting analyst(s))"
+        )
+
+        return winner, confidence, rationale, dissent
 
     def can_handle(self, task_type: str) -> bool:
         return task_type == "market_analysis"

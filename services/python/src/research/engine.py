@@ -13,7 +13,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from trading.indicators import ema
+
 logger = logging.getLogger(__name__)
+
+# Default train/test split ratio for walk-forward validation (§18 / P2-24).
+DEFAULT_TRAIN_RATIO = 0.7
+# Minimum bars required to attempt a backtest at all.
+_MIN_BARS = 5
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +74,12 @@ class Experiment:
 
 @dataclass
 class BacktestResult:
-    """Aggregated backtest metrics and trade history."""
+    """Aggregated backtest metrics and trade history.
+
+    Attributes:
+        walk_forward: Walk-forward validation metadata (windows, per-window
+            metrics, aggregate) — empty dict when walk-forward is disabled.
+    """
 
     total_trades: int
     win_rate: float
@@ -77,6 +89,7 @@ class BacktestResult:
     expectation: float
     net_pnl: float
     trades: list[dict[str, Any]] = field(default_factory=list)
+    walk_forward: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -300,18 +313,28 @@ class ResearchEngine:
         self,
         experiment: Experiment,
         historical_data: list[float],
+        train_ratio: float = DEFAULT_TRAIN_RATIO,
+        walk_forward: bool = True,
     ) -> BacktestResult:
-        """Run backtest on historical close prices.
+        """Run a realistic, indicator-based backtest over historical closes.
 
-        Replays bars, simulates trades based on merged parameters, and
-        closes final position at end of data.
+        The simulation reuses the project's real EMA implementation
+        (:func:`trading.indicators.ema`) — there is no hand-rolled indicator maths
+        here — and is fully deterministic (no randomness, no new deps).
+
+        When ``walk_forward`` is enabled (default), the data is split into a
+        train window and a test window (``train_ratio``, default 70/30). A
+        backtest is run on each window and the results are aggregated into a
+        ``walk_forward`` metadata dict (windows, per-window metrics, aggregate).
 
         Args:
-            experiment: Experiment to backtest.
+            experiment: Experiment to backtest (must be registered).
             historical_data: Close prices (oldest → newest).
+            train_ratio: Fraction of bars used for the train window (0<r<1).
+            walk_forward: Whether to compute walk-forward metadata.
 
         Returns:
-            BacktestResult with metrics and trade list.
+            BacktestResult with metrics, trade list, and walk-forward metadata.
 
         Raises:
             ValueError: If experiment not registered.
@@ -319,7 +342,7 @@ class ResearchEngine:
         if experiment.id not in self._experiments:
             raise ValueError(f"Experiment {experiment.id} not registered")
 
-        if len(historical_data) < 5:
+        if len(historical_data) < _MIN_BARS:
             result = BacktestResult(
                 total_trades=0,
                 win_rate=0.0,
@@ -329,6 +352,7 @@ class ResearchEngine:
                 expectation=0.0,
                 net_pnl=0.0,
                 trades=[],
+                walk_forward={"enabled": bool(walk_forward), "windows": [], "aggregate": {}},
             )
             self._backtest_results[experiment.id] = result
             experiment.status = "completed"
@@ -338,44 +362,78 @@ class ResearchEngine:
         params = dict(self._strategy_versions[experiment.strategy_version].parameters)
         params.update(experiment.parameters)
 
-        # Minimal mock backtest: simulate EMA-based trend trades
+        # Full-series simulation drives the headline metrics/trades.
+        trades = self._simulate(historical_data, params)
+        metrics = self.compute_metrics(trades)
+
+        walk_forward_meta: dict[str, Any] = {"enabled": bool(walk_forward)}
+        if walk_forward:
+            walk_forward_meta = self._walk_forward(historical_data, params, train_ratio)
+
+        result = BacktestResult(
+            total_trades=metrics["total_trades"],
+            win_rate=metrics["win_rate"],
+            profit_factor=metrics["profit_factor"],
+            sharpe_ratio=metrics["sharpe_ratio"],
+            max_drawdown=metrics["max_drawdown"],
+            expectation=metrics["expectation"],
+            net_pnl=metrics["net_pnl"],
+            trades=trades,
+            walk_forward=walk_forward_meta,
+        )
+        self._backtest_results[experiment.id] = result
+        experiment.status = "completed"
+        logger.info(
+            f"Backtest completed: {result.total_trades} trades, " f"PnL={result.net_pnl:.2f}"
+        )
+        return result
+
+    # -- Simulation internals -------------------------------------------------
+
+    def _simulate(
+        self,
+        prices: list[float],
+        params: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Simulate EMA-crossover trades over a price series (deterministic).
+
+        Uses the project's real :func:`trading.indicators.ema` for both the fast
+        and slow lines, enters on a crossover and exits on the opposite
+        crossover (or at end of data). The final open position is always closed
+        so realised PnL reflects the whole series.
+        """
+        fast_period = int(params.get("fast_ema_period", 3))
+        slow_period = int(params.get("slow_ema_period", 8))
+        if fast_period < 1:
+            fast_period = 1
+        if slow_period <= fast_period:
+            slow_period = fast_period + 1
+
         trades: list[dict[str, Any]] = []
         in_trade = False
         entry_price = 0.0
         direction = 0
 
-        # Extract EMA periods with fallback
-        fast_period = int(params.get("fast_ema_period", 2))
-        slow_period = int(params.get("slow_ema_period", 3))
-
-        for bar_idx, close in enumerate(historical_data):
-            if bar_idx < slow_period:
+        for bar_idx in range(len(prices)):
+            window = prices[: bar_idx + 1]
+            if len(window) < slow_period:
                 continue
+            fast_ema = ema(window, fast_period)
+            slow_ema = ema(window, slow_period)
+            if fast_ema is None or slow_ema is None:
+                continue
+            close = prices[bar_idx]
 
-            # Compute simple EMAs
-            fast_ema = self._simple_ema(
-                historical_data[max(0, bar_idx - fast_period + 1) : bar_idx + 1],
-                fast_period,
-            )
-            slow_ema = self._simple_ema(
-                historical_data[max(0, bar_idx - slow_period + 1) : bar_idx + 1],
-                slow_period,
-            )
-
-            # Signal: buy if fast > slow, sell if fast < slow
             if not in_trade:
                 if fast_ema > slow_ema:
-                    entry_price = close
-                    direction = 1
-                    in_trade = True
+                    entry_price, direction, in_trade = close, 1, True
                 elif fast_ema < slow_ema:
-                    entry_price = close
-                    direction = -1
-                    in_trade = True
-
-            elif in_trade:
-                # Exit on crossover reversal
-                if direction == 1 and fast_ema < slow_ema:
+                    entry_price, direction, in_trade = close, -1, True
+            else:
+                reversed_trend = (direction == 1 and fast_ema < slow_ema) or (
+                    direction == -1 and fast_ema > slow_ema
+                )
+                if reversed_trend:
                     pnl = (close - entry_price) * direction
                     trades.append(
                         {
@@ -387,23 +445,11 @@ class ResearchEngine:
                         }
                     )
                     in_trade = False
-                elif direction == -1 and fast_ema > slow_ema:
-                    pnl = (entry_price - close) * abs(direction)
-                    trades.append(
-                        {
-                            "entry": entry_price,
-                            "exit": close,
-                            "direction": direction,
-                            "pnl": pnl,
-                            "exit_reason": "signal_reversal",
-                        }
-                    )
-                    in_trade = False
 
-        # Close final position at last price
+        # Close final position at last price.
         if in_trade:
-            close = historical_data[-1]
-            pnl = (close - entry_price) if direction == 1 else (entry_price - close)
+            close = prices[-1]
+            pnl = (close - entry_price) * direction
             trades.append(
                 {
                     "entry": entry_price,
@@ -413,43 +459,70 @@ class ResearchEngine:
                     "exit_reason": "end_of_data",
                 }
             )
+        return trades
 
-        # Compute metrics
-        metrics = self.compute_metrics(trades)
-        result = BacktestResult(
-            total_trades=metrics["total_trades"],
-            win_rate=metrics["win_rate"],
-            profit_factor=metrics["profit_factor"],
-            sharpe_ratio=metrics["sharpe_ratio"],
-            max_drawdown=metrics["max_drawdown"],
-            expectation=metrics["expectation"],
-            net_pnl=metrics["net_pnl"],
-            trades=trades,
-        )
-        self._backtest_results[experiment.id] = result
-        experiment.status = "completed"
-        logger.info(
-            f"Backtest completed: {result.total_trades} trades, " f"PnL={result.net_pnl:.2f}"
-        )
-        return result
+    def _walk_forward(
+        self,
+        prices: list[float],
+        params: dict[str, Any],
+        train_ratio: float,
+    ) -> dict[str, Any]:
+        """Split data into train/test windows and aggregate their metrics.
 
-    def _simple_ema(self, data: list[float], period: int) -> float:
-        """Compute simple EMA (uses SMA for first value).
-
-        Args:
-            data: Price series (oldest → newest).
-            period: EMA period.
-
-        Returns:
-            Latest EMA value.
+        A single 70/30 split is used by default (``train_ratio``). Each window is
+        backtested independently; the result carries the split indices, the
+        per-window metrics and an aggregate across all windows.
         """
-        if len(data) < period:
-            return sum(data) / len(data) if data else 0.0
-        alpha = 2.0 / (period + 1)
-        ema = sum(data[:period]) / period
-        for price in data[period:]:
-            ema = price * alpha + ema * (1 - alpha)
-        return ema
+        ratio = train_ratio if 0.0 < train_ratio < 1.0 else DEFAULT_TRAIN_RATIO
+        n = len(prices)
+        split_idx = int(n * ratio)
+        # Guarantee non-empty, overlapping-safe windows even for tiny inputs.
+        split_idx = min(max(split_idx, 1), n - 1)
+
+        windows: list[dict[str, Any]] = []
+        splits = {
+            "train": (0, split_idx),
+            "test": (split_idx, n),
+        }
+        for name, (start, end) in splits.items():
+            window_prices = prices[start:end]
+            trades = self._simulate(window_prices, params)
+            metrics = self.compute_metrics(trades)
+            windows.append(
+                {
+                    "split": {"train": [0, split_idx], "test": [split_idx, n]},
+                    "name": name,
+                    "range": [start, end],
+                    "metrics": metrics,
+                }
+            )
+
+        aggregate = self._aggregate_windows(windows)
+        return {
+            "enabled": True,
+            "train_ratio": ratio,
+            "windows": windows,
+            "aggregate": aggregate,
+        }
+
+    @staticmethod
+    def _aggregate_windows(windows: list[dict[str, Any]]) -> dict[str, Any]:
+        """Aggregate per-window metrics into a single summary."""
+        total_trades = sum(w["metrics"]["total_trades"] for w in windows)
+        net_pnl = sum(w["metrics"]["net_pnl"] for w in windows)
+        # Trade-weighted win rate across windows (0 when no trades).
+        weighted_wins = sum(
+            w["metrics"]["win_rate"] * w["metrics"]["total_trades"] for w in windows
+        )
+        win_rate = (weighted_wins / total_trades) if total_trades > 0 else 0.0
+        max_drawdown = max((w["metrics"]["max_drawdown"] for w in windows), default=0.0)
+        return {
+            "windows": len(windows),
+            "total_trades": total_trades,
+            "net_pnl": net_pnl,
+            "win_rate": win_rate,
+            "max_drawdown": max_drawdown,
+        }
 
     # -- Comparison -----------------------------------------------------------
 

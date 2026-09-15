@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     host: str = Field(default="0.0.0.0", alias="HOST")
     port: int = Field(default=8000, alias="PORT")
 
+    # CORS (PRD_V2 §28 Security) — comma-separated explicit origins. Never use
+    # a wildcard together with credentials.
+    cors_allowed_origins: str = Field(
+        default="http://localhost:3000,http://127.0.0.1:3000",
+        alias="CORS_ALLOWED_ORIGINS",
+    )
+
     # MT5 (Jonhson MT5 — read-only sandbox, no real funds)
     mt5_terminal_path: str = Field(default="", alias="MT5_TERMINAL_PATH")
     mt5_login: int | None = Field(default=None, alias="MT5_LOGIN")
@@ -23,6 +30,10 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = Field(default="sqlite:///./ea_bot.db", alias="DATABASE_URL")
+
+    # Autonomous scheduler (PRD_V2 §10.3, §32.17)
+    scheduler_enabled: bool = Field(default=True, alias="SCHEDULER_ENABLED")
+    scheduler_poll_interval: float = Field(default=1.0, alias="SCHEDULER_POLL_INTERVAL")
 
     # Risk engine
     max_position_size: float = Field(default=1000.0, alias="MAX_POSITION_SIZE")

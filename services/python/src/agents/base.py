@@ -314,13 +314,20 @@ class TechnicalAnalystAgent(BaseAgent):
 
 
 class FundamentalAnalystAgent(BaseAgent):
-    """Placeholder fundamental analyst agent — skeleton for Phase 4."""
+    """Fundamental analyst agent — honest UNSUPPORTED stub (PRD_V2 §25).
+
+    Fundamental data feeds (economic calendar, earnings) are not wired yet.
+    Rather than fabricate a neutral recommendation that looks like real
+    analysis, this agent returns an explicit ``UNSUPPORTED`` status with
+    ``confidence`` 0.0 so the Supervisor and downstream consumers can tell the
+    difference between "no signal" and "not implemented".
+    """
 
     def __init__(self) -> None:
         super().__init__(
             name="fundamental_analyst",
             agent_type="fundamental",
-            description="Fundamental analysis agent (skeleton — Phase 4)",
+            description="Fundamental analysis agent (UNSUPPORTED — data feeds not wired)",
             priority=AgentPriority.NORMAL,
         )
         self.capabilities = [
@@ -329,23 +336,30 @@ class FundamentalAnalystAgent(BaseAgent):
         ]
 
     def analyze(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Return an explicit UNSUPPORTED result (no fabricated analysis)."""
         return {
             "agent": self.name,
+            "status": "UNSUPPORTED",
+            "supported": False,
             "signal": "NEUTRAL",
             "confidence": 0.0,
-            "reasons": ["Fundamental agent not yet implemented"],
-            "event_count": context.get("detected_events", []),
+            "reasons": ["Fundamental analysis is not implemented"],
+            "event_count": len(context.get("detected_events", []) or []),
         }
 
 
 class SentimentAnalystAgent(BaseAgent):
-    """Placeholder sentiment analyst agent — skeleton for Phase 4."""
+    """Sentiment analyst agent — honest UNSUPPORTED stub (PRD_V2 §25).
+
+    News/social sentiment feeds are not wired yet. Returns an explicit
+    ``UNSUPPORTED`` status instead of fabricated neutral data.
+    """
 
     def __init__(self) -> None:
         super().__init__(
             name="sentiment_analyst",
             agent_type="sentiment",
-            description="Sentiment analysis agent (skeleton — Phase 4)",
+            description="Sentiment analysis agent (UNSUPPORTED — data feeds not wired)",
             priority=AgentPriority.NORMAL,
         )
         self.capabilities = [
@@ -354,10 +368,13 @@ class SentimentAnalystAgent(BaseAgent):
         ]
 
     def analyze(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Return an explicit UNSUPPORTED result (no fabricated analysis)."""
         return {
             "agent": self.name,
+            "status": "UNSUPPORTED",
+            "supported": False,
             "signal": "NEUTRAL",
             "confidence": 0.0,
-            "reasons": ["Sentiment agent not yet implemented"],
-            "event_count": context.get("detected_events", []),
+            "reasons": ["Sentiment analysis is not implemented"],
+            "event_count": len(context.get("detected_events", []) or []),
         }

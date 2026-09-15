@@ -108,6 +108,7 @@ class SimulatedExecutionEngine:
         slippage_model: Optional[SlippageModel] = None,
         min_volume: float = 0.01,
         max_volume: float = 100.0,
+        auto_review: bool = True,
     ) -> None:
         """Initialize simulated execution engine.
 
@@ -118,6 +119,9 @@ class SimulatedExecutionEngine:
             slippage_model: SlippageModel instance.
             min_volume: Minimum lot size.
             max_volume: Maximum lot size.
+            auto_review: When True (default), a closed position triggers a
+                post-trade review via ``review.auto_trigger`` (PRD §18.1).
+                The hook is fail-safe and never breaks the close path.
         """
         if isinstance(spread_config, dict):
             spread_config = SpreadConfig(
@@ -128,6 +132,7 @@ class SimulatedExecutionEngine:
         self.slippage_model = slippage_model or SlippageModel()
         self.min_volume = min_volume
         self.max_volume = max_volume
+        self.auto_review = auto_review
 
         # In-memory tracking (similar to real ExecutionEngine)
         self._pending_orders: dict[str, float] = {}
@@ -417,7 +422,49 @@ class SimulatedExecutionEngine:
             close_price,
         )
 
+        # PRD §18.1: auto-trigger post-trade review for the closed position.
+        # Fail-safe: any review error is logged inside the hook, never raised.
+        if self.auto_review:
+            self._trigger_review(
+                trade_id=str(getattr(position, "ticket", 0) or symbol),
+                symbol=symbol,
+                side=side,
+                position=position,
+                close_price=close_price,
+                pnl=pnl,
+                close_trade=close_trade,
+            )
+
         return close_trade
+
+    def _trigger_review(
+        self,
+        trade_id: str,
+        symbol: str,
+        side: str,
+        position: Any,
+        close_price: float,
+        pnl: float,
+        close_trade: PaperTrade,
+    ) -> None:
+        """Invoke the review auto-trigger for a just-closed position (fail-safe)."""
+        try:
+            from review.auto_trigger import on_position_closed
+
+            on_position_closed(
+                {
+                    "trade_id": trade_id,
+                    "symbol": symbol,
+                    "direction": position.side,
+                    "entry_price": position.entry_price,
+                    "close_price": close_price,
+                    "pnl": pnl,
+                    "slippage": close_trade.slippage_applied,
+                    "status": "CLOSED",
+                }
+            )
+        except Exception as exc:  # pragma: no cover - defensive, never break close
+            logger.warning("Auto-review trigger failed for %s: %s", symbol, exc)
 
     def get_account_summary(self, account: PaperAccount) -> dict[str, Any]:
         """Get summary of paper account state.

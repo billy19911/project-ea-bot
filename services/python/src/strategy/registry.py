@@ -8,20 +8,43 @@ and live-parameter protection.
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 
+def _utcnow() -> str:
+    """Return the current UTC time as an ISO-8601 string."""
+    return datetime.now(timezone.utc).isoformat()
+
+
 class StrategyStatus(Enum):
-    """Strategy lifecycle status."""
+    """Strategy lifecycle status (PRD_V2 §19).
+
+    The canonical set required by the PRD is: DRAFT, RESEARCH, BACKTESTED,
+    WALK_FORWARD, PAPER, DEMO, APPROVED, ACTIVE, RETIRED, REJECTED.
+
+    ``TESTING`` is retained as a backwards-compatibility value for older
+    code/tests that referenced the pre-PRD lifecycle. New code should prefer
+    RESEARCH/BACKTESTED/WALK_FORWARD.
+    """
 
     DRAFT = "DRAFT"
-    TESTING = "TESTING"
+    RESEARCH = "RESEARCH"
+    BACKTESTED = "BACKTESTED"
+    WALK_FORWARD = "WALK_FORWARD"
+    PAPER = "PAPER"
+    DEMO = "DEMO"
+    APPROVED = "APPROVED"
     ACTIVE = "ACTIVE"
     RETIRED = "RETIRED"
+    REJECTED = "REJECTED"
+    # Backwards-compat aliases for the pre-PRD lifecycle.
+    TESTING = "TESTING"
 
 
 class ReadOnlyDict(dict):
@@ -45,13 +68,45 @@ class ReadOnlyDict(dict):
 
 @dataclass
 class VersionedStrategy:
-    """A versioned strategy with parameters and lifecycle status."""
+    """A versioned strategy with parameters and lifecycle status (PRD_V2 §19).
+
+    Tracks the full PRD §19 metadata set: a stable ``strategy_id``, the
+    ``version``, parameters, the risk policy, compatible market regimes, the
+    lifecycle ``status``, a ``metrics_summary``, ``validation_evidence``,
+    a human-readable ``rationale``, and the lifecycle timestamps
+    (created/approved/activated/retired).
+    """
 
     name: str
     version: str
     parameters: dict[str, Any] = field(default_factory=dict)
     description: str = ""
     status: StrategyStatus = StrategyStatus.DRAFT
+    # §19 metadata.
+    strategy_id: str = field(default_factory=lambda: f"strat_{uuid.uuid4().hex[:12]}")
+    risk_policy: dict[str, Any] = field(default_factory=dict)
+    compatible_regimes: list[str] = field(default_factory=list)
+    metrics_summary: dict[str, Any] = field(default_factory=dict)
+    validation_evidence: dict[str, Any] = field(default_factory=dict)
+    rationale: str = ""
+    created_at: str = field(default_factory=_utcnow)
+    approved_at: Optional[str] = None
+    activated_at: Optional[str] = None
+    retired_at: Optional[str] = None
+
+    def set_status(self, status: StrategyStatus) -> None:
+        """Transition the lifecycle status and stamp the relevant timestamp.
+
+        APPROVED/ACTIVE/RETIRED transitions record ``approved_at`` /
+        ``activated_at`` / ``retired_at`` respectively (PRD_V2 §19).
+        """
+        self.status = status
+        if status is StrategyStatus.APPROVED and self.approved_at is None:
+            self.approved_at = _utcnow()
+        elif status is StrategyStatus.ACTIVE and self.activated_at is None:
+            self.activated_at = _utcnow()
+        elif status is StrategyStatus.RETIRED and self.retired_at is None:
+            self.retired_at = _utcnow()
 
     def freeze_parameters(self) -> None:
         """Freeze parameters when activating strategy (13.06)."""
@@ -70,6 +125,16 @@ class VersionedStrategy:
             "parameters": dict(self.parameters),
             "description": self.description,
             "status": self.status.value,
+            "strategy_id": self.strategy_id,
+            "risk_policy": dict(self.risk_policy),
+            "compatible_regimes": list(self.compatible_regimes),
+            "metrics_summary": dict(self.metrics_summary),
+            "validation_evidence": dict(self.validation_evidence),
+            "rationale": self.rationale,
+            "created_at": self.created_at,
+            "approved_at": self.approved_at,
+            "activated_at": self.activated_at,
+            "retired_at": self.retired_at,
         }
 
 
@@ -181,7 +246,7 @@ class StrategyRegistry:
             old_version = self._active_by_name[name]
             old_strategy = self.get(name, old_version)
             if old_strategy:
-                old_strategy.status = StrategyStatus.RETIRED
+                old_strategy.set_status(StrategyStatus.RETIRED)
                 old_strategy.unfreeze_parameters()
 
         # Activate new version
@@ -189,7 +254,7 @@ class StrategyRegistry:
         if not strategy:
             raise ValueError(f"Strategy {name} v{version} not found")
 
-        strategy.status = StrategyStatus.ACTIVE
+        strategy.set_status(StrategyStatus.ACTIVE)
         strategy.freeze_parameters()
         self._active_by_name[name] = version
         logger.info(f"Activated strategy {name} v{version}")
@@ -200,11 +265,29 @@ class StrategyRegistry:
         if not strategy:
             raise ValueError(f"Strategy {name} v{version} not found")
 
-        strategy.status = StrategyStatus.RETIRED
+        strategy.set_status(StrategyStatus.RETIRED)
         strategy.unfreeze_parameters()
         if self._active_by_name.get(name) == version:
             del self._active_by_name[name]
         logger.info(f"Retired strategy {name} v{version}")
+
+    def record_status(
+        self,
+        name: str,
+        version: str,
+        status: StrategyStatus,
+    ) -> VersionedStrategy:
+        """Record a lifecycle status transition for a strategy version (§19).
+
+        Raises:
+            ValueError: when the strategy version is not registered.
+        """
+        strategy = self.get(name, version)
+        if not strategy:
+            raise ValueError(f"Strategy {name} v{version} not found")
+        strategy.set_status(status)
+        logger.info(f"Strategy {name} v{version} status → {status.value}")
+        return strategy
 
     def get_active_version(self, name: str) -> Optional[VersionedStrategy]:
         """Get the currently active version of a strategy."""

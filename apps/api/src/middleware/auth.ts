@@ -6,7 +6,25 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
+/**
+ * Resolve the JWT signing secret (PRD_V2 §28 Security).
+ *
+ * In production a real `JWT_SECRET` is MANDATORY — startup fails loudly rather
+ * than silently falling back to a well-known dev secret. Outside production a
+ * dev-only fallback is allowed so local development keeps working.
+ */
+function resolveJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (secret && secret.length > 0) {
+    return secret;
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET is required in production (no dev fallback allowed).');
+  }
+  return 'dev-secret-change-in-production';
+}
+
+const JWT_SECRET = resolveJwtSecret();
 const JWT_EXPIRY = process.env.JWT_EXPIRY || '24h';
 
 export interface AuthPayload {

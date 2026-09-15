@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import styles from './page.module.css';
+import { apiFetch } from '../../lib/api';
 
 type AgentStatus = 'active' | 'idle' | 'error';
 type AgentNode = { 
@@ -40,40 +41,72 @@ type SupervisorStatus = {
   agents: AgentNode[];
   models: ModelUsage[];
   errors: AgentError[];
+  source?: SourceState;
 };
+
+type SourceState = 'live' | 'unavailable';
+
+function SourceBadge({ source }: { source: SourceState | undefined }) {
+  const live = source === 'live';
+  return (
+    <span className={`${styles.badge} ${live ? styles.success : styles.muted}`}>
+      {live ? 'LIVE' : 'UNAVAILABLE'}
+    </span>
+  );
+}
 
 export default function AIControlPage() {
   const [agents, setAgents] = useState<AgentNode[]>([]);
-  const [activity, setActivity] = useState<ActivityLog[]>([]);
+  const activity: ActivityLog[] = [];
   const [errors, setErrors] = useState<AgentError[]>([]);
   const [models, setModels] = useState<ModelUsage[]>([]);
   const [reasoning, setReasoning] = useState('');
   const [supervisorStatus, setSupervisorStatus] = useState<SupervisorStatus | null>(null);
+  const [source, setSource] = useState<SourceState>('unavailable');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Fetch supervisor status
-    fetch('/api/ai-control/status')
-      .then(res => res.json())
-      .then(data => {
-        setSupervisorStatus(data);
-        setAgents(data.agents);
-        setModels(data.models);
-        setErrors(data.errors);
-      })
-      .catch(err => console.error('Failed to fetch supervisor status:', err));
+    const load = async () => {
+      try {
+        const res = await apiFetch(`/ai-control/status`);
+        if (!res.ok) {
+          setSource('unavailable');
+        } else {
+          const data = (await res.json()) as SupervisorStatus;
+          setSupervisorStatus(data);
+          setAgents(Array.isArray(data.agents) ? data.agents : []);
+          setModels(Array.isArray(data.models) ? data.models : []);
+          setErrors(Array.isArray(data.errors) ? data.errors : []);
+          setSource(data.source === 'live' ? 'live' : 'unavailable');
+        }
+      } catch (err) {
+        console.error('Failed to fetch supervisor status:', err);
+        setSource('unavailable');
+      }
 
-    // Fetch current reasoning
-    fetch('/api/ai-control/reasoning')
-      .then(res => res.json())
-      .then(data => setReasoning(data.reasoning))
-      .catch(err => console.error('Failed to fetch reasoning:', err));
+      try {
+        const res = await apiFetch(`/ai-control/reasoning`);
+        if (res.ok) {
+          const data = await res.json();
+          setReasoning(data.reasoning ?? '');
+        } else {
+          setReasoning('Reasoning unavailable — Python service unreachable.');
+        }
+      } catch (err) {
+        console.error('Failed to fetch reasoning:', err);
+        setReasoning('Reasoning unavailable — Python service unreachable.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
 
     // TODO: WebSocket connection to Python service for real-time updates
   }, []);
 
   const totalTokens = models.reduce((sum, m) => sum + m.promptTokens + m.completionTokens, 0);
   const totalCost = models.reduce((sum, m) => sum + m.cost, 0);
+  const totalCalls = models.reduce((sum, m) => sum + m.calls, 0);
 
   return (
     <div className={styles.shell}>
@@ -87,8 +120,8 @@ export default function AIControlPage() {
         <a href="/control-plane" className={styles.navItem}><span>▦</span> Control Plane</a>
         <a href="/observability" className={styles.navItem}><span>📊</span> Observability</a>
         <div className={styles.sidebarBottom}>
-          <span className={styles.greenDot} /> Supervisor aktif
-          <div className={styles.version}>Phase 23 · Live</div>
+          <span className={styles.greenDot} /> {source === 'live' ? 'Supervisor aktif' : 'Data tidak tersedia'}
+          <div className={styles.version}>Phase 23 · {source === 'live' ? 'Live' : 'Offline'}</div>
         </div>
       </aside>
 
@@ -99,22 +132,31 @@ export default function AIControlPage() {
             <h1>AI Control Center</h1>
           </div>
           <div className={styles.topActions}>
-            <span className={styles.envBadge}>LIVE</span>
+            <SourceBadge source={source} />
           </div>
         </header>
 
         <div className={styles.pageBody}>
           {/* Supervisor Status */}
-          {supervisorStatus && (
+          {supervisorStatus ? (
             <section className={styles.card}>
               <h2>Status supervisor</h2>
               <div className={styles.supervisorGrid}>
-                <div><small>Status</small><strong className={styles.statusActive}>Aktif</strong></div>
+                <div><small>Status</small><strong className={styles.statusActive}>{supervisorStatus.supervisor.status}</strong></div>
                 <div><small>Routing policy</small><strong>{supervisorStatus.supervisor.routing_policy}</strong></div>
                 <div><small>Max concurrency</small><strong>{supervisorStatus.supervisor.max_concurrency}</strong></div>
                 <div><small>Token budget</small><strong>{supervisorStatus.supervisor.token_budget}</strong></div>
                 <div><small>Token used</small><strong>{supervisorStatus.supervisor.token_used}</strong></div>
                 <div><small>Uptime</small><strong>{supervisorStatus.supervisor.uptime}</strong></div>
+              </div>
+            </section>
+          ) : (
+            <section className={styles.card}>
+              <h2>Status supervisor</h2>
+              <div className={styles.empty}>
+                {loading
+                  ? 'Memuat status supervisor…'
+                  : 'Status supervisor tidak tersedia — Python service tidak terjangkau.'}
               </div>
             </section>
           )}
@@ -153,7 +195,7 @@ export default function AIControlPage() {
             <p className={styles.reasoning}>{reasoning}</p>
           </section>
 
-          {/* Activity Log (placeholder - would connect to real logs in production) */}
+          {/* Activity Log — sourced from real agent events when available */}
           <section className={styles.card}>
             <h2>Log aktivitas agent</h2>
             <div className={styles.tableWrapper}>
@@ -168,13 +210,7 @@ export default function AIControlPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {[
-                    { id: 'A1', timestamp: '13:34:58', agent: 'supervisor', action: 'Route TREND_BULLISH → structure_analyst', status: 'success', duration: 12 },
-                    { id: 'A2', timestamp: '13:34:56', agent: 'volatility_analyst', action: 'Analyze ATR + Bollinger bands', status: 'success', duration: 234 },
-                    { id: 'A3', timestamp: '13:34:52', agent: 'structure_analyst', action: 'Detect support @ 2610.40', status: 'success', duration: 189 },
-                    { id: 'A4', timestamp: '13:34:48', agent: 'supervisor', action: 'Aggregate 3 agent results', status: 'success', duration: 45 },
-                    { id: 'A5', timestamp: '13:34:42', agent: 'news_sentiment', action: 'Fetch news failed (timeout)', status: 'error', duration: 5000 },
-                  ].map((log) => (
+                  {activity.map((log) => (
                     <tr key={log.id}>
                       <td><code>{log.timestamp}</code></td>
                       <td><strong>{log.agent}</strong></td>
@@ -192,6 +228,13 @@ export default function AIControlPage() {
                   ))}
                 </tbody>
               </table>
+              {activity.length === 0 && (
+                <div className={styles.empty}>
+                  {source === 'live'
+                    ? 'Belum ada aktivitas agent tercatat.'
+                    : 'Activity log tidak tersedia — Python service tidak terjangkau.'}
+                </div>
+              )}
             </div>
           </section>
 
@@ -228,7 +271,7 @@ export default function AIControlPage() {
             <div className={styles.modelSummary}>
               <div><small>Total token</small><strong>{totalTokens.toLocaleString()}</strong></div>
               <div><small>Total cost</small><strong>${totalCost.toFixed(3)}</strong></div>
-              <div><small>Avg per call</small><strong>{Math.round(totalTokens / models.reduce((s, m) => s + m.calls, 0))} token</strong></div>
+              <div><small>Avg per call</small><strong>{totalCalls > 0 ? `${Math.round(totalTokens / totalCalls)} token` : '—'}</strong></div>
             </div>
             <div className={styles.tableWrapper}>
               <table className={styles.table}>
@@ -257,6 +300,11 @@ export default function AIControlPage() {
                   ))}
                 </tbody>
               </table>
+              {models.length === 0 && (
+                <div className={styles.empty}>
+                  {source === 'live' ? 'Tidak ada model tersedia.' : 'Data model tidak tersedia — Python service tidak terjangkau.'}
+                </div>
+              )}
             </div>
           </section>
         </div>

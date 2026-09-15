@@ -267,3 +267,28 @@ Edit `.env` dengan nilai yang sesuai:
 - `SECRET_KEY` — Kunci rahasia untuk session/auth
 
 ---
+
+## Dev auth token
+
+API menerapkan autentikasi pada semua route kecuali allowlist publik: `/health`, `/metrics`, `/auth/token` (PRD_V2 §28). Untuk memakai dashboard web saat development:
+
+1. Jalankan API dengan token minting aktif:
+   ```bash
+   DEV_AUTH_ENABLED=true npm run dev
+   ```
+
+2. Mint sebuah token (development-only):
+   ```bash
+   curl -s -X POST http://localhost:3001/auth/token \
+     -H 'Content-Type: application/json' \
+     -d '{"userId":"admin","role":"admin"}'
+   ```
+
+3. Simpan token di browser agar halaman dashboard mengirim header `Authorization: Bearer <token>`:
+   ```js
+   localStorage.setItem('ea-bot-token', '<token>')
+   ```
+
+Helper `apps/web/lib/api.ts` (`apiFetch`) membaca key `ea-bot-token` dan menambahkan header `Authorization` serta `X-Trace-Id` ke setiap request.
+
+---

@@ -14,8 +14,12 @@ from .base import (
     SentimentAnalystAgent,
     TechnicalAnalystAgent,
 )
+from .decision_state import ActionType, DecisionState, MarketBias, SetupType
+from .evidence import EvidenceBundle, EvidenceItem, EvidenceKind, Freshness
 from .supervisor import DEFAULT_ROUTING_TABLE, SupervisorAgent
 from .synthesis import AgentSynthesizer, SynthesisResult, TradeProposal
+from .task import TERMINAL_STATUSES as TASK_TERMINAL_STATUSES
+from .task import IllegalTaskTransitionError, Task, TaskPriority, TaskStatus
 
 __all__ = [
     "AgentRegistry",
@@ -30,4 +34,17 @@ __all__ = [
     "TradeProposal",
     "SynthesisResult",
     "AgentSynthesizer",
+    "Task",
+    "TaskStatus",
+    "TaskPriority",
+    "IllegalTaskTransitionError",
+    "TASK_TERMINAL_STATUSES",
+    "EvidenceItem",
+    "EvidenceBundle",
+    "EvidenceKind",
+    "Freshness",
+    "DecisionState",
+    "MarketBias",
+    "SetupType",
+    "ActionType",
 ]

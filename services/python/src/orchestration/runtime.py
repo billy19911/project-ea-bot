@@ -1,0 +1,209 @@
+# -*- coding: utf-8 -*-
+"""Shared orchestration runtime — pipeline + scheduler singletons.
+
+This module owns the process-wide :class:`TradingPipeline` and
+:class:`AutonomousScheduler` instances so the FastAPI endpoints, the lifespan
+startup/shutdown hooks, and integration tests all operate on the same objects.
+
+The runtime is lazily constructed and is intentionally decoupled from MT5:
+when no live MT5 connector is supplied, the :class:`ExecutionEngine` runs in
+its built-in simulated mode (existing behaviour).
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from collections import deque
+from typing import Any, Optional
+
+from agents.registry import agent_registry
+from agents.supervisor import SupervisorAgent
+from execution.engine import ExecutionEngine
+from execution.order_builder import OrderBuilder
+from execution.reconciliation import ReconciliationReport
+from execution.reconciliation_runner import DEFAULT_RECONCILIATION_INTERVAL, ReconciliationRunner
+from observability.traces import TraceCollector
+from risk.engine import RiskEngine
+from risk.gate import RiskGate
+from risk.money_management import MoneyManager
+from trading.event_engine import EventQueue
+from trading.scheduler import AutonomousScheduler
+
+from .pipeline import TradingPipeline
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "OrchestrationRuntime",
+    "get_runtime",
+    "set_runtime",
+]
+
+# Bound on the in-process decision history retained for the control plane.
+DECISION_HISTORY_LIMIT = 100
+# Bound on the in-process trace history retained for the control plane.
+TRACE_HISTORY_LIMIT = 200
+# Bound on the in-process reconciliation history retained for the control plane.
+RECONCILIATION_HISTORY_LIMIT = 50
+
+
+class OrchestrationRuntime:
+    """Holds the pipeline, event queue, and scheduler for one process."""
+
+    def __init__(
+        self,
+        queue: Optional[EventQueue] = None,
+        pipeline: Optional[TradingPipeline] = None,
+        scheduler: Optional[AutonomousScheduler] = None,
+        decision_limit: int = DECISION_HISTORY_LIMIT,
+        trace_collector: Optional[TraceCollector] = None,
+        reconciliation_interval: int = DEFAULT_RECONCILIATION_INTERVAL,
+        reconciliation_providers: Optional[Any] = None,
+        reconciliation_history_limit: int = RECONCILIATION_HISTORY_LIMIT,
+    ) -> None:
+        self.queue = queue if queue is not None else EventQueue()
+        self.pipeline = pipeline if pipeline is not None else self._build_pipeline()
+        # Periodic reconciliation (PRD_V2 §14). Providers default to safe no-ops
+        # so production wiring can inject MT5-backed providers without forcing
+        # tests to spin up MT5.
+        self.reconciliation = ReconciliationRunner(
+            interval=reconciliation_interval,
+            providers=reconciliation_providers,
+            history_limit=reconciliation_history_limit,
+        )
+        self.scheduler = (
+            scheduler
+            if scheduler is not None
+            else AutonomousScheduler(
+                queue=self.queue,
+                pipeline=self.pipeline,
+                reconciliation_runner=self.reconciliation,
+            )
+        )
+        # Bounded in-memory history of PipelineResult dicts (oldest first).
+        self._decisions: deque[dict[str, Any]] = deque(maxlen=decision_limit)
+        # Real trace store for pipeline cycles (PRD §26/§27, bounded).
+        self.traces = (
+            trace_collector
+            if trace_collector is not None
+            else TraceCollector(max_traces=TRACE_HISTORY_LIMIT)
+        )
+
+    @property
+    def _reconciliation_runner(self) -> ReconciliationRunner:
+        """Return the active reconciliation runner.
+
+        Prefers the scheduler's runner (kept in sync in production) but falls back
+        to the runtime-owned runner when a custom scheduler was injected.
+        """
+        return getattr(self.scheduler, "reconciliation_runner", None) or self.reconciliation
+
+    @staticmethod
+    def _build_pipeline() -> TradingPipeline:
+        """Build the production pipeline from the registered agents + risk gate."""
+        supervisor = SupervisorAgent()
+        # The registry is used by the supervisor for dynamic delegation.
+        supervisor._registry_cache = agent_registry
+        risk_gate = RiskGate(RiskEngine(), MoneyManager())
+        execution_engine = ExecutionEngine(mt5_connector=None)
+        order_builder = OrderBuilder()
+        return TradingPipeline(
+            supervisor=supervisor,
+            risk_gate=risk_gate,
+            execution_engine=execution_engine,
+            order_builder=order_builder,
+        )
+
+    def run_cycle(
+        self,
+        event: Any,
+        context: Optional[dict[str, Any]] = None,
+        trace_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Run one pipeline cycle and return the serialised result.
+
+        Args:
+            event: The triggering event.
+            context: Optional pipeline context.
+            trace_id: Optional externally supplied trace id (e.g. from an
+                ``X-Trace-Id`` request header). Echoed as ``trace_id`` in the
+                result and used as the recorded trace's id.
+
+        Returns:
+            The serialised :class:`PipelineResult` with an added ``trace_id``.
+        """
+        result = self.pipeline.run(event, context)
+        record = result.to_dict()
+        if trace_id:
+            record["trace_id"] = str(trace_id)
+        self._record_decision(record)
+        self._record_trace(record, trace_id)
+        # Periodic reconciliation (PRD_V2 §14) — fail-safe, never raises.
+        self._reconciliation_runner.tick()
+        return record
+
+    def _record_trace(self, record: dict[str, Any], trace_id: Optional[str] = None) -> None:
+        """Record the cycle into the bounded trace store (fail-safe)."""
+        try:
+            self.traces.record_pipeline_result(record, trace_id=trace_id)
+        except Exception as exc:  # observability must never break a cycle
+            logger.warning("Failed to record trace for cycle: %s", exc)
+
+    def recent_traces(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return the most recent recorded traces (newest first)."""
+        return self.traces.recent(limit)
+
+    def _record_decision(self, record: dict[str, Any]) -> None:
+        """Append a decision record (with a server timestamp) to the history."""
+        entry = dict(record)
+        entry.setdefault("recorded_at", time.time())
+        self._decisions.append(entry)
+
+    def recent_decisions(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return the most recent decision records (newest first)."""
+        if limit <= 0:
+            return []
+        items = list(self._decisions)[-limit:]
+        items.reverse()
+        return items
+
+    # ------------------------------------------------------------------
+    # Reconciliation (PRD_V2 §14)
+    # ------------------------------------------------------------------
+    def last_reconciliation(self) -> Optional[ReconciliationReport]:
+        """Return the most recent reconciliation report, or ``None``."""
+        return self._reconciliation_runner.last_report()
+
+    def reconciliation_history(self) -> list[ReconciliationReport]:
+        """Return retained reconciliation reports (oldest first, bounded)."""
+        return self._reconciliation_runner.history()
+
+    def reconciliations_run(self) -> int:
+        """Return the number of reconciliation runs performed."""
+        return self._reconciliation_runner.runs
+
+    def reconciliation_errors(self) -> int:
+        """Return the number of failed reconciliation runs (fail-safe)."""
+        return self._reconciliation_runner.errors
+
+    def last_reconciliation_ok(self) -> bool:
+        """Whether the most recent reconciliation completed without criticals."""
+        return self._reconciliation_runner.last_ok
+
+
+_runtime: Optional[OrchestrationRuntime] = None
+
+
+def get_runtime() -> OrchestrationRuntime:
+    """Return the process-wide runtime, constructing it on first use."""
+    global _runtime
+    if _runtime is None:
+        _runtime = OrchestrationRuntime()
+    return _runtime
+
+
+def set_runtime(runtime: Optional[OrchestrationRuntime]) -> None:
+    """Override the process-wide runtime (used by tests)."""
+    global _runtime
+    _runtime = runtime

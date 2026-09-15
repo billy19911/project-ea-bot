@@ -322,6 +322,13 @@
   color: #475467;
 }
 
+.empty {
+  padding: 24px;
+  text-align: center;
+  color: #667085;
+  font-size: 13px;
+}
+
 .danger {
   background: #fef3f2;
   color: #d92d20;

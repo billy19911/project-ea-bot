@@ -20,10 +20,12 @@ from trading.events import DetectedEvent, EventDetector, EventTypes
 
 
 def test_event_priority_values():
+    assert EventPriority.BACKGROUND.value == 0
     assert EventPriority.LOW.value == 1
-    assert EventPriority.MEDIUM.value == 2
-    assert EventPriority.HIGH.value == 3
-    assert EventPriority.CRITICAL.value == 4
+    assert EventPriority.NORMAL.value == 2
+    assert EventPriority.MEDIUM.value == 3
+    assert EventPriority.HIGH.value == 4
+    assert EventPriority.CRITICAL.value == 5
 
 
 def test_event_priority_map_complete():
