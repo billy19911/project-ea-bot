@@ -78,10 +78,17 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan ve
 - **EPIC 18 ‑ Testing & Failure Simulation**:
   - `test_failure_simulation.py` — 13 skenario kegagalan: isolasi agent gagal/timeout, pemulihan transient, duplikat order, circuit breaker→kill switch, reconciliation mismatch→block, chaos storm (18.03–18.04, 18.07, 18.09–18.10, 18.14).
 
+- **EPIC 19 ‑ Live Readiness**:
+  - `LiveReadinessGate` — 14 gate bernama: backtest, walk_forward, paper, demo, risk, stability, recovery, observability, security, autonomous_workflow, committee_consensus, learning_safety, telegram_control_plane, provider_discovery (19.01–19.09, 19.11–19.15).
+  - Gate hanya bisa PASSED dengan evidence eksplisit; submission FAIL wajib menyertakan evidence atau alasan.
+  - **Explicit LIVE activation (19.10)**: `activate_live()` hanya berhasil jika SEMUA gate PASSED dan frasa konfirmasi persis `"ACTIVATE LIVE TRADING"`; tidak ada bypass programatik.
+  - Fail‑closed: gate revoke atau fail saat LIVE otomatis menurunkan mode kembali ke PAPER.
+  - Custom gate pluggable via protocol `ReadinessGate`; riwayat aktivasi/deaktivasi immutable (`ActivationRecord`).
+  - 23 unit tests (`test_readiness_activation.py`), 100% green.
+
 ### Planned
 - End‑to‑end integration testing.
 - Staging / production deployment hardening.
-- Explicit live‑trading enablement.
 
 ## [1.0.0] - 2026-09-14
 ### Added
