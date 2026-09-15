@@ -3,6 +3,13 @@
 const path = require("path");
 const fs = require("fs");
 
+// ---- Load .env (fail-safe: env vars always win; missing file is a no-op) ----
+try {
+  require("dotenv").config({ path: path.resolve(__dirname, ".env"), quiet: true });
+} catch {
+  // dotenv unavailable — fall back to process.env only
+}
+
 // ---- Load Zod -----------------------------------------------------------
 function loadZod() {
   const candidates = [

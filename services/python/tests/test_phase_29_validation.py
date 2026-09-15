@@ -339,11 +339,12 @@ class TestPhase29_APIFailure:
 class TestPhase29_Database:
     """Test database failure tolerance and recovery."""
 
-    def test_database_url_is_sqlite_by_default(self):
+    def test_database_url_is_sqlite_by_default(self, monkeypatch):
         """Database URL defaults to SQLite (no external DB needed)."""
+        monkeypatch.delenv("DATABASE_URL", raising=False)
         from config import Settings
 
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.database_url.startswith("sqlite")
 
     def test_database_engine_exists(self, monkeypatch):
