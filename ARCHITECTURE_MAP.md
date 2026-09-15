@@ -27,7 +27,7 @@
 | EPIC 02 | Agent Registry metadata (ditambahkan ke `base.py`) | `src/agents/base.py` | **Complete** |
 | EPIC 03 | Supervisor routing to department leads | `src/agents/supervisor.py` | **Complete** |
 || EPIC 04 | Market Intelligence Department (analyst aggregation & consensus) | `src/market/` | **Complete**
-| EPIC 05 | Documentation & QR pattern | [IN PROGRESS] | **TBD** |
+|| EPIC 05 | Risk Intelligence Department (advisory only) | `src/risk/intelligence.py` | **Complete**
 
 ---
 
