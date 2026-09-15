@@ -22,7 +22,7 @@ class NineRouterClient(BaseLLMProvider):
     def __init__(
         self,
         api_key: str | None = None,
-        base_url: str = "https://api.9router.com/v1",
+        base_url: str | None = None,
         default_model: str = "google/gemini-2.0-flash-lite:free",
         fallback_models: list[str] | None = None,
         timeout: float = 30.0,
@@ -36,7 +36,9 @@ class NineRouterClient(BaseLLMProvider):
         self.api_key = (
             api_key or os.getenv("NINE_ROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or "mock-key"
         )
-        self.base_url = base_url
+        self.base_url = (
+            base_url or os.getenv("NINE_ROUTER_BASE_URL") or "https://api.9router.com/v1"
+        )
         self.default_model = default_model
         self.fallback_models = (
             fallback_models if fallback_models is not None else ["deepseek/deepseek-r1:free"]

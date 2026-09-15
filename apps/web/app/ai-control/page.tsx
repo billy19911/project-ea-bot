@@ -182,7 +182,7 @@ export default function AIControlPage() {
                   </div>
                   <div className={styles.agentCardMeta}>
                     <span>Priority: {agent.priority}</span>
-                    <span>Last: {agent.lastActive}</span>
+                    {agent.lastActive && <span>Last: {agent.lastActive}</span>}
                     {agent.errorCount > 0 && <span className={styles.errorBadge}>{agent.errorCount} error</span>}
                   </div>
                 </div>

@@ -59,6 +59,13 @@ function badgeClass(status: string, s: Record<string, string>): string {
   return s.muted;
 }
 
+// Gateway errors often carry raw HTML (e.g. an upstream 404 page). Strip tags,
+// collapse whitespace, and cap the length so the UI never dumps markup.
+function shortError(raw: unknown): string {
+  const s = String(raw ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  return s.length > 160 ? s.slice(0, 160) + '…' : s;
+}
+
 export default function ControlPlanePage() {
   const [tab, setTab] = useState<Tab>('overview');
   const [data, setData] = useState<Record<string, unknown>>({});
@@ -669,10 +676,9 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
             <span className={s.kpiLabel}>Last discovery</span>
           </div>
         </div>
-        {models.health?.error && (
+        {shortError(models.health?.error) && (
           <div className={s.mono} style={{ marginBottom: 12 }}>
-            Health error: {String(models.health.error).split('\n')[0].slice(0, 180)}
-            {String(models.health.error).length > 180 ? '…' : ''}
+            Health error: {shortError(models.health?.error)}
           </div>
         )}
         <div className={s.tableWrapper}>

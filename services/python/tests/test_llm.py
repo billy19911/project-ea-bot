@@ -221,6 +221,30 @@ def test_nine_router_init_defaults() -> None:
         assert client.max_retries == 2
 
 
+def test_nine_router_base_url_defaults_without_env(monkeypatch) -> None:
+    """Without NINE_ROUTER_BASE_URL, the public default gateway URL is used."""
+    monkeypatch.delenv("NINE_ROUTER_BASE_URL", raising=False)
+    with patch("src.llm.nine_router.OpenAI"):
+        client = NineRouterClient(api_key="test-key")
+        assert client.base_url == "https://api.9router.com/v1"
+
+
+def test_nine_router_base_url_from_env(monkeypatch) -> None:
+    """A NINE_ROUTER_BASE_URL env var overrides the default gateway URL."""
+    monkeypatch.setenv("NINE_ROUTER_BASE_URL", "http://127.0.0.1:20128/v1")
+    with patch("src.llm.nine_router.OpenAI"):
+        client = NineRouterClient(api_key="test-key")
+        assert client.base_url == "http://127.0.0.1:20128/v1"
+
+
+def test_nine_router_base_url_arg_wins_over_env(monkeypatch) -> None:
+    """An explicit base_url argument takes precedence over the env var."""
+    monkeypatch.setenv("NINE_ROUTER_BASE_URL", "http://127.0.0.1:20128/v1")
+    with patch("src.llm.nine_router.OpenAI"):
+        client = NineRouterClient(api_key="test-key", base_url="https://explicit.example/v1")
+        assert client.base_url == "https://explicit.example/v1"
+
+
 def test_nine_router_generate_success(mock_openai_client: Mock) -> None:
     """Successful generation returns LLMResponse with usage."""
     with patch("src.llm.nine_router.OpenAI", return_value=mock_openai_client):
