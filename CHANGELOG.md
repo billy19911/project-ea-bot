@@ -7,7 +7,9 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan ve
 ## [Unreleased]
 
 ### Added
-- **EPIC 05 — Risk Intelligence Department**:
+- **EPIC 07 — Deterministic Risk & Safety**:
+  - `KillSwitch` — deterministic emergency stop (07.07)
+  - `CircuitBreaker` — auto-trip on repeated failures (07.08)
   - `RiskLead` sebagai Department Lead untuk risk aggregation dan advisory decisions.
   - 4 spesialis analis: `AccountRiskAnalyst`, `PositionRiskAnalyst`, `PortfolioRiskAnalyst`, `DrawdownAnalyst`.
   - `RiskAssessmentReport` dan `RiskCommitteeDecision` schema dengan scoring, warnings, dan recommendations.
