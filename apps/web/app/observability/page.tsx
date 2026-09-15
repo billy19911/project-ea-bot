@@ -142,6 +142,7 @@ export default function ObservabilityPage() {
         <div className={styles.workspaceLabel}>MONITORING</div>
         <a href="/" className={styles.navItem}><span>←</span> Dashboard</a>
         <a href="/ai-control" className={styles.navItem}><span>🧠</span> AI Control</a>
+        <a href="/control-plane" className={styles.navItem}><span>▦</span> Control Plane</a>
         <a href="/strategy" className={styles.navItem}><span>📡</span> Strategy</a>
         <a href="/observability" className={`${styles.navItem} ${styles.active}`}><span>📊</span> Observability</a>
         <div className={styles.sidebarBottom}>

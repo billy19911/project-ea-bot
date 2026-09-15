@@ -270,6 +270,222 @@ app.patch('/strategies/:id/active', (req, res) => {
   res.json({ strategy: strat, message: `Strategi ${strat.name} ${active ? 'diaktifkan' : 'dinonaktifkan'}` });
 });
 
+// ── EPIC 15: Control Plane endpoints ────────────────────────────────────────
+app.get('/system/overview', (req, res) => {
+  const log = (req as any).log;
+  log.info('system.overview');
+  res.json({
+    mode: 'PAPER',
+    status: 'healthy',
+    uptime: '4h 23m',
+    version: '1.0.0',
+    environment: process.env.NODE_ENV || 'development',
+    services: [
+      { name: 'api', status: 'up', latency_ms: 12 },
+      { name: 'python-engine', status: 'up', latency_ms: 28 },
+      { name: 'mt5-bridge', status: 'up', latency_ms: 45 },
+      { name: 'telegram-bot', status: 'up', latency_ms: 0 },
+    ],
+    kpis: { open_positions: 3, daily_pnl: 128.4, win_rate_today: 66.7, risk_utilization: 42.0 },
+  });
+});
+
+app.get('/trading/overview', (req, res) => {
+  const log = (req as any).log;
+  log.info('trading.overview');
+  res.json({
+    today: {
+      trades: 9, wins: 6, losses: 3, net_pnl: 128.4,
+      gross_profit: 214.0, gross_loss: -85.6, profit_factor: 2.5,
+    },
+    recent_trades: [
+      { id: 'T-1021', symbol: 'XAUUSD', side: 'BUY', volume: 0.10, open: 2412.5, close: 2418.2, pnl: 57.0, status: 'CLOSED' },
+      { id: 'T-1020', symbol: 'EURUSD', side: 'SELL', volume: 0.20, open: 1.0842, close: 1.0826, pnl: 32.0, status: 'CLOSED' },
+      { id: 'T-1019', symbol: 'GBPJPY', side: 'BUY', volume: 0.10, open: 189.42, close: 189.10, pnl: -32.0, status: 'CLOSED' },
+      { id: 'T-1022', symbol: 'XAUUSD', side: 'SELL', volume: 0.10, open: 2418.2, close: 0, pnl: 0, status: 'OPEN' },
+    ],
+  });
+});
+
+app.get('/positions', (req, res) => {
+  const log = (req as any).log;
+  log.info('positions.list');
+  res.json({
+    positions: [
+      { ticket: 50121, symbol: 'XAUUSD', side: 'SELL', volume: 0.10, open_price: 2418.2, current_price: 2415.8, sl: 2424.0, tp: 2404.0, pnl: 24.0, opened_at: '2026-09-15T13:02:11Z' },
+      { ticket: 50118, symbol: 'EURUSD', side: 'BUY', volume: 0.20, open_price: 1.0821, current_price: 1.0838, sl: 1.0800, tp: 1.0870, pnl: 34.0, opened_at: '2026-09-15T11:44:03Z' },
+      { ticket: 50115, symbol: 'USDJPY', side: 'BUY', volume: 0.10, open_price: 148.22, current_price: 148.05, sl: 147.80, tp: 148.90, pnl: -17.0, opened_at: '2026-09-15T09:18:47Z' },
+    ],
+    count: 3,
+  });
+});
+
+app.get('/market/overview', (req, res) => {
+  const log = (req as any).log;
+  log.info('market.overview');
+  res.json({
+    session: 'LONDON',
+    sessions: [
+      { name: 'Sydney', status: 'closed' },
+      { name: 'Tokyo', status: 'closed' },
+      { name: 'London', status: 'open' },
+      { name: 'New York', status: 'upcoming' },
+    ],
+    symbols: [
+      { symbol: 'XAUUSD', price: 2415.8, change_pct: -0.24, spread: 18, volatility: 'HIGH' },
+      { symbol: 'EURUSD', price: 1.0838, change_pct: 0.16, spread: 8, volatility: 'LOW' },
+      { symbol: 'GBPUSD', price: 1.2712, change_pct: 0.08, spread: 10, volatility: 'MEDIUM' },
+      { symbol: 'USDJPY', price: 148.05, change_pct: -0.11, spread: 9, volatility: 'MEDIUM' },
+    ],
+    regime: { label: 'TREND_UP', confidence: 0.72, volatility: 'MEDIUM' },
+  });
+});
+
+app.get('/tasks', (req, res) => {
+  const log = (req as any).log;
+  log.info('tasks.list');
+  res.json({
+    tasks: [
+      { id: 'TSK-401', type: 'ANALYSIS', assignee: 'structure_analyst', status: 'RUNNING', priority: 75, created_at: '13:40:02', duration_ms: 1240 },
+      { id: 'TSK-400', type: 'ANALYSIS', assignee: 'momentum_analyst', status: 'COMPLETED', priority: 75, created_at: '13:38:11', duration_ms: 2210 },
+      { id: 'TSK-399', type: 'RISK_CHECK', assignee: 'risk_lead', status: 'COMPLETED', priority: 90, created_at: '13:36:40', duration_ms: 380 },
+      { id: 'TSK-398', type: 'EXECUTION', assignee: 'executor', status: 'QUEUED', priority: 95, created_at: '13:36:38', duration_ms: 0 },
+    ],
+    counts: { running: 1, queued: 1, completed: 2, failed: 0 },
+  });
+});
+
+app.get('/decisions', (req, res) => {
+  const log = (req as any).log;
+  log.info('decisions.list');
+  res.json({
+    decisions: [
+      { id: 'DEC-77', type: 'ENTRY', symbol: 'XAUUSD', verdict: 'APPROVED', confidence: 0.74, committee: 'market+risk', decided_at: '13:41:55', rationale: 'Breakout with momentum confirmation' },
+      { id: 'DEC-76', type: 'NO_TRADE', symbol: 'EURUSD', verdict: 'REJECTED', confidence: 0.41, committee: 'market+risk', decided_at: '12:58:20', rationale: 'Range-bound; edge below threshold' },
+      { id: 'DEC-75', type: 'EXIT', symbol: 'GBPJPY', verdict: 'APPROVED', confidence: 0.82, committee: 'position-monitor', decided_at: '12:31:09', rationale: 'SL proximity + adverse momentum' },
+    ],
+  });
+});
+
+// ── EPIC 15 (cont.): more control plane endpoints ───────────────────────────
+app.get('/audit/events', (req, res) => {
+  const log = (req as any).log;
+  log.info('audit.events');
+  res.json({
+    events: [
+      { id: 'AUD-901', timestamp: '13:41:55', actor: 'supervisor', action: 'DECISION_APPROVED', target: 'DEC-77', severity: 'info' },
+      { id: 'AUD-900', timestamp: '13:36:40', actor: 'risk_lead', action: 'RISK_CHECK_PASSED', target: 'PROP-512', severity: 'info' },
+      { id: 'AUD-899', timestamp: '13:22:10', actor: 'admin', action: 'SETTINGS_UPDATED', target: 'risk.maxDrawdown', severity: 'warning' },
+      { id: 'AUD-898', timestamp: '12:58:20', actor: 'supervisor', action: 'DECISION_REJECTED', target: 'DEC-76', severity: 'info' },
+      { id: 'AUD-897', timestamp: '12:04:33', actor: 'system', action: 'RECONNECT_MT5', target: 'mt5-bridge', severity: 'warning' },
+    ],
+    count: 5,
+  });
+});
+
+app.get('/system/health', (req, res) => {
+  const log = (req as any).log;
+  log.info('system.health');
+  res.json({
+    overall: 'healthy',
+    components: [
+      { name: 'api', status: 'healthy', detail: 'latency p95 34ms' },
+      { name: 'python-engine', status: 'healthy', detail: 'queue depth 2' },
+      { name: 'mt5-bridge', status: 'healthy', detail: 'ping 45ms' },
+      { name: 'redis', status: 'healthy', detail: 'memory 128MB' },
+      { name: 'postgres', status: 'healthy', detail: 'connections 6/100' },
+      { name: 'telegram', status: 'degraded', detail: 'rate limited, retry in 30s' },
+    ],
+    checked_at: new Date().toISOString(),
+  });
+});
+
+app.get('/ai/providers', (req, res) => {
+  const log = (req as any).log;
+  log.info('ai.providers');
+  res.json({
+    router: { name: '9Router', status: 'up', latency_ms: 320, failover_enabled: true },
+    providers: [
+      { name: 'google', status: 'up', models_available: 6, priority: 1, calls_today: 142 },
+      { name: 'qwen', status: 'up', models_available: 4, priority: 2, calls_today: 38 },
+      { name: 'openai', status: 'up', models_available: 8, priority: 3, calls_today: 12 },
+      { name: 'anthropic', status: 'down', models_available: 0, priority: 4, calls_today: 0 },
+    ],
+    budget: { tokens_used: 1240, tokens_limit: 8000, cost_today: 0.058 },
+  });
+});
+
+app.get('/ai/models', (req, res) => {
+  const log = (req as any).log;
+  log.info('ai.models');
+  res.json({
+    models: [
+      { id: 'gemini-2.0-flash-lite', provider: 'google', context: 1000000, status: 'available', role: 'analyst' },
+      { id: 'qwen-2.5-72b', provider: 'qwen', context: 131072, status: 'available', role: 'supervisor' },
+      { id: 'gpt-4o-mini', provider: 'openai', context: 128000, status: 'available', role: 'fallback' },
+      { id: 'claude-3-5-haiku', provider: 'anthropic', context: 200000, status: 'unavailable', role: 'fallback' },
+    ],
+    last_discovery: '2026-09-15T13:00:00Z',
+  });
+});
+
+app.get('/learning/analytics', (req, res) => {
+  const log = (req as any).log;
+  log.info('learning.analytics');
+  res.json({
+    by_hour: [
+      { hour: 9, trades: 24, win_rate: 62.5, avg_pnl: 18.4 },
+      { hour: 13, trades: 31, win_rate: 58.1, avg_pnl: 12.2 },
+      { hour: 15, trades: 18, win_rate: 44.4, avg_pnl: -8.1 },
+      { hour: 20, trades: 12, win_rate: 33.3, avg_pnl: -14.7 },
+    ],
+    by_regime: [
+      { regime: 'TREND_UP', trades: 40, win_rate: 65.0, avg_pnl: 22.1 },
+      { regime: 'RANGE', trades: 28, win_rate: 46.4, avg_pnl: -2.4 },
+      { regime: 'HIGH_VOL', trades: 17, win_rate: 52.9, avg_pnl: 8.6 },
+    ],
+    supervisor_kpis: { win_rate: 57.1, profit_factor: 1.86, expectancy: 12.8, max_drawdown: 8.2, false_signals: 4 },
+    lessons: [
+      { id: 'L-12', text: 'Hindari entry pada jam 20:00+ (win rate 33%)', validated: true },
+      { id: 'L-11', text: 'Setup breakout London paling konsisten', validated: true },
+    ],
+  });
+});
+
+app.get('/telegram/status', (req, res) => {
+  const log = (req as any).log;
+  log.info('telegram.status');
+  res.json({
+    connected: true,
+    bot_username: '@ea_bot_control',
+    chat_id: '[REDACTED]',
+    last_message_at: '13:38:02',
+    commands: ['/status', '/positions', '/risk', '/pause', '/resume'],
+    messages_today: 24,
+    errors_today: 0,
+  });
+});
+
+app.get('/committee/trace', (req, res) => {
+  const log = (req as any).log;
+  log.info('committee.trace');
+  res.json({
+    traces: [
+      {
+        decision_id: 'DEC-77',
+        symbol: 'XAUUSD',
+        rounds: [
+          { round: 1, speaker: 'structure_analyst', stance: 'BULLISH', confidence: 0.71, argument: 'H4 breakout with rising lows' },
+          { round: 1, speaker: 'momentum_analyst', stance: 'BULLISH', confidence: 0.66, argument: 'RSI 61, MACD positive' },
+          { round: 1, speaker: 'volatility_analyst', stance: 'NEUTRAL', confidence: 0.52, argument: 'ATR expanding but within band' },
+          { round: 2, speaker: 'risk_lead', stance: 'APPROVE', confidence: 0.78, argument: 'Risk 1.2% within budget; R:R 1:2.4' },
+        ],
+        final: { verdict: 'APPROVED', confidence: 0.74 },
+      },
+    ],
+  });
+});
+
 // Health check
 app.get('/health', (req, res) => {
   const log = (req as any).log;

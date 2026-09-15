@@ -103,6 +103,9 @@ export default function StrategyCenterPage() {
         <a href="/" className={styles.navItem}>
           <span>←</span> Kembali
         </a>
+        <a href="/control-plane" className={styles.navItem}>
+          <span>▦</span> Control Plane
+        </a>
         <div className={styles.sidebarBottom}>
           <span className={styles.greenDot} /> {strategies.filter((s) => s.active).length} strategi aktif
           <div className={styles.version}>Phase 24 · Live</div>

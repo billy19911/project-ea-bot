@@ -5,6 +5,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
+import { logger } from '../logger';
 
 export interface AuditEvent {
   timestamp: string;
@@ -54,13 +55,15 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
   res.on('finish', () => {
     const latencyMs = Date.now() - start;
     const status = res.statusCode;
+    // Express 5 query objects have a null prototype: coerce safely via URLSearchParams
+    const queryString = new URLSearchParams(query as Record<string, string>).toString();
 
     const auditEvent: AuditEvent = {
       timestamp: new Date().toISOString(),
       ip: getClientIp(req),
       userId: (req as any).user?.userId,
       method,
-      path: path + (query ? `?${query}` : ''),
+      path: queryString ? `${path}?${queryString}` : path,
       status,
       latencyMs,
       userAgent,
@@ -74,9 +77,9 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
       auditLogBuffer.pop();
     }
 
-    // Log to pino if attached
-    const log = (req as any).log;
-    log?.audit(auditEvent);
+    // Log to pino if attached (pino has no .audit method — log as info event)
+    const log = (req as any).log || logger;
+    log.info({ audit: auditEvent }, 'audit.event');
   });
 
   next();

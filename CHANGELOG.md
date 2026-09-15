@@ -52,6 +52,13 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan ve
   - 21 unit tests (`test_learning_loop.py`), 100% green.
   - Full test suite: 752 passed.
 
+- **EPIC 15 ‑ Dashboard & Control Plane**:
+  - 16 halaman dashboard: System Overview, Trading, Positions, Market, AI Organization, Task Explorer, Decision Explorer, Risk Center, Execution Center, Audit Viewer, System Health, Committee Trace, Telegram, AI Providers, Model Registry, Learning Analytics (15.01–15.22).
+  - API endpoints baru: `/system/overview`, `/trading/overview`, `/positions`, `/market/overview`, `/tasks`, `/decisions`, `/system/health`, `/audit/events`, `/committee/trace`, `/telegram/status`, `/ai/providers`, `/ai/models`, `/learning/analytics`.
+  - Fix pre‑existing bug audit middleware: Express 5 null‑prototype query crash + `log.audit` bukan pino method.
+  - Navigasi Control Plane ditambahkan ke semua halaman existing.
+  - Next.js build 8/8 routes sukses; ESLint 0 errors.
+
 ### Planned
 - End‑to‑end integration testing.
 - Staging / production deployment hardening.

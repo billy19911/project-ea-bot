@@ -54,6 +54,7 @@ export default function Home() {
         <div className={styles.workspaceLabel}>WORKSPACE</div>
         <button className={`${styles.navItem} ${section === 'research' ? styles.active : ''}`} onClick={() => setSection('research')}><span>▦</span> Research Center</button>
         <button className={`${styles.navItem} ${section === 'settings' ? styles.active : ''}`} onClick={() => setSection('settings')}><span>⚙</span> System Settings</button>
+        <a href="/control-plane" className={styles.navItem}><span>▦</span> Control Plane</a>
         <a href="/ai-control" className={styles.navItem}><span>🧠</span> AI Control Center</a>
         <a href="/strategy" className={styles.navItem}><span>📡</span> Strategy Center</a>
         <a href="/observability" className={styles.navItem}><span>📊</span> Observability</a>
