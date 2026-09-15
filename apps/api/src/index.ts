@@ -14,6 +14,8 @@ import { auditMiddleware, fetchAuditLogs } from './middleware/audit';
 import { validatePayload, sanitizeInput, securityHeaders, preventParameterPollution } from './middleware/security';
 import { generalLimiter, authLimiter } from './middleware/rateLimiter';
 import { validateSecrets, redactSecrets } from './middleware/secrets';
+// Run 18: honest supervisor status (real uptime; no fabricated zeros).
+import { buildSupervisorStatus } from './supervisorStatus.js';
 import {
   register,
   httpRequestDuration,
@@ -336,15 +338,17 @@ app.get('/ai-control/status', async (req, res) => {
     : [];
 
   const models = modelsResult.ok && Array.isArray(modelsResult.data.models)
-    ? modelsResult.data.models.map((m: any) => ({
-        model: m.id ?? m.name,
-        provider: m.provider,
-        calls: 0,
-        promptTokens: 0,
-        completionTokens: 0,
-        cost: 0,
-      }))
+    ? buildSupervisorStatus({ models: modelsResult.data.models }).models
     : [];
+
+  // Run 18: assemble the supervisor block from real sources only. Unknown values
+  // (token budget/usage, uptime when the Python service is down) are reported as
+  // null rather than fabricated 0 / "live" strings.
+  const supervisor = buildSupervisorStatus({
+    health: healthData,
+    scheduler: schedulerData,
+    models: modelsResult.ok ? modelsResult.data.models : [],
+  });
 
   // Update Prometheus gauges from real (or absent) data.
   const activeCount = agents.filter((a: any) => a.status === 'active').length;
@@ -363,12 +367,12 @@ app.get('/ai-control/status', async (req, res) => {
 
   res.json({
     supervisor: {
-      status: schedulerData.running ? 'active' : 'idle',
-      routing_policy: healthData.trading_engine ? 'priority_based' : 'unknown',
-      max_concurrency: schedulerData.stats?.max_concurrency ?? 0,
-      token_budget: 0,
-      token_used: 0,
-      uptime: health.ok ? 'live' : 'unknown',
+      status: supervisor.status,
+      routing_policy: supervisor.routing_policy,
+      max_concurrency: supervisor.max_concurrency,
+      token_budget: supervisor.token_budget,
+      token_used: supervisor.token_used,
+      uptime: supervisor.uptime,
     },
     agents,
     models,
@@ -518,10 +522,12 @@ app.get('/system/overview', async (req, res) => {
   }
   const healthData = health.ok ? health.data : {};
   const schedulerData = scheduler.ok ? scheduler.data : {};
+  // Run 18: real uptime (seconds) from the Python service, or null when absent.
+  const { uptime } = buildSupervisorStatus({ health: healthData, scheduler: schedulerData });
   res.json({
     mode: 'PAPER',
     status: health.ok ? (healthData.status ?? 'unknown') : 'degraded',
-    uptime: null,
+    uptime,
     version: healthData.version ?? null,
     environment: healthData.environment ?? (process.env.NODE_ENV || 'development'),
     services: [

@@ -27,18 +27,23 @@ interface MetricsSummary {
 }
 
 interface SupervisorStatus {
-  supervisor: { status: string; routing_policy: string; max_concurrency: number; token_budget: number; token_used: number; uptime: string };
+  supervisor: { status: string; routing_policy: string; max_concurrency: number | null; token_budget: number | null; token_used: number | null; uptime: number | null };
   agents: { name: string; type: string; status: string; priority: number; errorCount: number }[];
-  models: { model: string; provider: string; calls: number; promptTokens: number; completionTokens: number; cost: number }[];
+  models: { model: string; provider: string; calls: number; promptTokens: number; completionTokens: number; cost: number; isFree?: boolean }[];
   errors: { id: string; timestamp: string; agent: string; message: string; severity: string }[];
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-function formatUptime(seconds: number): string {
+function formatUptime(seconds: number | null | undefined): string {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return '—';
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
   return `${h}h ${m}m ${s}s`;
+}
+
+function formatNumber(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : '—';
 }
 
 function severityClass(severity: string): string {
@@ -356,17 +361,19 @@ export default function ObservabilityPage() {
               <h2>Agent Execution Metrics</h2>
               <div className={styles.supervisorInfo}>
                 <div><small>Routing Policy</small><strong>{supervisor.supervisor.routing_policy}</strong></div>
-                <div><small>Max Concurrency</small><strong>{supervisor.supervisor.max_concurrency}</strong></div>
-                <div><small>Token Budget</small><strong>{supervisor.supervisor.token_budget.toLocaleString()}</strong></div>
-                <div><small>Token Used</small><strong>{supervisor.supervisor.token_used.toLocaleString()}</strong></div>
+                <div><small>Max Concurrency</small><strong>{formatNumber(supervisor.supervisor.max_concurrency)}</strong></div>
+                <div><small>Token Budget</small><strong>{formatNumber(supervisor.supervisor.token_budget)}</strong></div>
+                <div><small>Token Used</small><strong>{formatNumber(supervisor.supervisor.token_used)}</strong></div>
                 <div><small>Budget Usage</small>
                   <strong>
-                    {supervisor.supervisor.token_budget > 0
+                    {typeof supervisor.supervisor.token_budget === 'number'
+                      && typeof supervisor.supervisor.token_used === 'number'
+                      && supervisor.supervisor.token_budget > 0
                       ? ((supervisor.supervisor.token_used / supervisor.supervisor.token_budget) * 100).toFixed(1) + '%'
-                      : '0.0%'}
+                      : '—'}
                   </strong>
                 </div>
-                <div><small>Supervisor Uptime</small><strong>{supervisor.supervisor.uptime}</strong></div>
+                <div><small>Supervisor Uptime</small><strong>{formatUptime(supervisor.supervisor.uptime)}</strong></div>
               </div>
 
               <h3>Agent Details</h3>
@@ -441,7 +448,13 @@ export default function ObservabilityPage() {
                         <td>{model.completionTokens.toLocaleString()}</td>
                         <td><strong>{(model.promptTokens + model.completionTokens).toLocaleString()}</strong></td>
                         <td className={model.cost > 0 ? styles.textDanger : styles.textMuted}>
-                          {model.cost > 0 ? `$${model.cost.toFixed(3)}` : 'Gratis'}
+                          {model.calls === 0
+                            ? '—'
+                            : model.cost > 0
+                              ? `$${model.cost.toFixed(3)}`
+                              : model.isFree
+                                ? 'Gratis'
+                                : '$0.000'}
                         </td>
                       </tr>
                     ))}

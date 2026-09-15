@@ -79,6 +79,18 @@ function formatContext(v: unknown): string {
   return `${(n / 1024).toFixed(0)}k`;
 }
 
+// Service uptime in seconds → "3h 12m 40s". Missing/invalid → em dash.
+// Never prints a raw float and never invents a value when uptime is unknown.
+function formatUptimeSeconds(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '—';
+  const n = typeof v === 'number' ? v : Number(v);
+  if (!Number.isFinite(n) || n < 0) return '—';
+  const h = Math.floor(n / 3600);
+  const m = Math.floor((n % 3600) / 60);
+  const s = Math.floor(n % 60);
+  return `${h}h ${m}m ${s}s`;
+}
+
 // Gateway errors often carry raw HTML (e.g. an upstream 404 page). Strip tags,
 // collapse whitespace, and cap the length so the UI never dumps markup.
 function shortError(raw: unknown): string {
@@ -278,7 +290,7 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
           <div className={s.kpiRow}>
             <div className={s.kpi}><span className={s.kpiValue}>{overview.mode}</span><span className={s.kpiLabel}>Mode</span></div>
             <div className={s.kpi}><span className={s.kpiValue}>{overview.status}</span><span className={s.kpiLabel}>Status</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{overview.uptime}</span><span className={s.kpiLabel}>Uptime</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{formatUptimeSeconds(overview.uptime)}</span><span className={s.kpiLabel}>Uptime</span></div>
           </div>
           <h3>Services</h3>
           <table className={s.table}>

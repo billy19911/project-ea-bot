@@ -1,6 +1,7 @@
 """FastAPI application skeleton for EA Bot Python services."""
 
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -18,6 +19,10 @@ from .trading.endpoints import router as trading_router
 from .trading.events import router as events_router
 
 logger = logging.getLogger(__name__)
+
+# Process start time, captured at import. Used to report a REAL service uptime
+# (seconds since boot) instead of a placeholder string.
+_STARTED_AT = time.time()
 
 
 @asynccontextmanager
@@ -109,6 +114,7 @@ async def health_check() -> dict:
         "status": "ok",
         "environment": settings.environment,
         "version": "0.1.0",
+        "uptime_seconds": round(time.time() - _STARTED_AT, 1),
         "trading_engine": "deterministic",
         "agents_registered": agent_registry.count(),
         "agents": agents,

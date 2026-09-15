@@ -35,9 +35,10 @@ type ModelUsage = {
   promptTokens: number; 
   completionTokens: number; 
   cost: number;
+  isFree?: boolean;
 };
 type SupervisorStatus = {
-  supervisor: { status: string; routing_policy: string; max_concurrency: number; token_budget: number; token_used: number; uptime: string };
+  supervisor: { status: string; routing_policy: string; max_concurrency: number | null; token_budget: number | null; token_used: number | null; uptime: number | null };
   agents: AgentNode[];
   models: ModelUsage[];
   errors: AgentError[];
@@ -45,6 +46,20 @@ type SupervisorStatus = {
 };
 
 type SourceState = 'live' | 'unavailable';
+
+// Real uptime (seconds) → human string; '—' for unknown. Never prints raw floats.
+function formatUptime(seconds: number | null | undefined): string {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return '—';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  return `${h}h ${m}m ${s}s`;
+}
+
+// `number | null` → locale string or '—' (no fabricated zeros).
+function formatCount(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : '—';
+}
 
 function SourceBadge({ source }: { source: SourceState | undefined }) {
   const live = source === 'live';
@@ -145,10 +160,10 @@ export default function AIControlPage() {
               <div className={styles.supervisorGrid}>
                 <div><small>Status</small><strong className={styles.statusActive}>{supervisorStatus.supervisor.status}</strong></div>
                 <div><small>Routing policy</small><strong>{supervisorStatus.supervisor.routing_policy}</strong></div>
-                <div><small>Max concurrency</small><strong>{supervisorStatus.supervisor.max_concurrency}</strong></div>
-                <div><small>Token budget</small><strong>{supervisorStatus.supervisor.token_budget}</strong></div>
-                <div><small>Token used</small><strong>{supervisorStatus.supervisor.token_used}</strong></div>
-                <div><small>Uptime</small><strong>{supervisorStatus.supervisor.uptime}</strong></div>
+                <div><small>Max concurrency</small><strong>{formatCount(supervisorStatus.supervisor.max_concurrency)}</strong></div>
+                <div><small>Token budget</small><strong>{formatCount(supervisorStatus.supervisor.token_budget)}</strong></div>
+                <div><small>Token used</small><strong>{formatCount(supervisorStatus.supervisor.token_used)}</strong></div>
+                <div><small>Uptime</small><strong>{formatUptime(supervisorStatus.supervisor.uptime)}</strong></div>
               </div>
             </section>
           ) : (
@@ -295,7 +310,13 @@ export default function AIControlPage() {
                       <td>{model.promptTokens.toLocaleString()}</td>
                       <td>{model.completionTokens.toLocaleString()}</td>
                       <td className={model.cost > 0 ? styles.costPaid : styles.costFree}>
-                        {model.cost > 0 ? `$${model.cost.toFixed(3)}` : 'Gratis'}
+                        {model.calls === 0
+                          ? '—'
+                          : model.cost > 0
+                            ? `$${model.cost.toFixed(3)}`
+                            : model.isFree
+                              ? 'Gratis'
+                              : '$0.000'}
                       </td>
                     </tr>
                   ))}
