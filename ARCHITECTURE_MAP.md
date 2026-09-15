@@ -36,6 +36,7 @@
 | EPIC 13 | Strategy Versioning & Promotion (registry, gates, activation) | `src/strategy/` | **Complete** |
 | EPIC 14 | Learning Loop (review→pattern→hypothesis→experiment→validation) | `src/learning/` | **Complete** |
 | EPIC 15 | Dashboard & Control Plane (16 halaman, 13 endpoint) | `apps/web/app/control-plane/`, `apps/api/` | **Complete** |
+| EPIC 16 | Observability (traces, domain metrics, alerts) | `src/observability/` | **Complete** |
 
 ---
 

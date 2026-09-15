@@ -59,6 +59,14 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan ve
   - Navigasi Control Plane ditambahkan ke semua halaman existing.
   - Next.js build 8/8 routes sukses; ESLint 0 errors.
 
+- **EPIC 16 ‑ Observability**:
+  - `TraceCollector` — event traces & task traces dengan span parent/child, status, durasi (16.03–16.04).
+  - `MetricsRegistry` — counter/gauge/histogram berlabel + domain recorders: risk decisions (16.08), execution (16.09), supervisor KPI (16.11), committee consensus (16.12), decision quality (16.13), no-trade outcomes (16.14), learning patterns (16.15), Telegram delivery (16.16), provider health (16.17), token usage (16.05).
+  - `AlertManager` — threshold rules (above/below), dedup saat firing, auto‑resolve, severity validation (16.10).
+  - Structured logs, HTTP latency & error rates sudah tersedia dari Phase 27 (16.01–16.02, 16.06–16.07).
+  - 31 unit tests (`test_observability.py`), 100% green.
+  - Full test suite: 783 passed.
+
 ### Planned
 - End‑to‑end integration testing.
 - Staging / production deployment hardening.
