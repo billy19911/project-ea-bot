@@ -67,6 +67,14 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan ve
   - 31 unit tests (`test_observability.py`), 100% green.
   - Full test suite: 783 passed.
 
+- **EPIC 17 ‑ Security**:
+  - `ToolPermissionRegistry` — fail‑closed tool→permission mapping dengan wildcard `*` grant, `require()` raise `ToolPermissionError` (17.06).
+  - `ProtectedAuditLog` — append‑only audit trail dengan SHA‑256 hash chain; deteksi modifikasi, penghapusan, dan reorder entry (17.07).
+  - Authentication, RBAC, secret isolation, API authorization, agent permissions, rate limiting sudah tersedia dari Phase 28‑30 + EPIC 01 (17.01–17.05, 17.08).
+  - LIVE mode protection tersedia dari `live_readiness` (17.09).
+  - 17 unit tests (`test_security.py`), 100% green.
+  - Full test suite: 800 passed.
+
 ### Planned
 - End‑to‑end integration testing.
 - Staging / production deployment hardening.
