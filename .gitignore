@@ -43,3 +43,7 @@ apps/api/.devin/
 *.pem
 *.key
 secrets/
+
+# Next.js / TS build artifacts
+*.tsbuildinfo
+apps/web/.next/
