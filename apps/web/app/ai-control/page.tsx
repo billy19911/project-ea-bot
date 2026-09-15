@@ -101,7 +101,8 @@ export default function AIControlPage() {
     };
     load();
 
-    // TODO: WebSocket connection to Python service for real-time updates
+    // Polling is not yet scheduled here; the page fetches on mount. WebSocket
+    // streaming from the Python service is a future enhancement.
   }, []);
 
   const totalTokens = models.reduce((sum, m) => sum + m.promptTokens + m.completionTokens, 0);

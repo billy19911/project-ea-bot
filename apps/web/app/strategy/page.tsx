@@ -1,8 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import styles from './page.module.css';
+import { apiFetch } from '../../lib/api';
 
+// View model: camelCase performance fields for rendering. Mapped from the
+// Node API's StrategyRecord (snake_case) in `mapStrategy`.
 type Strategy = {
   id: string;
   name: string;
@@ -18,75 +21,88 @@ type Strategy = {
   versions: { version: string; date: string; changes: string }[];
 };
 
-const mockStrategies: Strategy[] = [
-  {
-    id: 'STR-001',
-    name: 'EMA Crossover Gold',
-    version: 'v1.4',
-    active: true,
-    performance: { winRate: 57.1, profitFactor: 1.86, sharpe: 1.42, maxDD: 8.2 },
-    parameters: { ema_fast: 12, ema_slow: 26, atr_period: 14, risk_percent: 1.5 },
-    versions: [
-      { version: 'v1.4', date: '2026-09-10', changes: 'Tambah filter ATR minimum' },
-      { version: 'v1.3', date: '2026-08-28', changes: 'Optimasi exit timing' },
-      { version: 'v1.2', date: '2026-08-15', changes: 'Initial release' },
-    ],
-  },
-  {
-    id: 'STR-002',
-    name: 'Momentum London Open',
-    version: 'v2.1',
-    active: true,
-    performance: { winRate: 53.8, profitFactor: 1.54, sharpe: 1.16, maxDD: 11.4 },
-    parameters: { rsi_period: 14, rsi_threshold: 65, volume_min: 1000, spread_max: 25 },
-    versions: [
-      { version: 'v2.1', date: '2026-09-08', changes: 'Tambah filter spread' },
-      { version: 'v2.0', date: '2026-08-20', changes: 'Refactor logic entry' },
-    ],
-  },
-  {
-    id: 'STR-003',
-    name: 'Volatility Filter',
-    version: 'v0.9',
-    active: false,
-    performance: { winRate: 0, profitFactor: 0, sharpe: 0, maxDD: 0 },
-    parameters: { bb_period: 20, bb_std: 2, atr_multiplier: 1.5 },
-    versions: [
-      { version: 'v0.9', date: '2026-09-05', changes: 'Beta testing' },
-    ],
-  },
-  {
-    id: 'STR-004',
-    name: 'Structure Breakout',
-    version: 'v3.0',
-    active: false,
-    performance: { winRate: 0, profitFactor: 0, sharpe: 0, maxDD: 0 },
-    parameters: { lookback: 50, threshold: 0.002, confirmation_bars: 2 },
-    versions: [
-      { version: 'v3.0', date: '2026-09-01', changes: 'Menunggu validasi' },
-    ],
-  },
-];
+// Shape returned by GET /strategies (see apps/api/src/index.ts).
+type ApiStrategy = {
+  id: string;
+  name: string;
+  version: string;
+  active: boolean;
+  performance: { win_rate: number; profit_factor: number; sharpe: number; max_dd: number };
+  parameters: Record<string, string | number>;
+  versions: { version: string; date: string; changes: string }[];
+};
+
+function mapStrategy(record: ApiStrategy): Strategy {
+  return {
+    id: record.id,
+    name: record.name,
+    version: record.version,
+    active: record.active,
+    performance: {
+      winRate: record.performance?.win_rate ?? 0,
+      profitFactor: record.performance?.profit_factor ?? 0,
+      sharpe: record.performance?.sharpe ?? 0,
+      maxDD: record.performance?.max_dd ?? 0,
+    },
+    parameters: record.parameters ?? {},
+    versions: Array.isArray(record.versions) ? record.versions : [],
+  };
+}
 
 export default function StrategyCenterPage() {
-  const [strategies, setStrategies] = useState<Strategy[]>(mockStrategies);
+  const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const selected = selectedId ? strategies.find((s) => s.id === selectedId) : null;
 
-  const toggleActive = (id: string) => {
-    setStrategies((items) =>
-      items.map((item) =>
-        item.id === id ? { ...item, active: !item.active } : item
-      )
-    );
+  const loadStrategies = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await apiFetch('/strategies');
+      if (!res.ok) {
+        throw new Error(`Gagal memuat strategi (HTTP ${res.status})`);
+      }
+      const data = await res.json();
+      const records: ApiStrategy[] = Array.isArray(data.strategies) ? data.strategies : [];
+      setStrategies(records.map(mapStrategy));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal memuat strategi dari API.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadStrategies();
+  }, [loadStrategies]);
+
+  const toggleActive = async (id: string) => {
     const strat = strategies.find((s) => s.id === id);
-    const newState = !strat?.active;
-    setNotice(
-      `Strategi ${strat?.name} ${newState ? 'diaktifkan' : 'dinonaktifkan'}`
-    );
-    setTimeout(() => setNotice(''), 2500);
+    if (!strat) return;
+    try {
+      const res = await apiFetch(`/strategies/${id}/active`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !strat.active }),
+      });
+      if (!res.ok) {
+        throw new Error(`Gagal mengubah status (HTTP ${res.status})`);
+      }
+      const data = await res.json();
+      const updated = mapStrategy(data.strategy as ApiStrategy);
+      // Update from the server response, not optimistically.
+      setStrategies((items) => items.map((item) => (item.id === id ? updated : item)));
+      setNotice(data.message || `Strategi ${updated.name} diperbarui`);
+      setTimeout(() => setNotice(''), 2500);
+    } catch (err) {
+      // Do NOT flip UI state on failure.
+      setError(err instanceof Error ? err.message : 'Gagal mengubah status strategi.');
+      setTimeout(() => setError(''), 4000);
+    }
   };
 
   return (
@@ -124,11 +140,24 @@ export default function StrategyCenterPage() {
         </header>
 
         {notice && <div className={styles.notice}>{notice}</div>}
+        {error && (
+          <div className={styles.errorCard}>
+            <span>{error}</span>
+            <button className={styles.retryBtn} onClick={loadStrategies}>Coba lagi</button>
+          </div>
+        )}
 
         <div className={styles.pageBody}>
           {/* Strategies List */}
           <section className={styles.card}>
             <h2>Daftar strategi</h2>
+            {loading ? (
+              <div className={styles.empty}>Memuat…</div>
+            ) : error && strategies.length === 0 ? (
+              <div className={styles.empty}>Data strategi tidak tersedia.</div>
+            ) : strategies.length === 0 ? (
+              <div className={styles.empty}>Belum ada strategi terdaftar.</div>
+            ) : (
             <div className={styles.tableWrapper}>
               <table className={styles.table}>
                 <thead>
@@ -173,10 +202,11 @@ export default function StrategyCenterPage() {
                       </td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                 </tbody>
+               </table>
+             </div>
+            )}
+           </section>
 
           {/* Detail Panel */}
           {selected && (

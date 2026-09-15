@@ -14,8 +14,6 @@ on:
 env:
   PYTHON_VERSION: "3.11"
   NODE_VERSION: "20"
-  POSTGRES_VERSION: "15"
-  REDIS_VERSION: "7"
 
 jobs:
   # ==========================================
@@ -58,25 +56,15 @@ jobs:
       #   If 'node' is unavailable, frontend lint will fail.
       # ---------------------------------------------------------
       - name: Install frontend dependencies
-        run: |
-          cd apps/web
-          npm ci
+        run: npm ci --legacy-peer-deps
 
-      # ---------------------------------------------------------
-      # ⚠ WARNING: Requires Node.js binary.
-      #   'npm run lint' executes linting scripts via Node.js.
-      # ---------------------------------------------------------
       - name: Run frontend lint
-        run: |
-          cd apps/web
-          npm run lint
-        # If Node.js is not available, this will fail.
-        # Consider guarding with: if: always() and check output.
+        run: npm run lint --workspace=project-ea-bot-web
 
       - name: Run backend lint
         run: |
-          # Ganti dengan tool linting backend yang sesuai (mis. ruff, flake8, pylint)
-          python -m flake8 services/python/
+          python -m pip install flake8
+          python -m flake8 services/python/ --max-line-length=100 --extend-ignore=E203,W503
 
   # ==========================================
   # TYPE CHECKING
@@ -116,7 +104,7 @@ jobs:
     services:
       # PostgreSQL service container
       postgres:
-        image: postgres:${{ env.POSTGRES_VERSION }}
+        image: postgres:15
         env:
           POSTGRES_USER: ea_bot_user
           POSTGRES_PASSWORD: test_password
@@ -131,7 +119,7 @@ jobs:
 
       # Redis service container
       redis:
-        image: redis:${{ env.REDIS_VERSION }}-alpine
+        image: redis:7-alpine
         ports:
           - 6379:6379
 
@@ -157,43 +145,32 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r services/python/requirements.txt
-          pip install pytest pytest-django pytest-cov
+          pip install pytest pytest-cov
 
-      # ---------------------------------------------------------
-      # ⚠ WARNING: Requires Node.js binary.
-      #   Frontend tests need 'node' to run test runners (Jest/Vitest).
-      #   If not available, frontend test will fail.
-      # ---------------------------------------------------------
       - name: Install frontend dependencies
-        run: |
-          cd apps/web
-          npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Run backend tests
         env:
-          DATABASE_URL: postgresql://ea_bot_user:***@localhost:5432/ea_bot_test
+          DATABASE_URL: postgresql://ea_bot_user:test_password@localhost:5432/ea_bot_test
           REDIS_URL: redis://localhost:6379/0
           SECRET_KEY: test-secret-key-for-ci
         run: |
-          # Ganti dengan perintah test backend yang sesuai
-          python -m pytest services/python/tests/ -v --cov=services/python --cov-report=xml
+          cd services/python
+          python -m pytest tests/ -v
 
-      # ---------------------------------------------------------
-      # ⚠ WARNING: Requires Node.js binary.
-      #   Frontend test runner (Jest/Vitest) requires 'node'.
-      # ---------------------------------------------------------
-      - name: Run frontend tests
+      - name: Run Node API tests
+        run: npm test --workspace=project-ea-bot-api
+
+      - name: Lint frontend
         run: |
           cd apps/web
-          npm test -- --coverage
-        # Hanya akan berhasil jika Node.js binary tersedia di runner.
+          npm run lint
 
-      - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./coverage.xml
-          flags: unittests
-          fail_ci_if_error: false
+      - name: Type-check frontend
+        run: |
+          cd apps/web
+          npx tsc --noEmit
 
   # ==========================================
   # BUILD
@@ -228,19 +205,12 @@ jobs:
           pip install -r services/python/requirements.txt
 
       - name: Install frontend dependencies
-        run: |
-          cd apps/web
-          npm ci
+        run: npm ci --legacy-peer-deps
 
-      # ---------------------------------------------------------
-      # ⚠ WARNING: 'npm run build' requires Node.js binary.
-      #   Build script chains (Babel, TypeScript, Webpack) all need 'node'.
-      # ---------------------------------------------------------
       - name: Build frontend
         run: |
           cd apps/web
           npm run build
-        # Gagal jika Node.js tidak tersedia.
 
       - name: Collect backend static files
         run: |
@@ -253,7 +223,7 @@ jobs:
         with:
           name: build-artifacts
           path: |
-            apps/web/dist/
+            apps/web/.next/
             services/python/static/
           retention-days: 7
 
@@ -279,31 +249,19 @@ jobs:
 
       - name: Run Python dependency audit
         run: |
-          pip install pip-audit
-          pip-audit
+          python -m pip install pip-audit
+          pip-audit -r services/python/requirements.txt
 
-      # ---------------------------------------------------------
-      # ⚠ WARNING: Requires Node.js binary.
-      #   'npm audit' uses Node.js to parse package-lock.json.
-      # ---------------------------------------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Install frontend dependencies
-        run: |
-          cd apps/web
-          npm ci
+        run: npm ci --legacy-peer-deps
 
-      # ---------------------------------------------------------
-      # ⚠ WARNING: 'npm audit' requires Node.js binary.
-      # ---------------------------------------------------------
       - name: Run frontend dependency audit
-        run: |
-          cd apps/web
-          npm audit --audit-level=high
-        # Gagal jika Node.js tidak tersedia.
+        run: npm audit --audit-level=high
 
   # ==========================================
   # DEPLOY (Blueprint — belum diaktifkan)
