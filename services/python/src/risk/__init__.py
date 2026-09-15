@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 from .base import RiskLevel, RiskMetrics, RiskThreshold
+from .circuit_breaker import CircuitBreaker
 from .engine import RiskEngine
 from .gate import GateDecision, RiskGate
+from .kill_switch import KillSwitch
 from .money_management import MoneyManager, PositionSizeResult
 
 __all__ = [
@@ -17,4 +19,6 @@ __all__ = [
     "RiskLevel",
     "RiskMetrics",
     "RiskThreshold",
+    "KillSwitch",
+    "CircuitBreaker",
 ]
