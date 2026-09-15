@@ -75,6 +75,9 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan ve
   - 17 unit tests (`test_security.py`), 100% green.
   - Full test suite: 800 passed.
 
+- **EPIC 18 ‑ Testing & Failure Simulation**:
+  - `test_failure_simulation.py` — 13 skenario kegagalan: isolasi agent gagal/timeout, pemulihan transient, duplikat order, circuit breaker→kill switch, reconciliation mismatch→block, chaos storm (18.03–18.04, 18.07, 18.09–18.10, 18.14).
+
 ### Planned
 - End‑to‑end integration testing.
 - Staging / production deployment hardening.
