@@ -28,8 +28,8 @@ interface MetricsSummary {
 
 interface SupervisorStatus {
   supervisor: { status: string; routing_policy: string; max_concurrency: number; token_budget: number; token_used: number; uptime: string };
-  agents: { name: string; type: string; status: string; priority: number; last_active: string; error_count: number }[];
-  models: { model: string; provider: string; calls: number; prompt_tokens: number; completion_tokens: number; cost: number }[];
+  agents: { name: string; type: string; status: string; priority: number; errorCount: number }[];
+  models: { model: string; provider: string; calls: number; promptTokens: number; completionTokens: number; cost: number }[];
   errors: { id: string; timestamp: string; agent: string; message: string; severity: string }[];
 }
 
@@ -113,7 +113,7 @@ export default function ObservabilityPage() {
     : 0;
 
   const totalTokens = supervisor
-    ? supervisor.models.reduce((sum, m) => sum + m.prompt_tokens + m.completion_tokens, 0)
+    ? supervisor.models.reduce((sum, m) => sum + m.promptTokens + m.completionTokens, 0)
     : 0;
 
   const totalCost = supervisor
@@ -269,8 +269,8 @@ export default function ObservabilityPage() {
                         <div className={styles.agentMeta}>
                           <span>Type: {agent.type}</span>
                           <span>Priority: {agent.priority}</span>
-                          {agent.error_count > 0 && (
-                            <span className={styles.textDanger}>{agent.error_count} errors</span>
+                          {agent.errorCount > 0 && (
+                            <span className={styles.textDanger}>{agent.errorCount} errors</span>
                           )}
                         </div>
                       </div>
@@ -361,7 +361,9 @@ export default function ObservabilityPage() {
                 <div><small>Token Used</small><strong>{supervisor.supervisor.token_used.toLocaleString()}</strong></div>
                 <div><small>Budget Usage</small>
                   <strong>
-                    {((supervisor.supervisor.token_used / supervisor.supervisor.token_budget) * 100).toFixed(1)}%
+                    {supervisor.supervisor.token_budget > 0
+                      ? ((supervisor.supervisor.token_used / supervisor.supervisor.token_budget) * 100).toFixed(1) + '%'
+                      : '0.0%'}
                   </strong>
                 </div>
                 <div><small>Supervisor Uptime</small><strong>{supervisor.supervisor.uptime}</strong></div>
@@ -376,7 +378,6 @@ export default function ObservabilityPage() {
                       <th>Type</th>
                       <th>Status</th>
                       <th>Priority</th>
-                      <th>Last Active</th>
                       <th>Errors</th>
                     </tr>
                   </thead>
@@ -391,9 +392,8 @@ export default function ObservabilityPage() {
                           </span>
                         </td>
                         <td>{agent.priority}</td>
-                        <td>{agent.last_active}</td>
-                        <td className={agent.error_count > 0 ? styles.textDanger : ''}>
-                          {agent.error_count}
+                        <td className={agent.errorCount > 0 ? styles.textDanger : ''}>
+                          {agent.errorCount}
                         </td>
                       </tr>
                     ))}
@@ -437,9 +437,9 @@ export default function ObservabilityPage() {
                         <td><strong>{model.model}</strong></td>
                         <td>{model.provider}</td>
                         <td>{model.calls}</td>
-                        <td>{model.prompt_tokens.toLocaleString()}</td>
-                        <td>{model.completion_tokens.toLocaleString()}</td>
-                        <td><strong>{(model.prompt_tokens + model.completion_tokens).toLocaleString()}</strong></td>
+                        <td>{model.promptTokens.toLocaleString()}</td>
+                        <td>{model.completionTokens.toLocaleString()}</td>
+                        <td><strong>{(model.promptTokens + model.completionTokens).toLocaleString()}</strong></td>
                         <td className={model.cost > 0 ? styles.textDanger : styles.textMuted}>
                           {model.cost > 0 ? `$${model.cost.toFixed(3)}` : 'Gratis'}
                         </td>

@@ -649,24 +649,45 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
 
   if (tab === 'models') {
     if (!models) return <div className={s.empty}>Tidak ada data model.</div>;
+    const registryState = models.health?.state ?? 'UNKNOWN';
     return (
       <section className={s.card}>
         <h2>Model Discovery & Registry</h2>
-        <table className={s.table}>
-          <thead><tr><th>Model</th><th>Provider</th><th>Context</th><th>Role</th><th>Status</th></tr></thead>
-          <tbody>
-            {models.models?.map((m: any) => (
-              <tr key={m.id}>
-                <td className={s.mono}>{m.id}</td>
-                <td>{m.provider}</td>
-                <td>{(m.context / 1000).toFixed(0)}k</td>
-                <td>{m.role}</td>
-                <td><span className={`${s.badge} ${badgeClass(m.status.toUpperCase(), s)}`}>{m.status}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className={s.mono} style={{ marginTop: 10 }}>Last discovery: {models.last_discovery}</div>
+        <div className={s.kpiRow} style={{ marginBottom: 12 }}>
+          <div className={s.kpi}>
+            <span className={s.kpiValue}>
+              <span className={`${s.badge} ${badgeClass(String(registryState), s)}`}>{registryState}</span>
+            </span>
+            <span className={s.kpiLabel}>Registry state</span>
+          </div>
+          <div className={s.kpi}>
+            <span className={s.kpiValue}>{models.source ?? models.health?.source ?? '—'}</span>
+            <span className={s.kpiLabel}>Source</span>
+          </div>
+          <div className={s.kpi}>
+            <span className={s.kpiValue}>{models.health?.last_discovery ?? '—'}</span>
+            <span className={s.kpiLabel}>Last discovery</span>
+          </div>
+        </div>
+        {models.health?.error && (
+          <div className={s.mono} style={{ marginBottom: 12 }}>Health error: {models.health.error}</div>
+        )}
+        <div className={s.tableWrapper}>
+          <table className={s.table}>
+            <thead><tr><th>Model</th><th>Provider</th><th>Context</th><th>Free/Paid</th><th>Capabilities</th></tr></thead>
+            <tbody>
+              {models.models?.map((m: any) => (
+                <tr key={m.id}>
+                  <td className={s.mono}>{m.id}</td>
+                  <td>{m.provider}</td>
+                  <td>{(m.context / 1000).toFixed(0)}k</td>
+                  <td>{m.is_free ? 'Free' : 'Paid'}</td>
+                  <td>{m.capabilities?.join(', ') ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
     );
   }
