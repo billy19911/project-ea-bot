@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, Optional
+
+import httpx
 
 from src.llm.base import ModelInfo
 
@@ -199,8 +202,21 @@ class ModelRegistry:
         return self.list_models()
 
     def _fetch_gateway_models(self, client: Any) -> list[Any]:
-        """Return the raw model entries from the gateway client."""
+        """Return the raw model entries from the gateway.
+
+        When no ``client`` is supplied we fetch the raw ``GET /models`` JSON
+        directly via :mod:`httpx`. The OpenAI SDK's ``models.list()`` drops
+        gateway-specific fields (``context_length``, ``capabilities``,
+        ``owned_by``) that this registry relies on for fidelity, so raw JSON
+        is strongly preferred. If the raw request fails we transparently fall
+        back to the SDK path.
+        """
         if client is None:
+            try:
+                return self._fetch_gateway_models_raw()
+            except Exception as exc:  # noqa: BLE001 - fall back to the SDK
+                logger.debug("Raw gateway fetch failed, falling back to SDK: %s", exc)
+
             # Imported lazily to avoid a circular import at module load time.
             from src.llm.nine_router import NineRouterClient
 
@@ -211,6 +227,24 @@ class ModelRegistry:
         if hasattr(response, "data"):
             return list(response.data)
         return list(response)
+
+    @staticmethod
+    def _fetch_gateway_models_raw() -> list[dict[str, Any]]:
+        """Fetch ``GET /models`` JSON verbatim, preserving every field."""
+        from src.llm.nine_router import NineRouterClient
+
+        router = NineRouterClient()
+        base = router.base_url.rstrip("/")
+        api_key = router.api_key
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+        response = httpx.get(f"{base}/models", headers=headers, timeout=5.0)
+        response.raise_for_status()
+        payload = response.json()
+        data = payload["data"] if isinstance(payload, dict) else payload
+        if not isinstance(data, list):
+            raise TypeError("Gateway /models payload is not a list")
+        return list(data)
 
     def _normalize_model(self, entry: Any) -> Optional[ModelInfo]:
         """Normalize a single gateway model entry into a :class:`ModelInfo`."""
@@ -223,19 +257,39 @@ class ModelRegistry:
 
         return ModelInfo(
             name=name,
-            provider=self._parse_provider(name),
-            is_free=":free" in name,
+            provider=self._parse_provider(name, entry),
+            is_free=self._is_free(name),
             context_window=self._extract_context_window(entry),
             cost_per_prompt_token=0.0,
             cost_per_completion_token=0.0,
             capabilities=self._extract_capabilities(entry),
         )
 
+    # Matches ``free`` only as a discrete token (e.g. ``-free``, ``/free``,
+    # ``:free``, ``_free``) — never a bare suffix like ``...flashfree``.
+    _FREE_RE = re.compile(r"(^|[-_/:])free($|[-_/:])", re.IGNORECASE)
+
+    @classmethod
+    def _is_free(cls, name: str) -> bool:
+        """True when ``free`` appears as a case-insensitive token in the id."""
+        return bool(cls._FREE_RE.search(name))
+
     @staticmethod
-    def _parse_provider(name: str) -> str:
-        """Parse the provider from a model name prefix (``provider/model``)."""
+    def _parse_provider(name: str, entry: Any = None) -> str:
+        """Parse the provider from ``provider/model`` or the entry's ``owned_by``."""
         if "/" in name:
             return name.split("/", 1)[0]
+
+        owned_by: Any = None
+        if isinstance(entry, dict):
+            owned_by = entry.get("owned_by")
+        if owned_by is None and entry is not None:
+            owned_by = getattr(entry, "owned_by", None)
+
+        if isinstance(owned_by, str):
+            owned_by = owned_by.strip()
+            if owned_by and owned_by.lower() != "unknown":
+                return owned_by
         return "unknown"
 
     @staticmethod
@@ -257,10 +311,18 @@ class ModelRegistry:
 
     @staticmethod
     def _extract_capabilities(entry: Any) -> list[str]:
-        """Derive capabilities from any capability data the gateway exposes."""
+        """Derive capabilities from any capability data the gateway exposes.
+
+        The gateway reports capabilities as a ``{name: bool}`` mapping; only
+        enabled entries are surfaced. Lists/tuples/sets are passed through.
+        """
         raw = getattr(entry, "capabilities", None)
         if raw is None and isinstance(entry, dict):
             raw = entry.get("capabilities")
+
+        if isinstance(raw, dict):
+            caps = [str(k) for k, v in raw.items() if v is True]
+            return caps or ["chat"]
         if isinstance(raw, (list, tuple, set)):
             caps = [str(c) for c in raw]
             return caps or ["chat"]

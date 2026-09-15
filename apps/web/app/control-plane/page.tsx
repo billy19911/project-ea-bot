@@ -59,6 +59,26 @@ function badgeClass(status: string, s: Record<string, string>): string {
   return s.muted;
 }
 
+// Epoch seconds (e.g. 1789511131.4758043) → localized string. Anything that is
+// missing, non-finite, or unparseable renders as an em dash — never a raw float
+// and never the literal "Invalid Date".
+function formatDiscoveryTime(ts: unknown): string {
+  if (ts === null || ts === undefined || ts === '') return '—';
+  const n = typeof ts === 'number' ? ts : Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  const d = new Date(n * 1000);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString();
+}
+
+// Context window (tokens) → humanized "1.0M" / "128k". Invalid → em dash.
+function formatContext(v: unknown): string {
+  const n = typeof v === 'number' ? v : Number(v);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  if (n >= 1048576) return `${(n / 1048576).toFixed(1)}M`;
+  return `${(n / 1024).toFixed(0)}k`;
+}
+
 // Gateway errors often carry raw HTML (e.g. an upstream 404 page). Strip tags,
 // collapse whitespace, and cap the length so the UI never dumps markup.
 function shortError(raw: unknown): string {
@@ -672,7 +692,7 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
             <span className={s.kpiLabel}>Registry source</span>
           </div>
           <div className={s.kpi}>
-            <span className={s.kpiValue}>{models.health?.last_discovery ?? '—'}</span>
+            <span className={s.kpiValue}>{formatDiscoveryTime(models.health?.last_discovery)}</span>
             <span className={s.kpiLabel}>Last discovery</span>
           </div>
         </div>
@@ -689,7 +709,7 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
                 <tr key={m.id}>
                   <td className={s.mono}>{m.id}</td>
                   <td>{m.provider}</td>
-                  <td>{(m.context / 1000).toFixed(0)}k</td>
+                  <td>{formatContext(m.context)}</td>
                   <td>{m.is_free ? 'Free' : 'Paid'}</td>
                   <td>{m.capabilities?.join(', ') ?? '—'}</td>
                 </tr>

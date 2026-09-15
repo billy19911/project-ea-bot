@@ -239,3 +239,122 @@ def test_empty_gateway_response_is_treated_as_failure() -> None:
     # Still serving the earlier discovered models, flagged DEGRADED.
     assert registry.get("openai/gpt-4o-mini") is not None
     assert registry.health()["state"] == STATE_DEGRADED
+
+
+# ---------------------------------------------------------------------------
+# Raw HTTP fidelity (httpx fallback path) — Run 17
+# ---------------------------------------------------------------------------
+class _FakeHTTPResponse:
+    """Minimal ``httpx.Response`` double exposing ``.json()``."""
+
+    def __init__(self, payload: Any, *, error: Exception | None = None) -> None:
+        self._payload = payload
+        self._error = error
+
+    def json(self) -> Any:
+        if self._error is not None:
+            raise self._error
+        return self._payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+def _patch_httpx_get(monkeypatch: Any, responder: Any) -> list[dict[str, Any]]:
+    """Patch ``src.llm.registry.httpx.get`` and record the calls made."""
+    calls: list[dict[str, Any]] = []
+
+    def _fake_get(url: str, **kwargs: Any) -> Any:
+        calls.append({"url": url, **kwargs})
+        return responder(url, **kwargs)
+
+    monkeypatch.setattr("src.llm.registry.httpx.get", _fake_get)
+    return calls
+
+
+def test_gateway_raw_json_preserves_context_and_capabilities(monkeypatch: Any) -> None:
+    """Raw gateway JSON keeps context_length and the dict capabilities."""
+    payload = {
+        "data": [
+            {
+                "id": "gc/gemini-3.1-pro-preview",
+                "owned_by": "gc",
+                "context_length": 1048576,
+                "capabilities": {
+                    "vision": True,
+                    "pdf": False,
+                    "tools": True,
+                    "contextWindow": 1048576,
+                },
+            }
+        ]
+    }
+    _patch_httpx_get(monkeypatch, lambda url, **kw: _FakeHTTPResponse(payload))
+
+    registry = ModelRegistry()
+    registry.discover_from_gateway(client=None, force=True)
+
+    model = registry.get("gc/gemini-3.1-pro-preview")
+    assert model is not None
+    assert model.context_window == 1048576
+    assert "vision" in model.capabilities
+    assert "tools" in model.capabilities
+    assert "contextWindow" not in model.capabilities
+    assert "pdf" not in model.capabilities
+
+
+def test_gateway_raw_json_uses_owned_by_as_provider(monkeypatch: Any) -> None:
+    """A model without a ``provider/`` prefix uses ``owned_by`` for the provider."""
+    payload = {"data": [{"id": "OpenCodeCombo", "owned_by": "combo"}]}
+    _patch_httpx_get(monkeypatch, lambda url, **kw: _FakeHTTPResponse(payload))
+
+    registry = ModelRegistry()
+    registry.discover_from_gateway(client=None, force=True)
+
+    assert registry.get("OpenCodeCombo").provider == "combo"
+
+
+def test_gateway_raw_json_honest_free_detection(monkeypatch: Any) -> None:
+    """``free`` is detected as a token (``-free``, ``/free``, ``:free``)."""
+    payload = {
+        "data": [
+            {"id": "opencode-free"},
+            {"id": "kc/kilo-auto/free"},
+            {"id": "th-harbor/deepseek-v4-flash:free"},
+            {"id": "gc/gemini-2.5-pro"},
+        ]
+    }
+    _patch_httpx_get(monkeypatch, lambda url, **kw: _FakeHTTPResponse(payload))
+
+    registry = ModelRegistry()
+    registry.discover_from_gateway(client=None, force=True)
+
+    assert registry.get("opencode-free").is_free is True
+    assert registry.get("kc/kilo-auto/free").is_free is True
+    assert registry.get("th-harbor/deepseek-v4-flash:free").is_free is True
+    assert registry.get("gc/gemini-2.5-pro").is_free is False
+
+
+def test_ambiguous_free_suffix_without_separator_is_not_free() -> None:
+    """A trailing ``free`` with no separator is ambiguous and stays paid."""
+    registry = ModelRegistry()
+    registry.discover_from_gateway(
+        client=StubGatewayClient([_StubModel("codebuddy-deepseekv4.1flashfree")]),
+    )
+    assert registry.get("codebuddy-deepseekv4.1flashfree").is_free is False
+
+
+def test_httpx_failure_falls_back_without_raising(monkeypatch: Any) -> None:
+    """When raw httpx fails the discovery is fail-safe (cached/defaults, no raise)."""
+
+    def _boom(url: str, **kwargs: Any) -> Any:
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr("src.llm.registry.httpx.get", _boom)
+
+    registry = ModelRegistry()
+    models = registry.discover_from_gateway(client=None, force=True)
+
+    # Defaults remain served and nothing raised.
+    assert len(models) >= 6
+    assert registry.health()["state"] == STATE_DISCONNECTED
