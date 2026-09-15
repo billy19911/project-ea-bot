@@ -34,8 +34,23 @@ Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan ve
   - Validation, experiment creation, metric aggregation, comparative analysis.
   - 17 unit tests (`test_research_engine.py`), 100% green.
 
-- **EPIC 13 ‑ Strategy Versioning & Promotion** (planned):
-  - Strategy registry, version schema, promotion gates, activation/deactivation, retirement, live‑parameter protection.
+- **EPIC 13 ‑ Strategy Versioning & Promotion**:
+  - `StrategyRegistry` — register, get, list, activate, retire strategies (13.01).
+  - `VersionedStrategy` — version schema dengan name, version, parameters, status (13.02).
+  - `PromotionGate` — enforce DRAFT → TESTING → ACTIVE → RETIRED transitions (13.03).
+  - `ReadOnlyDict` — live‑parameter protection saat status ACTIVE (13.06).
+  - Hanya satu versi ACTIVE per strategy name (13.04); retirement bersih (13.05).
+  - 27 unit tests (`test_strategy_registry.py`), 100% green.
+
+- **EPIC 14 ‑ Learning Loop**:
+  - `LearningLoop` — review → pattern → hypothesis → experiment → candidate → validation → approval (14.01–14.07).
+  - `PerformanceTracker` — performance‑by‑time, session, regime, setup dengan minimum sample‑size safeguards (14.08–14.10).
+  - Supervisor KPI learning: win rate, profit factor, expectancy, max drawdown, false signals (14.11).
+  - `compare_candidates` — current vs candidate comparison dengan konsisten metrics (14.12).
+  - `LearningMemory` — validated lessons disimpan terpisah dari raw trade history (14.13).
+  - Tidak ada automatic live mutation (14.14).
+  - 21 unit tests (`test_learning_loop.py`), 100% green.
+  - Full test suite: 752 passed.
 
 ### Planned
 - End‑to‑end integration testing.

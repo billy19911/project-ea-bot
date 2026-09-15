@@ -32,7 +32,9 @@
 | EPIC 08 | Execution Engine (OrderBuilder, RecoveryEngine) | `src/execution/` | **Complete** |
 | EPIC 09 | Position Monitoring (lifecycle, trailing, abnormal detection) | `src/monitoring/` | **Complete** |
 | EPIC 11 | Advanced Trade Review (root-cause, patterns, journal) | `src/review/` | **Complete** |
-| EPIC 12 | Research Engine (hypothesis, experiments, backtest) | `src/research/` | **Complete** |
+| EPIC 12 | Research Engine (hypotheses, experiments, backtests) | `src/research/` | **Complete** |
+| EPIC 13 | Strategy Versioning & Promotion (registry, gates, activation) | `src/strategy/` | **Complete** |
+| EPIC 14 | Learning Loop (review→pattern→hypothesis→experiment→validation) | `src/learning/` | **Complete** |
 
 ---
 
