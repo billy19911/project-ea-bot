@@ -661,8 +661,8 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
             <span className={s.kpiLabel}>Registry state</span>
           </div>
           <div className={s.kpi}>
-            <span className={s.kpiValue}>{models.source ?? models.health?.source ?? '—'}</span>
-            <span className={s.kpiLabel}>Source</span>
+            <span className={s.kpiValue}>{models.health?.source ?? models.source ?? '—'}</span>
+            <span className={s.kpiLabel}>Registry source</span>
           </div>
           <div className={s.kpi}>
             <span className={s.kpiValue}>{models.health?.last_discovery ?? '—'}</span>
@@ -670,7 +670,10 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
           </div>
         </div>
         {models.health?.error && (
-          <div className={s.mono} style={{ marginBottom: 12 }}>Health error: {models.health.error}</div>
+          <div className={s.mono} style={{ marginBottom: 12 }}>
+            Health error: {String(models.health.error).split('\n')[0].slice(0, 180)}
+            {String(models.health.error).length > 180 ? '…' : ''}
+          </div>
         )}
         <div className={s.tableWrapper}>
           <table className={s.table}>
