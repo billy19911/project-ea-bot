@@ -396,8 +396,13 @@ app.get('/ai-control/reasoning', async (req, res) => {
   });
 });
 
-// Strategy Center — list, detail, activate/deactivate
-interface StrategyRecord {
+// Strategy Center — list, detail, activate/deactivate.
+//
+// These routes proxy the REAL StrategyRegistry exposed by the Python service
+// (EPIC 13). The previous hard-coded `strategiesDB` seed data has been removed;
+// when Python is unreachable we return 503 `source: "unavailable"` and never
+// fabricate rows.
+interface MappedStrategy {
   id: string;
   name: string;
   version: string;
@@ -407,36 +412,93 @@ interface StrategyRecord {
   versions: { version: string; date: string; changes: string }[];
 }
 
-const strategiesDB: StrategyRecord[] = [
-  { id: 'STR-001', name: 'EMA Crossover Gold', version: 'v1.4', active: true, performance: { win_rate: 57.1, profit_factor: 1.86, sharpe: 1.42, max_dd: 8.2 }, parameters: { ema_fast: 12, ema_slow: 26, atr_period: 14, risk_percent: 1.5 }, versions: [{ version: 'v1.4', date: '2026-09-10', changes: 'Tambah filter ATR minimum' }, { version: 'v1.3', date: '2026-08-28', changes: 'Optimasi exit timing' }, { version: 'v1.2', date: '2026-08-15', changes: 'Initial release' }] },
-  { id: 'STR-002', name: 'Momentum London Open', version: 'v2.1', active: true, performance: { win_rate: 53.8, profit_factor: 1.54, sharpe: 1.16, max_dd: 11.4 }, parameters: { rsi_period: 14, rsi_threshold: 65, volume_min: 1000, spread_max: 25 }, versions: [{ version: 'v2.1', date: '2026-09-08', changes: 'Tambah filter spread' }, { version: 'v2.0', date: '2026-08-20', changes: 'Refactor logic entry' }] },
-  { id: 'STR-003', name: 'Volatility Filter', version: 'v0.9', active: false, performance: { win_rate: 0, profit_factor: 0, sharpe: 0, max_dd: 0 }, parameters: { bb_period: 20, bb_std: 2, atr_multiplier: 1.5 }, versions: [{ version: 'v0.9', date: '2026-09-05', changes: 'Beta testing' }] },
-  { id: 'STR-004', name: 'Structure Breakout', version: 'v3.0', active: false, performance: { win_rate: 0, profit_factor: 0, sharpe: 0, max_dd: 0 }, parameters: { lookback: 50, threshold: 0.002, confirmation_bars: 2 }, versions: [{ version: 'v3.0', date: '2026-09-01', changes: 'Menunggu validasi' }] },
-];
+/**
+ * Map a Python `VersionedStrategy.to_dict()` record to the shape the web page
+ * already consumes. `versions` defaults to just this record; the list handler
+ * overrides it with every sibling version of the same strategy name.
+ */
+function mapStrategyRecord(py: any): MappedStrategy {
+  const metrics = py?.metrics_summary ?? {};
+  return {
+    id: py?.strategy_id,
+    name: py?.name,
+    version: py?.version,
+    active: py?.status === 'ACTIVE',
+    performance: {
+      win_rate: metrics.win_rate ?? 0,
+      profit_factor: metrics.profit_factor ?? 0,
+      sharpe: metrics.sharpe_ratio ?? 0,
+      max_dd: metrics.max_drawdown ?? 0,
+    },
+    parameters: py?.parameters ?? {},
+    versions: [
+      { version: py?.version, date: py?.created_at, changes: py?.description ?? '' },
+    ],
+  };
+}
 
-app.get('/strategies', (req, res) => {
+/** Build the per-name version history the strategy detail page renders. */
+function buildVersionHistory(records: any[]): Map<string, MappedStrategy['versions']> {
+  const byName = new Map<string, MappedStrategy['versions']>();
+  for (const record of records) {
+    const entry = { version: record?.version, date: record?.created_at, changes: record?.description ?? '' };
+    const list = byName.get(record?.name) ?? [];
+    list.push(entry);
+    byName.set(record?.name, list);
+  }
+  return byName;
+}
+
+app.get('/strategies', async (req, res) => {
   const log = (req as any).log;
   log.info('strategies.list');
-  res.json({ strategies: strategiesDB });
+  const result = await getJson<any>('/strategies', undefined, headersForTrace(req));
+  if (!result.ok) {
+    res.status(503).json({ error: 'python_service_unavailable', source: 'unavailable' });
+    return;
+  }
+  const records: any[] = Array.isArray(result.data?.strategies) ? result.data.strategies : [];
+  const versionHistory = buildVersionHistory(records);
+  const strategies = records.map((record: any) => ({
+    ...mapStrategyRecord(record),
+    versions: versionHistory.get(record?.name) ?? mapStrategyRecord(record).versions,
+  }));
+  res.json({ strategies, source: 'live' });
 });
 
-app.get('/strategies/:id', (req, res) => {
-  const strat = strategiesDB.find((s) => s.id === req.params.id);
-  if (!strat) { res.status(404).json({ error: 'Strategy not found' }); return; }
+app.get('/strategies/:id', async (req, res) => {
   const log = (req as any).log;
-  log.info({ strategyId: strat.id }, 'strategies.detail');
-  res.json({ strategy: strat });
+  log.info({ strategyId: req.params.id }, 'strategies.detail');
+  const result = await getJson<any>(`/strategies/${req.params.id}`, undefined, headersForTrace(req));
+  if (!result.ok) {
+    res.status(503).json({ error: 'python_service_unavailable', source: 'unavailable' });
+    return;
+  }
+  res.json({ strategy: mapStrategyRecord(result.data?.strategy ?? {}), source: 'live' });
 });
 
-app.patch('/strategies/:id/active', (req, res) => {
-  const strat = strategiesDB.find((s) => s.id === req.params.id);
-  if (!strat) { res.status(404).json({ error: 'Strategy not found' }); return; }
+app.patch('/strategies/:id/active', async (req, res) => {
+  const log = (req as any).log;
   const active = req.body?.active;
-  if (typeof active !== 'boolean') { res.status(400).json({ error: 'active must be boolean' }); return; }
-  strat.active = active;
-  const log = (req as any).log;
-  log.info({ strategyId: strat.id, active: strat.active }, 'strategies.toggle');
-  res.json({ strategy: strat, message: `Strategi ${strat.name} ${active ? 'diaktifkan' : 'dinonaktifkan'}` });
+  if (typeof active !== 'boolean') {
+    res.status(400).json({ error: 'active must be boolean' });
+    return;
+  }
+  log.info({ strategyId: req.params.id, active }, 'strategies.toggle');
+  const result = await postJson<any>(
+    `/strategies/${req.params.id}/active`,
+    { active },
+    undefined,
+    headersForTrace(req),
+  );
+  if (!result.ok) {
+    res.status(503).json({ error: 'python_service_unavailable', source: 'unavailable' });
+    return;
+  }
+  res.json({
+    strategy: mapStrategyRecord(result.data?.strategy ?? {}),
+    message: result.data?.message ?? '',
+  });
 });
 
 // ── EPIC 15: Control Plane endpoints ────────────────────────────────────────

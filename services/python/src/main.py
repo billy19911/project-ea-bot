@@ -11,6 +11,8 @@ from .config import settings
 from .mt5.endpoints import router as mt5_router
 from .orchestration.endpoints import router as orchestration_router
 from .orchestration.runtime import get_runtime
+from .strategy.endpoints import register_live_strategy
+from .strategy.endpoints import router as strategy_router
 from .system.endpoints import router as system_router
 from .trading.endpoints import router as trading_router
 from .trading.events import router as events_router
@@ -25,6 +27,10 @@ async def lifespan(app: FastAPI):
     from .agents.base import TechnicalAnalystAgent
 
     agent_registry.register(TechnicalAnalystAgent())
+
+    # Register the real live engine configuration with the strategy registry
+    # (EPIC 13) — idempotent, so a warm reload does not duplicate it.
+    register_live_strategy()
 
     # Autonomous scheduler (PRD_V2 §10.3, §32.17) — optional, non-blocking.
     scheduler_task = None
@@ -79,6 +85,7 @@ app.include_router(trading_router)
 app.include_router(events_router)
 app.include_router(orchestration_router)
 app.include_router(system_router)
+app.include_router(strategy_router)
 
 
 @app.get("/health")
