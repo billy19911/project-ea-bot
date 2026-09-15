@@ -1,116 +1,64 @@
 # Changelog
 Semua perubahan penting pada project ini dicatat di dokumen ini.
-
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
 ## [Unreleased]
-
 ### Added
-- **EPIC 07 — Deterministic Risk & Safety**:
+- **EPIC 07 ‑ Deterministic Risk & Safety**:
   - `KillSwitch` — deterministic emergency stop (07.07)
-  - `CircuitBreaker` — auto-trip on repeated failures (07.08)
+  - `CircuitBreaker` — auto‑trip on repeated failures (07.08)
   - `RiskLead` sebagai Department Lead untuk risk aggregation dan advisory decisions.
   - 4 specialist analis: `AccountRiskAnalyst`, `PositionRiskAnalyst`, `PortfolioRiskAnalyst`, `DrawdownAnalyst`.
   - `RiskAssessmentReport` dan `RiskCommitteeDecision` schema dengan scoring, warnings, dan recommendations.
   - Separation test: membuktikan AI risk advice tidak memiliki izin memodifikasi batasan deterministik atau mengeksekusi order MT5.
   - 9 unit test komprehensif (`test_risk_intelligence.py`), 100% green.
 
-- **EPIC 08 — Execution Engine**:
+- **EPIC 08 ‑ Execution Engine**:
   - `OrderBuilder` — deterministically build OrderRequest from trade proposal (08.03)
-    Normalize symbol, prefixes/suffixes, map side/order_type, lot/volume, SL/TP, auto-quote fill
+    - Normalize symbol, prefixes/suffixes, map side/order_type, lot/volume, SL/TP, auto‑quote fill.
   - `ExecutionRecoveryEngine` — mismatch detection and execution blocking (08.07)
-    Audit orphan positions, missing ledger items, volume mismatches
-    State machine: NORMAL -> WARN_MISMATCH -> BLOCKED_CRITICAL
-  - 38 unit tests (`test_order_builder.py`)
-  - Full test suite: 648 passed
+    - Audit orphan positions, missing ledger items, volume mismatches.
+    - State machine: NORMAL → WARN_MISMATCH → BLOCKED_CRITICAL.
+  - 38 unit tests (`test_order_builder.py`).
+  - Full test suite: 648 passed.
 
-- **EPIC 09 — Position Monitoring**:
-  - `PositionMonitor` real-time position oversight (09.01)
-  - SL/TP management dan dynamic updates (09.02)
-  - ATR-based dynamic trailing stop (09.03)
-  - Abnormal price movement detection (>3x ATR threshold) (09.04)
-  - Risk change monitoring dan exit events generation (09.05, 09.06)
-  - 35 unit tests (`test_position_monitor.py`), 100% green
+- **EPIC 09 ‑ Position Monitoring**:
+  - `PositionMonitor` real‑time position oversight (09.01).
+  - SL/TP management, dynamic updates (09.02).
+  - ATR‑based dynamic trailing stop (09.03).
+  - Abnormal price movement detection (>3×ATR threshold) (09.04).
+  - Risk change monitoring dan exit events generation (09.05, 09.06).
+  - 35 unit tests (`test_position_monitor.py`), 100% green.
+
+- **EPIC 12 ‑ Research Engine**:
+  - `Hypothesis`, `StrategyVersion`, `Experiment`, `BacktestResult`.
+  - Validation, experiment creation, metric aggregation, comparative analysis.
+  - 17 unit tests (`test_research_engine.py`), 100% green.
+
+- **EPIC 13 ‑ Strategy Versioning & Promotion** (planned):
+  - Strategy registry, version schema, promotion gates, activation/deactivation, retirement, live‑parameter protection.
 
 ### Planned
-- End-to-end integration testing
-- Staging / production deployment hardening
-- Explicit live-trading enablement
-
----
+- End‑to‑end integration testing.
+- Staging / production deployment hardening.
+- Explicit live‑trading enablement.
 
 ## [1.0.0] - 2026-09-14
-
 ### Added
-
-#### Phase 28–30 — Security & Live Readiness
-- Security hardening untuk API, service Python, dan konfigurasi runtime.
-- Validasi paper trading dan demo trading.
-- Live readiness evaluator, gate, dan checklist sebelum mode `LIVE` dapat diaktifkan.
-
-#### Phase 27 — Observability
-- Metrics dan alerting untuk monitoring sistem.
-- Observability dashboard pada aplikasi web.
-
-#### Phase 21–26 — Frontend
-- Dashboard Foundation berbasis Next.js.
-- Trading Dashboard.
-- AI Control Center.
-- Strategy Center.
-- Research Center.
-- System Settings.
-
-#### Phase 18–20 — Research & Simulation
-- Research Engine.
-- Paper Trading simulation dengan akun dan simulated execution.
-- Demo Trading dan stability validation.
-
-#### Phase 15–17 — Monitoring, Memory & Review
-- Position Monitor.
-- Trade Memory.
-- Trade Review.
-
-#### Phase 14 — Execution Engine
-- Validasi order sebelum eksekusi.
-- Pengiriman order, confirmation, retry, dan duplicate prevention.
-
-#### Phase 10–13 — Risk & Supervisor Synthesis
-- Risk Engine untuk risiko account, position, dan portfolio.
-- Money Management / position sizing.
-- Supervisor synthesis untuk menggabungkan hasil analyst agents.
-- Deterministic Risk Gate dengan hard risk limits.
-
-#### Phase 7–9 — AI Layer
-- SupervisorAgent dengan routing policy, concurrency, dan token budget.
-- 9Router LLM gateway dengan registry provider.
-- Market agents: Structure, Momentum, Volatility, dan News.
-
-#### Phase 4–6 — Trading Intelligence
-- Market Regime Engine.
-- Event Engine dengan EventDetector class-based.
-- Priority processing, deduplication, queue, dan event history.
-
-#### Phase 1–3 — MT5 & Trading Foundation
-- MT5 connector layer: connection manager, data models, retrieval, dan endpoints.
-- Paper trading API.
-- Deterministic Trading Engine, indicators, trend, volatility, dan event processing.
-
-#### Phase 0 — Architecture Foundation
-- Monorepo npm workspaces: Next.js dashboard, Express API, FastAPI service, dan shared TypeScript package.
-- Foundation Python: FastAPI, pydantic-settings, SQLAlchemy, pytest, dan pre-commit.
-- Database layer: Prisma, SQLAlchemy, Docker Compose, migration, init, backup, dan restore tools.
-- Structured logging dan environment validation.
-- Development setup guide, CI/CD blueprint, constraints, PRD, dan environment template.
-
-### Security
-- Deterministic validation dan Risk Gate menjadi jalur wajib sebelum order dapat dieksekusi.
-- Hard limits untuk drawdown, daily loss, dan exposure tetap berada di kode; tidak dapat diubah oleh LLM.
-- Mode `LIVE` memerlukan explicit enablement dan live-readiness validation.
-
----
+- Phase 28‑30 ‑ Security & Live Readiness.
+  - Security hardening untuk API, service Python, dan konfigurasi runtime.
+  - Validasi paper trading dan demo trading.
+  - Live readiness evaluator, gate, dan checklist sebelum mode `LIVE` dapat diaktifkan.
+- Phase 27 ‑ Observability.
+  - Metrics dan alerting untuk monitoring sistem.
+  - Observability dashboard pada aplikasi web.
+- Phase 21‑26 ‑ Frontend.
+  - Dashboard Foundation berbasis Next.js.
+  - Trading Dashboard.
+  - AI Control Center.
+  - Strategy Center.
+  - Research Center.
 
 ## [0.1.0-alpha] - 2026-09-12
-
 ### Added
 - Initial monorepo repository structure.
 - README, development setup documentation, constraints documentation, dan CI/CD blueprint.
