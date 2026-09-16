@@ -6,7 +6,7 @@
 
 ### Autonomous Multi-Agent Trading &amp; Research Platform
 
-[![Status](https://img.shields.io/badge/status-in_development-orange.svg)](#status--roadmap)
+[![Status](https://img.shields.io/badge/status-in_development-orange.svg)](#status)
 [![Platform](https://img.shields.io/badge/platform-MT5-6f42c1.svg)](#tech-stack)
 [![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-339933.svg)](#prasyarat)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB.svg)](#prasyarat)
@@ -140,61 +140,9 @@ project-ea-bot/
 
 ---
 
-## Status &amp; Roadmap
+## Status
 
-### Phase 0 — Architecture Foundation ✅
-- [x] Monorepo setup (npm workspaces, TypeScript, ESLint, Prettier)
-- [x] Python service foundation (FastAPI, pydantic-settings, SQLAlchemy)
-- [x] Database layer (Prisma + SQLAlchemy, docker-compose blueprint)
-- [x] Logging & config system (structured logging, env validation)
-- [x] Development environment docs & CI/CD blueprint
-
-### Phase 1–6 — Trading Core ✅
-- [x] MT5 connector (connection manager, data models, paper trading API)
-- [x] Deterministic Trading Engine
-- [x] Event Engine (class-based EventDetector, priority, dedup, queue, history)
-- [x] Market Regime Engine
-
-### Phase 7–13 — AI & Risk ✅
-- [x] Supervisor Agent (routing policy, concurrency, token budget)
-- [x] 9Router LLM Layer
-- [x] Market Agents (Structure, Momentum, Volatility, News)
-- [x] Risk Engine (account / position / portfolio risk)
-- [x] Money Management
-- [x] Supervisor Synthesis
-- [x] Deterministic Risk Gate (hard limits)
-
-### Phase 14–17 — Execution & Monitoring ✅
-- [x] Execution Engine (validation, sending, confirmation, retry, dedup)
-- [x] Position Monitor
-- [x] Trade Memory
-- [x] Trade Review
-
-### Phase 18–20 — Research & Simulation ✅
-- [x] Research Engine
-- [x] Paper Trading
-- [x] Demo Trading & stability validation
-
-### Phase 21–26 — Frontend ✅
-- [x] Dashboard Foundation
-- [x] Trading Dashboard
-- [x] AI Control Center
-- [x] Strategy Center
-- [x] Research Center
-- [x] System Settings
-
-### Phase 27 — Observability ✅
-- [x] Metrics, alerts, dan observability dashboard
-
-### Phase 28–30 — Security & Live Readiness ✅
-- [x] Security hardening
-- [x] Paper & demo validation
-- [x] Live readiness checklist
-
-### Berikutnya
-- Live trading enablement (explicit `LIVE` mode activation)
-- Hardening & end-to-end integration testing
-- Deployment ke staging / production
+Platform sedang dalam tahap *pre-release*: core trading, AI, risk, dan observability sudah terimplementasi dan teruji. Lihat [`CHANGELOG.md`](./CHANGELOG.md) untuk riwayat perubahan dan [`ARCHITECTURE_MAP.md`](./ARCHITECTURE_MAP.md) untuk status per-EPIC.
 
 ---
 
@@ -271,6 +219,41 @@ cd apps/web
 npm run dev
 ```
 
+## Cara Menjalankan
+
+```bash
+# Terminal 1 — Python service (FastAPI) :8000
+cd services/python
+.venv/Scripts/activate            # Windows
+# source .venv/bin/activate       # Linux/macOS
+NINE_ROUTER_BASE_URL=http://127.0.0.1:20128/v1 uvicorn src.main:app --host 127.0.0.1 --port 8000
+
+# Terminal 2 — Node API :3001
+cd apps/api
+npm run build                     # sekali saja / setelah ubah kode
+DEV_AUTH_ENABLED=true PORT=3001 PYTHON_SERVICE_URL=http://127.0.0.1:8000 node dist/index.js
+
+# Terminal 3 — Web dashboard :3200
+cd apps/web
+npm run build                     # sekali saja
+npx next start -p 3200
+# buka http://127.0.0.1:3200
+```
+
+### Dev auth token
+
+Dengan `DEV_AUTH_ENABLED=true`, panggil `POST /auth/token` dengan body `{"userId":"admin","role":"admin"}`, lalu simpan token di browser:
+
+```js
+localStorage.setItem('ea-bot-token', '<token>')
+```
+
+| Service | Port | Health check |
+|---|---:|---|
+| Python FastAPI | 8000 | `GET /health` |
+| Node API | 3001 | `GET /health` |
+| Web (Next.js) | 3200 | buka `/` |
+
 ---
 
 ## Dokumentasi
@@ -287,7 +270,7 @@ npm run dev
 
 ## Arsip: EPIC 00–30
 
-Lihat [`ARCHITECTURE_MAP.md`](./ARCHITECTURE_MAP.md) untuk checklist, diagram, dan roadmap lengkap.
+Lengkap EPIC 00–30 tercakup. Lihat [`ARCHITECTURE_MAP.md`](./ARCHITECTURE_MAP.md) untuk checklist dan diagram.
 
 ---
 

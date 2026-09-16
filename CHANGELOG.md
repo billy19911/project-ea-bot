@@ -2,6 +2,20 @@
 Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
+### Changed — Hardening & UI Real-Data Iterations (Runs 10–19)
+
+- **CI always-green**: perbaiki workflow CI yang invalid, dependensi & audit, `node --test` portabel (Node 20 & 22), test DB default yang deterministik, config validator memuat `.env`; hasil CI 8/8 hijau.
+- **Dashboard memakai data nyata** (bukan demo/hardcode): hapus seed data, strategy registry end-to-end, wiring `/observability` + model registry ke field API nyata (bebas NaN/crash).
+- **Model Registry**:
+  - base URL gateway 9Router dapat dikonfigurasi via env `NINE_ROUTER_BASE_URL` (default lama `https://api.9router.com/v1` mati → diarahkan ke gateway lokal).
+  - sanitasi pesan error HTML dari upstream; sembunyikan field "Last" bila kosong.
+  - pertahankan metadata model dari gateway (`context_length`, `capabilities`, `owned_by`) yang sebelumnya hilang karena SDK membuang field ekstra.
+  - deteksi model gratis yang jujur (`:free` / `-free` / `/free`); label biaya benar (tidak lagi salah menandai "Gratis"/"Paid"); timestamp registry diformat manusiawi.
+- **Uptime & biaya jujur**: uptime service diambil dari data nyata (bukan "live"/`null`), hapus angka `0` fabrikasi (`token_budget`, `max_concurrency`), label biaya "—" saat data tidak tersedia.
+- **Rate limit**: dashboard polling reads dikecualikan dari rate limit global (hapus 429 palsu), batas dinaikkan.
+- **Observability error-state**: halaman tidak lagi white-screen saat API membalas error (401/429/500) — guard `res.ok` + validasi shape payload + akses nested yang aman; tampilkan pesan jujur "Gagal memuat (HTTP `<kode>`)" + tombol "Coba lagi"; KPI tampil "—" saat data gagal.
+- **Konsistensi**: semua halaman dashboard memakai helper `apps/web/lib/api.ts` (`apiFetch`) yang mengirim `Authorization: Bearer` + `X-Trace-Id`.
+
 ### Added
 - **PRD_V2 Conformance Pass (Run 9)**:
   - Pipeline + scheduler, Telegram gateway, dan model discovery diselaraskan dengan PRD_V2.
