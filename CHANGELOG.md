@@ -2,6 +2,17 @@
 Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
+### Fixed — Honest UI Pass 2 (Run 22)
+
+Menutup sisa celah kejujuran data di Control Plane: KPI kini dibaca dari endpoint yang benar, Safety Controls tidak lagi hardcode, dan tab Learning tidak lagi merender "%" kosong.
+
+- **KPI "Hari Ini" (Control Plane overview)**: sebelumnya selalu `—` karena membaca `overview.kpis` (yang memang `null` by design) — kini membaca `/trading/overview` (data nyata: open positions, unrealized PnL, win rate `—` saat wins/losses null).
+- **Safety Controls**: hapus hardcode `ARMED/NORMAL/NORMAL/ENFORCED`; kini menampilkan status nyata dari `/system/health` (`risk_gate.safe`, `flags.daily_loss_ok/drawdown_ok/margin_ok/equity_ok`) + `/reconciliation/status` (`last_report.critical`, `total_mismatches`, `history_count`), dengan badge `—` saat data tidak tersedia.
+- **Tab Learning**: `{supervisor_kpis?.win_rate}%` tidak lagi merender "%" kosong saat null (kini `—` via helper `nullablePercent`); banner "Analytics belum tersedia" saat `available: false`; tabel by-hour/by-regime menampilkan "Tidak ada data." saat kosong.
+- **Risk budget bar**: bar tidak lagi merender 0% palsu saat `risk_utilization` null.
+- **Fetch efisien**: `/reconciliation/status` diambil sekali dalam `fetchAll` (sebelumnya fetch terpisah).
+- **Docs**: `PRD_V2_CONFORMANCE_AUDIT.md` & `CURRENT_STATE.md` diberi banner HISTORICAL + angka test diperbarui (1136 Python · 38/38 Node).
+
 ### Fixed — Honest Data Pass (Run 21)
 
 Menghapus "data fabrikasi" (angka `0`/`[]`/label `live` palsu) di endpoint overview & render UI, agar UI menampilkan `—` ketika data tidak tersedia (honesty over completeness).

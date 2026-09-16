@@ -86,6 +86,23 @@ function nullableValue(v: unknown): string {
   return String(v);
 }
 
+function nullablePercent(v: unknown): string {
+  if (v === null || v === undefined) return '—';
+  return `${v}%`;
+}
+
+function flagBadge(v: unknown, s: Record<string, string>, okText: string, badText: string) {
+  if (v === true) return <span className={`${s.badge} ${s.success}`}>{okText}</span>;
+  if (v === false) return <span className={`${s.badge} ${s.danger}`}>{badText}</span>;
+  return <span className={`${s.badge} ${s.muted}`}>—</span>;
+}
+
+function invertedFlagBadge(v: unknown, s: Record<string, string>, okText: string, badText: string) {
+  if (v === false) return <span className={`${s.badge} ${s.success}`}>{okText}</span>;
+  if (v === true) return <span className={`${s.badge} ${s.danger}`}>{badText}</span>;
+  return <span className={`${s.badge} ${s.muted}`}>—</span>;
+}
+
 function formatUptimeSeconds(v: unknown): string {
   if (v === null || v === undefined || v === '') return '—';
   const n = typeof v === 'number' ? v : Number(v);
@@ -129,7 +146,7 @@ export default function ControlPlanePage() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
-    const [overview, trading, positions, market, aiControl, tasks, decisions, risk, execution, audit, health, committee, telegram, providers, models, learning] = await Promise.all([
+    const [overview, trading, positions, market, aiControl, tasks, decisions, execution, audit, health, committee, telegram, providers, models, learning, reconciliation] = await Promise.all([
       fetchJson('/system/overview'),
       fetchJson('/trading/overview'),
       fetchJson('/positions'),
@@ -137,7 +154,6 @@ export default function ControlPlanePage() {
       fetchJson('/ai-control/status'),
       fetchJson('/tasks'),
       fetchJson('/decisions'),
-      fetchJson('/system/health'),
       fetchJson('/strategies'),
       fetchJson('/audit/events'),
       fetchJson('/system/health'),
@@ -146,8 +162,9 @@ export default function ControlPlanePage() {
       fetchJson('/ai/providers'),
       fetchJson('/ai/models'),
       fetchJson('/learning/analytics'),
+      fetchJson('/reconciliation/status'),
     ]);
-    setData({ overview, trading, positions, market, aiControl, tasks, decisions, risk, execution, audit, health, committee, telegram, providers, models, learning });
+    setData({ overview, trading, positions, market, aiControl, tasks, decisions, execution, audit, health, committee, telegram, providers, models, learning, reconciliation });
     setLoading(false);
   }, [fetchJson]);
 
@@ -285,6 +302,7 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
   const providers = data.providers as any;
   const models = data.models as any;
   const learning = data.learning as any;
+  const reconciliation = data.reconciliation as any;
 
   if (tab === 'overview') {
     if (!overview) return <div className={s.empty}>Tidak ada data overview.</div>;
@@ -312,13 +330,19 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
         </section>
         <section className={s.card}>
           <h2>KPI Hari Ini</h2>
-          <div className={s.kpiRow}>
-            <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(overview.kpis?.open_positions)}</span><span className={s.kpiLabel}>Open positions</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(overview.kpis?.daily_pnl)}</span><span className={s.kpiLabel}>Daily PnL</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{overview.kpis?.win_rate_today == null ? '—' : overview.kpis.win_rate_today + '%'}</span><span className={s.kpiLabel}>Win rate</span></div>
-          </div>
+<div className={s.kpiRow}>
+              <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading?.open_positions)}</span><span className={s.kpiLabel}>Open positions</span></div>
+              <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading?.today?.unrealized_pnl)}</span><span className={s.kpiLabel}>Unrealized PnL</span></div>
+              <div className={s.kpi}><span className={s.kpiValue}>{
+                (trading?.today?.wins != null && trading?.today?.losses != null && (trading?.today?.wins + trading?.today?.losses) > 0)
+                  ? ((trading?.today?.wins / (trading?.today?.wins + trading?.today?.losses)) * 100).toFixed(1) + '%'
+                  : '—'
+              }</span><span className={s.kpiLabel}>Win rate</span></div>
+            </div>
           <h3>Risk utilization</h3>
-          <div className={s.bar}><div className={s.barFill} style={{ width: `${overview.kpis?.risk_utilization ?? 0}%` }} /></div>
+          {overview.kpis?.risk_utilization != null && (
+            <div className={s.bar}><div className={s.barFill} style={{ width: `${overview.kpis.risk_utilization}%` }} /></div>
+          )}
           <div className={s.mono}>{overview.kpis?.risk_utilization == null ? '—' : overview.kpis.risk_utilization + '% dari budget'}</div>
         </section>
       </div>
@@ -535,15 +559,19 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
             <div className={s.kpi}><span className={s.kpiValue}>{health.risk_gate?.max_daily_loss == null ? '—' : `${health.risk_gate.max_daily_loss}`}</span><span className={s.kpiLabel}>Daily loss limit</span></div>
           </div>
           <h3>Risk budget</h3>
-          <div className={s.bar}><div className={s.barFillGreen} style={{ width: `${overview?.kpis?.risk_utilization ?? 0}%` }} /></div>
+          {overview?.kpis?.risk_utilization != null && (
+            <div className={s.bar}><div className={s.barFillGreen} style={{ width: `${overview.kpis.risk_utilization}%` }} /></div>
+          )}
         </section>
         <section className={s.card}>
           <h2>Safety Controls</h2>
           <table className={s.table}><tbody>
-            <tr><td>Kill switch</td><td><span className={`${s.badge} ${s.success}`}>ARMED</span></td></tr>
-            <tr><td>Circuit breaker</td><td><span className={`${s.badge} ${s.success}`}>NORMAL</span></td></tr>
-            <tr><td>Execution recovery</td><td><span className={`${s.badge} ${s.success}`}>NORMAL</span></td></tr>
-            <tr><td>Write guard</td><td><span className={`${s.badge} ${s.success}`}>ENFORCED</span></td></tr>
+            <tr><td>Risk gate</td><td>{flagBadge(health.risk_gate?.safe, s, 'SAFE', 'UNSAFE')}</td></tr>
+            <tr><td>Daily loss limit</td><td>{flagBadge(health.risk_gate?.flags?.daily_loss_ok, s, 'OK', 'BREACH')}</td></tr>
+            <tr><td>Drawdown</td><td>{flagBadge(health.risk_gate?.flags?.drawdown_ok, s, 'OK', 'BREACH')}</td></tr>
+            <tr><td>Margin</td><td>{flagBadge(health.risk_gate?.flags?.margin_ok, s, 'OK', 'BREACH')}</td></tr>
+            <tr><td>Equity</td><td>{flagBadge(health.risk_gate?.flags?.equity_ok, s, 'OK', 'BREACH')}</td></tr>
+            <tr><td>Reconciliation</td><td>{invertedFlagBadge(reconciliation?.last_report?.critical, s, 'OK', 'CRITICAL')} <span className={s.mono}>{reconciliation?.last_report ? `${reconciliation.last_report.total_mismatches} mismatch · ${reconciliation.history_count} run` : '—'}</span></td></tr>
           </tbody></table>
         </section>
       </div>
@@ -747,13 +775,16 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
     if (!learning) return <div className={s.empty}>Tidak ada data learning.</div>;
     return (
       <div className={s.grid}>
+        {learning.available === false && (
+          <div className={s.empty}>Analytics belum tersedia — belum ada trade tertutup untuk dianalisis.</div>
+        )}
         <section className={s.card}>
           <h2>Supervisor KPI</h2>
           <div className={s.kpiRow}>
-            <div className={s.kpi}><span className={s.kpiValue}>{learning.supervisor_kpis?.win_rate}%</span><span className={s.kpiLabel}>Win rate</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{learning.supervisor_kpis?.profit_factor}</span><span className={s.kpiLabel}>Profit factor</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{learning.supervisor_kpis?.expectancy}</span><span className={s.kpiLabel}>Expectancy</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{learning.supervisor_kpis?.max_drawdown}%</span><span className={s.kpiLabel}>Max DD</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{nullablePercent(learning.supervisor_kpis?.win_rate)}</span><span className={s.kpiLabel}>Win rate</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(learning.supervisor_kpis?.profit_factor)}</span><span className={s.kpiLabel}>Profit factor</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(learning.supervisor_kpis?.expectancy)}</span><span className={s.kpiLabel}>Expectancy</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{nullablePercent(learning.supervisor_kpis?.max_drawdown)}</span><span className={s.kpiLabel}>Max DD</span></div>
           </div>
         </section>
         <section className={s.card}>
@@ -765,10 +796,13 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
                 <tr key={h.hour}>
                   <td>{h.hour}:00</td>
                   <td>{h.trades}</td>
-                  <td>{h.win_rate}%</td>
+                  <td>{nullablePercent(h.win_rate)}</td>
                   <td style={{ color: h.avg_pnl > 0 ? '#027a48' : '#b42318' }}>{h.avg_pnl}</td>
                 </tr>
               ))}
+              {(!learning.by_hour || learning.by_hour.length === 0) && (
+                <tr><td colSpan={4}>Tidak ada data.</td></tr>
+              )}
             </tbody>
           </table>
         </section>
@@ -781,10 +815,13 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
                 <tr key={r.regime}>
                   <td><strong>{r.regime}</strong></td>
                   <td>{r.trades}</td>
-                  <td>{r.win_rate}%</td>
+                  <td>{nullablePercent(r.win_rate)}</td>
                   <td style={{ color: r.avg_pnl > 0 ? '#027a48' : '#b42318' }}>{r.avg_pnl}</td>
                 </tr>
               ))}
+              {(!learning.by_regime || learning.by_regime.length === 0) && (
+                <tr><td colSpan={4}>Tidak ada data.</td></tr>
+              )}
             </tbody>
           </table>
         </section>
@@ -796,6 +833,9 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
               <div className={s.traceText}>{l.text}</div>
             </div>
           ))}
+          {(!learning.lessons || learning.lessons.length === 0) && (
+            <div>Tidak ada lessons tervalidasi.</div>
+          )}
         </section>
       </div>
     );

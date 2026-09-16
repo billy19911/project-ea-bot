@@ -1,5 +1,8 @@
 # EPIC 00 — Full Repository Audit Report
 
+> **⚠️ HISTORICAL SNAPSHOT — dokumen ini menggambarkan kondisi repo pada 2026-09-14 (sebelum Runs 10–22).**
+> Angka test di bawah (547 Python / Node) sudah usang. **Kondisi terkini (2026-09-16): Python 1136 passed · Node 38/38 · tsc 0 error · CI 8/8 hijau.** Lihat `CHANGELOG.md` untuk daftar perubahan setelah snapshot ini.
+
 **Tanggal:** 2026-09-14  
 **Status:** Complete  
 **Target:** Conformity check against PRD V2 & MASTER_TASKS.md
@@ -164,8 +167,10 @@ $ pytest services/python/tests/ -q --ignore=tests/test_llm.py
 FAILED tests/test_mt5.py::test_timeframe_map_populated
 1 failed, 522 passed
 
-# After P0+P1 fixes:
+# After P0+P1 fixes (2026-09-14 snapshot):
 547 passed, 1 warning
+
+# Current (2026-09-16, after Runs 10–22): 1136 passed
 ```
 
 ### Test Coverage by Module
@@ -205,7 +210,9 @@ FAILED tests/test_mt5.py::test_timeframe_map_populated
 
 ### Summary
 
-The repository is in a stable state with 547 passing tests and zero lint errors. Core safety architecture is sound — AI cannot directly execute MT5, hard risk limits are immutable, and the risk gate is enforced deterministically.
+The repository is in a stable state with 1136 passing tests (Python; plus 38/38 Node API tests) and zero lint errors. Core safety architecture is sound — AI cannot directly execute MT5, hard risk limits are immutable, and the risk gate is enforced deterministically.
+
+> Note: the "Gaps Identified" list below reflects the 2026-09-14 snapshot; most have since been implemented (see `CHANGELOG.md`, Runs 10–22).
 
 ### Gaps Identified (Ordered by Priority)
 
@@ -223,7 +230,7 @@ The repository is in a stable state with 547 passing tests and zero lint errors.
 All foundational issues resolved:
 - TypeScript compilation: clean
 - Linting: clean (0 errors across all workspaces)
-- Python tests: 547 passing
+- Python tests: 1136 passing (as of 2026-09-16)
 - CI/CD paths corrected
 - Dependencies synchronized
 

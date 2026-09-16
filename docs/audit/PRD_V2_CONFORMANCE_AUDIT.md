@@ -1,5 +1,9 @@
 # PRD_V2 Conformance & Integration Audit (XynnBot)
 
+> **⚠️ HISTORICAL — dokumen ini menggambarkan kondisi repo pada 2026-09-15, SEBELUM Runs 10–22.**
+> Banyak temuan "FAIL"/"PARTIAL" di bawah **sudah diperbaiki** (Telegram gateway, trading modes, Task Contract state machine, Event Priority, dependency breakers, CI hijau, UI jujur, dll).
+> Untuk kondisi terkini lihat `docs/audit/CURRENT_STATE.md` dan `CHANGELOG.md`. Verdict di bawah **jangan** dipakai sebagai status saat ini tanpa re-verifikasi.
+
 **Repository:** `C:\xampp\htdocs\project-ea-bot`
 **Authority document:** `PRD_V2.md` (1051 lines)
 **Roadmap context:** `MASTER_TASKS.md` (EPIC 00–19)
