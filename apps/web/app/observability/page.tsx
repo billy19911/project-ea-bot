@@ -71,28 +71,93 @@ export default function ObservabilityPage() {
   const [supervisor, setSupervisor] = useState<SupervisorStatus | null>(null);
   const [errors, setErrors] = useState<ErrorRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
+  const [allFailed, setAllFailed] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<string>('');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [tab, setTab] = useState<'overview' | 'errors' | 'agents' | 'tokens'>('overview');
 
   const fetchData = useCallback(async () => {
-    try {
-      const [metricsRes, supervisorRes, errorsRes] = await Promise.allSettled([
-        apiFetch(`/observability/metrics`).then(r => r.json()),
-        apiFetch(`/ai-control/status`).then(r => r.json()),
-        apiFetch(`/observability/errors?limit=50`).then(r => r.json()),
-      ]);
+    // Fetch + parse each endpoint independently, tracking HTTP status so we
+    // never store a non-OK error body (e.g. 401 JSON) as if it were data.
+    const fetchEndpoint = async (
+      path: string,
+    ): Promise<{ ok: true; data: unknown } | { ok: false; status: number }> => {
+      try {
+        const res = await apiFetch(path);
+        if (!res.ok) return { ok: false, status: res.status };
+        const data = (await res.json()) as unknown;
+        return { ok: true, data };
+      } catch {
+        return { ok: false, status: 0 };
+      }
+    };
 
-      if (metricsRes.status === 'fulfilled') setMetrics(metricsRes.value);
-      if (supervisorRes.status === 'fulfilled') setSupervisor(supervisorRes.value);
-      if (errorsRes.status === 'fulfilled') setErrors(errorsRes.value.errors || []);
+    const [metricsRes, supervisorRes, errorsRes] = await Promise.all([
+      fetchEndpoint('/observability/metrics'),
+      fetchEndpoint('/ai-control/status'),
+      fetchEndpoint('/observability/errors?limit=50'),
+    ]);
 
-      setLastRefresh(new Date().toLocaleTimeString());
-    } catch (err) {
-      console.error('Failed to fetch observability data:', err);
-    } finally {
-      setLoading(false);
+    const failedStatuses: number[] = [];
+
+    // Metrics: only accept an OK payload that carries an object `requests`.
+    if (
+      metricsRes.ok &&
+      metricsRes.data &&
+      typeof metricsRes.data === 'object' &&
+      typeof (metricsRes.data as { requests?: unknown }).requests === 'object' &&
+      (metricsRes.data as { requests?: unknown }).requests !== null
+    ) {
+      setMetrics(metricsRes.data as MetricsSummary);
+    } else if (!metricsRes.ok) {
+      failedStatuses.push(metricsRes.status);
+    } else {
+      failedStatuses.push(0);
     }
+
+    // Supervisor: only accept an OK payload with array `models`/`agents`.
+    if (
+      supervisorRes.ok &&
+      supervisorRes.data &&
+      typeof supervisorRes.data === 'object' &&
+      Array.isArray((supervisorRes.data as { models?: unknown }).models) &&
+      Array.isArray((supervisorRes.data as { agents?: unknown }).agents)
+    ) {
+      setSupervisor(supervisorRes.data as SupervisorStatus);
+    } else if (!supervisorRes.ok) {
+      failedStatuses.push(supervisorRes.status);
+    } else {
+      failedStatuses.push(0);
+    }
+
+    // Errors: only accept an OK payload with an array `errors`.
+    if (
+      errorsRes.ok &&
+      errorsRes.data &&
+      typeof errorsRes.data === 'object' &&
+      Array.isArray((errorsRes.data as { errors?: unknown }).errors)
+    ) {
+      setErrors((errorsRes.data as { errors: ErrorRecord[] }).errors);
+    } else if (!errorsRes.ok) {
+      failedStatuses.push(errorsRes.status);
+    } else {
+      failedStatuses.push(0);
+    }
+
+    // Honest error state: only when every endpoint failed. Prefer a real HTTP
+    // status (non-zero) over the 0 "unknown/network" sentinel.
+    if (failedStatuses.length === 3) {
+      const real = failedStatuses.find((s) => s > 0) ?? null;
+      setAllFailed(true);
+      setErrorStatus(real);
+    } else {
+      setAllFailed(false);
+      setErrorStatus(null);
+    }
+
+    setLastRefresh(new Date().toLocaleTimeString());
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -105,28 +170,32 @@ export default function ObservabilityPage() {
     return () => clearInterval(interval);
   }, [autoRefresh, fetchData]);
 
-  const totalRequests = metrics
-    ? Object.values(metrics.requests).reduce((sum, statuses) =>
-        sum + Object.values(statuses).reduce((s, v) => s + v, 0), 0)
+  const requests = metrics?.requests;
+  const models = supervisor?.models;
+  const agents = supervisor?.agents;
+
+  const totalRequests = requests
+    ? Object.values(requests).reduce((sum, statuses) =>
+        sum + Object.values(statuses ?? {}).reduce((s, v) => s + v, 0), 0)
     : 0;
 
-  const errorRequests = metrics
-    ? Object.values(metrics.requests).reduce((sum, statuses) =>
-        sum + Object.entries(statuses)
+  const errorRequests = requests
+    ? Object.values(requests).reduce((sum, statuses) =>
+        sum + Object.entries(statuses ?? {})
           .filter(([code]) => parseInt(code) >= 400)
           .reduce((s, [, v]) => s + v, 0), 0)
     : 0;
 
-  const totalTokens = supervisor
-    ? supervisor.models.reduce((sum, m) => sum + m.promptTokens + m.completionTokens, 0)
+  const totalTokens = models
+    ? models.reduce((sum, m) => sum + (m.promptTokens ?? 0) + (m.completionTokens ?? 0), 0)
     : 0;
 
-  const totalCost = supervisor
-    ? supervisor.models.reduce((sum, m) => sum + m.cost, 0)
+  const totalCost = models
+    ? models.reduce((sum, m) => sum + (m.cost ?? 0), 0)
     : 0;
 
-  const activeAgentCount = supervisor
-    ? supervisor.agents.filter(a => a.status === 'active').length
+  const activeAgentCount = agents
+    ? agents.filter(a => a.status === 'active').length
     : 0;
 
   const tabs = [
@@ -176,6 +245,15 @@ export default function ObservabilityPage() {
         </header>
 
         <div className={styles.pageBody}>
+          {allFailed && (
+            <div className={styles.errorCard}>
+              <span>
+                {errorStatus ? `Gagal memuat (HTTP ${errorStatus})` : 'Gagal memuat data dari API.'}
+              </span>
+              <button className={styles.retryBtn} onClick={fetchData}>Coba lagi</button>
+            </div>
+          )}
+
           {/* KPI Cards */}
           <div className={styles.kpiGrid}>
             <div className={styles.kpiCard}>
@@ -184,23 +262,25 @@ export default function ObservabilityPage() {
             </div>
             <div className={styles.kpiCard}>
               <small>Total Requests</small>
-              <strong>{totalRequests.toLocaleString()}</strong>
+              <strong>{requests ? totalRequests.toLocaleString() : '—'}</strong>
             </div>
             <div className={styles.kpiCard}>
               <small>Error Requests</small>
-              <strong className={errorRequests > 0 ? styles.textDanger : ''}>{errorRequests}</strong>
+              <strong className={requests && errorRequests > 0 ? styles.textDanger : ''}>
+                {requests ? errorRequests : '—'}
+              </strong>
             </div>
             <div className={styles.kpiCard}>
               <small>Active Agents</small>
-              <strong>{activeAgentCount}</strong>
+              <strong>{agents ? activeAgentCount : '—'}</strong>
             </div>
             <div className={styles.kpiCard}>
               <small>Total Tokens</small>
-              <strong>{totalTokens.toLocaleString()}</strong>
+              <strong>{models ? totalTokens.toLocaleString() : '—'}</strong>
             </div>
             <div className={styles.kpiCard}>
               <small>LLM Cost</small>
-              <strong>${totalCost.toFixed(3)}</strong>
+              <strong>{models ? `$${totalCost.toFixed(3)}` : '—'}</strong>
             </div>
           </div>
 
@@ -235,10 +315,11 @@ export default function ObservabilityPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {metrics && Object.entries(metrics.requests).map(([route, statuses]) => {
-                        const s2 = Object.entries(statuses).filter(([c]) => c.startsWith('2')).reduce((s, [, v]) => s + v, 0);
-                        const s4 = Object.entries(statuses).filter(([c]) => c.startsWith('4')).reduce((s, [, v]) => s + v, 0);
-                        const s5 = Object.entries(statuses).filter(([c]) => c.startsWith('5')).reduce((s, [, v]) => s + v, 0);
+                      {requests && Object.entries(requests).map(([route, statuses]) => {
+                        const safeStatuses = statuses ?? {};
+                        const s2 = Object.entries(safeStatuses).filter(([c]) => c.startsWith('2')).reduce((s, [, v]) => s + v, 0);
+                        const s4 = Object.entries(safeStatuses).filter(([c]) => c.startsWith('4')).reduce((s, [, v]) => s + v, 0);
+                        const s5 = Object.entries(safeStatuses).filter(([c]) => c.startsWith('5')).reduce((s, [, v]) => s + v, 0);
                         const total = s2 + s4 + s5;
                         return (
                           <tr key={route}>
@@ -250,7 +331,7 @@ export default function ObservabilityPage() {
                           </tr>
                         );
                       })}
-                      {(!metrics || Object.keys(metrics.requests).length === 0) && (
+                      {(!requests || Object.keys(requests).length === 0) && (
                         <tr><td colSpan={5} className={styles.emptyRow}>Belum ada request data</td></tr>
                       )}
                     </tbody>
@@ -259,11 +340,13 @@ export default function ObservabilityPage() {
               </section>
 
               {/* Agent Status */}
-              {supervisor && (
+              {agents && (
                 <section className={styles.card}>
                   <h2>Agent Status</h2>
                   <div className={styles.agentGrid}>
-                    {supervisor.agents.map((agent) => (
+                    {agents.length === 0 ? (
+                      <div className={styles.emptyState}><p>Belum ada agent</p></div>
+                    ) : agents.map((agent) => (
                       <div key={agent.name} className={styles.agentCard}>
                         <div className={styles.agentHeader}>
                           <strong>{agent.name}</strong>
@@ -331,7 +414,7 @@ export default function ObservabilityPage() {
               )}
 
               {/* Also show supervisor errors */}
-              {supervisor && supervisor.errors.length > 0 && (
+              {supervisor?.errors && supervisor.errors.length > 0 && (
                 <>
                   <h3 style={{ marginTop: 16 }}>Agent Errors (dari Supervisor)</h3>
                   <div className={styles.errorList}>
@@ -360,20 +443,20 @@ export default function ObservabilityPage() {
             <section className={styles.card}>
               <h2>Agent Execution Metrics</h2>
               <div className={styles.supervisorInfo}>
-                <div><small>Routing Policy</small><strong>{supervisor.supervisor.routing_policy}</strong></div>
-                <div><small>Max Concurrency</small><strong>{formatNumber(supervisor.supervisor.max_concurrency)}</strong></div>
-                <div><small>Token Budget</small><strong>{formatNumber(supervisor.supervisor.token_budget)}</strong></div>
-                <div><small>Token Used</small><strong>{formatNumber(supervisor.supervisor.token_used)}</strong></div>
+                <div><small>Routing Policy</small><strong>{supervisor.supervisor?.routing_policy ?? '—'}</strong></div>
+                <div><small>Max Concurrency</small><strong>{formatNumber(supervisor.supervisor?.max_concurrency)}</strong></div>
+                <div><small>Token Budget</small><strong>{formatNumber(supervisor.supervisor?.token_budget)}</strong></div>
+                <div><small>Token Used</small><strong>{formatNumber(supervisor.supervisor?.token_used)}</strong></div>
                 <div><small>Budget Usage</small>
                   <strong>
-                    {typeof supervisor.supervisor.token_budget === 'number'
-                      && typeof supervisor.supervisor.token_used === 'number'
+                    {typeof supervisor.supervisor?.token_budget === 'number'
+                      && typeof supervisor.supervisor?.token_used === 'number'
                       && supervisor.supervisor.token_budget > 0
                       ? ((supervisor.supervisor.token_used / supervisor.supervisor.token_budget) * 100).toFixed(1) + '%'
                       : '—'}
                   </strong>
                 </div>
-                <div><small>Supervisor Uptime</small><strong>{formatUptime(supervisor.supervisor.uptime)}</strong></div>
+                <div><small>Supervisor Uptime</small><strong>{formatUptime(supervisor.supervisor?.uptime)}</strong></div>
               </div>
 
               <h3>Agent Details</h3>
@@ -389,7 +472,9 @@ export default function ObservabilityPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {supervisor.agents.map((agent) => (
+                    {!agents || agents.length === 0 ? (
+                      <tr><td colSpan={5} className={styles.emptyRow}>Belum ada agent data</td></tr>
+                    ) : agents.map((agent) => (
                       <tr key={agent.name}>
                         <td><strong>{agent.name}</strong></td>
                         <td>{agent.type}</td>
@@ -414,13 +499,15 @@ export default function ObservabilityPage() {
             <section className={styles.card}>
               <h2>LLM Token Usage</h2>
               <div className={styles.tokenSummary}>
-                <div><small>Total Tokens</small><strong>{totalTokens.toLocaleString()}</strong></div>
-                <div><small>Total Cost</small><strong>${totalCost.toFixed(3)}</strong></div>
-                <div><small>Total Calls</small><strong>{supervisor.models.reduce((s, m) => s + m.calls, 0)}</strong></div>
+                <div><small>Total Tokens</small><strong>{models ? totalTokens.toLocaleString() : '—'}</strong></div>
+                <div><small>Total Cost</small><strong>{models ? `$${totalCost.toFixed(3)}` : '—'}</strong></div>
+                <div><small>Total Calls</small><strong>{models ? models.reduce((s, m) => s + m.calls, 0) : '—'}</strong></div>
                 <div>
                   <small>Avg Tokens/Call</small>
                   <strong>
-                    {Math.round(totalTokens / Math.max(1, supervisor.models.reduce((s, m) => s + m.calls, 0)))}
+                    {models && models.reduce((s, m) => s + m.calls, 0) > 0
+                      ? Math.round(totalTokens / models.reduce((s, m) => s + m.calls, 0))
+                      : '—'}
                   </strong>
                 </div>
               </div>
@@ -439,14 +526,16 @@ export default function ObservabilityPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {supervisor.models.map((model) => (
+                    {!models || models.length === 0 ? (
+                      <tr><td colSpan={7} className={styles.emptyRow}>Belum ada data model</td></tr>
+                    ) : models.map((model) => (
                       <tr key={model.model}>
                         <td><strong>{model.model}</strong></td>
                         <td>{model.provider}</td>
-                        <td>{model.calls}</td>
-                        <td>{model.promptTokens.toLocaleString()}</td>
-                        <td>{model.completionTokens.toLocaleString()}</td>
-                        <td><strong>{(model.promptTokens + model.completionTokens).toLocaleString()}</strong></td>
+                        <td>{formatNumber(model.calls)}</td>
+                        <td>{formatNumber(model.promptTokens)}</td>
+                        <td>{formatNumber(model.completionTokens)}</td>
+                        <td><strong>{formatNumber((model.promptTokens ?? 0) + (model.completionTokens ?? 0))}</strong></td>
                         <td className={model.cost > 0 ? styles.textDanger : styles.textMuted}>
                           {model.calls === 0
                             ? '—'

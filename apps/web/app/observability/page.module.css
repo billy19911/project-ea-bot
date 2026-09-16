@@ -424,6 +424,37 @@
   padding: 24px 0 !important;
 }
 
+/* ── Error state ── */
+.errorCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #fecdca;
+  background: #fef3f2;
+  color: #b42318;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 14px;
+  font-size: 14px;
+}
+
+.retryBtn {
+  border: 1px solid #b42318;
+  background: #fff;
+  color: #b42318;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.retryBtn:hover {
+  background: #b42318;
+  color: #fff;
+}
+
 /* ── Controls ── */
 .autoRefreshLabel {
   display: flex;
