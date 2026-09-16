@@ -194,6 +194,12 @@ export default function ObservabilityPage() {
     ? models.reduce((sum, m) => sum + (m.cost ?? 0), 0)
     : 0;
 
+  // Total LLM calls across models — used to decide whether token/cost figures
+  // are real data or should render as "—" (no fabricated zeros).
+  const totalCalls = models
+    ? models.reduce((sum, m) => sum + (m.calls ?? 0), 0)
+    : 0;
+
   const activeAgentCount = agents
     ? agents.filter(a => a.status === 'active').length
     : 0;
@@ -220,7 +226,7 @@ export default function ObservabilityPage() {
         <a href="/observability" className={`${styles.navItem} ${styles.active}`}><span>📊</span> Observability</a>
         <div className={styles.sidebarBottom}>
           <span className={styles.greenDot} /> API terhubung
-          <div className={styles.version}>Phase 27 · Live</div>
+          <div className={styles.version}>Live</div>
         </div>
       </aside>
 
@@ -276,11 +282,11 @@ export default function ObservabilityPage() {
             </div>
             <div className={styles.kpiCard}>
               <small>Total Tokens</small>
-              <strong>{models ? totalTokens.toLocaleString() : '—'}</strong>
+              <strong>{models && totalCalls > 0 ? totalTokens.toLocaleString() : '—'}</strong>
             </div>
             <div className={styles.kpiCard}>
               <small>LLM Cost</small>
-              <strong>{models ? `$${totalCost.toFixed(3)}` : '—'}</strong>
+              <strong>{models && totalCalls > 0 ? `$${totalCost.toFixed(3)}` : '—'}</strong>
             </div>
           </div>
 

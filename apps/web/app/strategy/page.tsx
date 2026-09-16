@@ -124,7 +124,7 @@ export default function StrategyCenterPage() {
         </a>
         <div className={styles.sidebarBottom}>
           <span className={styles.greenDot} /> {strategies.filter((s) => s.active).length} strategi aktif
-          <div className={styles.version}>Phase 24 · Live</div>
+          <div className={styles.version}>Live</div>
         </div>
       </aside>
 

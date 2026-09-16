@@ -17,17 +17,16 @@ import { validateSecrets, redactSecrets } from './middleware/secrets';
 // Run 18: honest supervisor status (real uptime; no fabricated zeros).
 import { buildSupervisorStatus } from './supervisorStatus.js';
 import {
+  mapTradingOverview,
+  mapMarketOverview,
+  mapProvidersOverview,
+  mapSystemOverview,
+} from './overviewMapping.js';
+import {
   register,
   httpRequestDuration,
   httpRequestsTotal,
-  agentExecutionDuration,
-  agentExecutionsTotal,
-  llmTokensTotal,
-  llmCallsTotal,
-  llmCostTotal,
   activeAgents,
-  tokenBudgetUsed,
-  tokenBudgetLimit,
   recordError,
   getRecentErrors,
   clearErrors,
@@ -350,20 +349,10 @@ app.get('/ai-control/status', async (req, res) => {
     models: modelsResult.ok ? modelsResult.data.models : [],
   });
 
-  // Update Prometheus gauges from real (or absent) data.
+  // Only active agent count has a real source here. Token and execution metrics
+  // are not recorded by this service, so do not create zero-valued observations.
   const activeCount = agents.filter((a: any) => a.status === 'active').length;
   activeAgents.set(activeCount);
-  tokenBudgetUsed.set(0);
-  tokenBudgetLimit.set(0);
-  for (const agent of agents) {
-    agentExecutionsTotal.inc({ agent_name: agent.name, status: agent.status }, 0);
-    agentExecutionDuration.observe({ agent_name: agent.name }, 0);
-  }
-  for (const model of models) {
-    llmCallsTotal.inc({ model: model.model }, 0);
-    llmTokensTotal.inc({ model: model.model, type: 'prompt' }, 0);
-    llmCostTotal.inc({ model: model.model }, 0);
-  }
 
   res.json({
     supervisor: {
@@ -377,7 +366,7 @@ app.get('/ai-control/status', async (req, res) => {
     agents,
     models,
     tasks: Array.isArray(tasksData.tasks) ? tasksData.tasks : [],
-    errors: [],
+    errors: getRecentErrors(10),
     source: 'live',
   });
 });
@@ -522,31 +511,17 @@ app.get('/system/overview', async (req, res) => {
   }
   const healthData = health.ok ? health.data : {};
   const schedulerData = scheduler.ok ? scheduler.data : {};
-  // Run 18: real uptime (seconds) from the Python service, or null when absent.
-  const { uptime } = buildSupervisorStatus({ health: healthData, scheduler: schedulerData });
-  res.json({
-    mode: 'PAPER',
-    status: health.ok ? (healthData.status ?? 'unknown') : 'degraded',
-    uptime,
-    version: healthData.version ?? null,
-    environment: healthData.environment ?? (process.env.NODE_ENV || 'development'),
-    services: [
-      { name: 'api', status: 'up', latency_ms: 0 },
-      { name: 'python-engine', status: health.ok ? 'up' : 'down', latency_ms: null },
-      { name: 'scheduler', status: schedulerData.running ? 'up' : 'idle', latency_ms: null },
-    ],
-    agents_registered: healthData.agents_registered ?? 0,
-    kpis: {},
-    source: 'live',
-  });
+  const payload = mapSystemOverview(health.ok, healthData, schedulerData);
+  res.json(payload);
 });
 
 app.get('/trading/overview', async (req, res) => {
   const log = (req as any).log;
   log.info('trading.overview');
-  const [account, positions] = await Promise.all([
+  const [account, positions, scheduler] = await Promise.all([
     getJson<any>('/mt5/accounts/balance'),
     getJson<any>('/mt5/positions'),
+    getJson<any>('/scheduler/status'),
   ]);
   if (!account.ok && !positions.ok) {
     res.status(503).json({ error: 'python_service_unavailable', source: 'unavailable' });
@@ -554,22 +529,8 @@ app.get('/trading/overview', async (req, res) => {
   }
   const accountData = account.ok ? account.data : {};
   const positionsData = positions.ok ? positions.data : { positions: [] };
-  const openPositions = Array.isArray(positionsData.positions) ? positionsData.positions : [];
-  res.json({
-    today: {
-      trades: 0,
-      wins: 0,
-      losses: 0,
-      net_pnl: accountData.total_unrealized_pnl ?? 0,
-      gross_profit: 0,
-      gross_loss: 0,
-      profit_factor: 0,
-    },
-    account: accountData.account ?? null,
-    open_positions: openPositions.length,
-    recent_trades: [],
-    source: 'live',
-  });
+  const schedulerData = scheduler.ok ? scheduler.data : {};
+  res.json(mapTradingOverview(accountData, positionsData, schedulerData));
 });
 
 app.get('/positions', async (req, res) => {
@@ -586,14 +547,7 @@ app.get('/market/overview', async (req, res) => {
     res.status(503).json({ error: 'python_service_unavailable', source: 'unavailable' });
     return;
   }
-  const symbols = Array.isArray(symbolsResult.data.symbols) ? symbolsResult.data.symbols : [];
-  res.json({
-    session: null,
-    sessions: [],
-    symbols,
-    regime: null,
-    source: 'live',
-  });
+  res.json(mapMarketOverview(symbolsResult.data));
 });
 
 app.get('/tasks', async (req, res) => {
@@ -639,6 +593,9 @@ app.get('/system/health', async (req, res) => {
   res.json({
     overall: python.ok ? 'healthy' : 'degraded',
     components,
+    // Real risk-gate limits from the Python service (null when unavailable —
+    // never a hard-coded 15% / 5% in the UI).
+    risk_gate: python.ok ? (python.data?.risk_gate ?? null) : null,
     checked_at: new Date().toISOString(),
     source: 'live',
   });
@@ -652,30 +609,7 @@ app.get('/ai/providers', async (req, res) => {
     res.status(503).json({ error: 'python_service_unavailable', source: 'unavailable' });
     return;
   }
-  const models = Array.isArray(result.data.models) ? result.data.models : [];
-  const byProvider = new Map<string, number>();
-  for (const model of models) {
-    const provider = model.provider ?? 'unknown';
-    byProvider.set(provider, (byProvider.get(provider) ?? 0) + 1);
-  }
-  const providers = Array.from(byProvider.entries()).map(([name, models_available], index) => ({
-    name,
-    status: result.data.health?.state === 'CONNECTED' ? 'up' : 'degraded',
-    models_available,
-    priority: index + 1,
-    calls_today: 0,
-  }));
-  res.json({
-    router: {
-      name: '9Router',
-      status: result.data.health?.state === 'CONNECTED' ? 'up' : 'degraded',
-      latency_ms: null,
-      failover_enabled: true,
-    },
-    providers,
-    budget: { tokens_used: 0, tokens_limit: 0, cost_today: 0 },
-    source: 'live',
-  });
+  res.json(mapProvidersOverview(result.data));
 });
 
 app.get('/ai/models', async (req, res) => {

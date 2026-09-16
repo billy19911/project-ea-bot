@@ -81,6 +81,11 @@ function formatContext(v: unknown): string {
 
 // Service uptime in seconds → "3h 12m 40s". Missing/invalid → em dash.
 // Never prints a raw float and never invents a value when uptime is unknown.
+function nullableValue(v: unknown): string {
+  if (v === null || v === undefined) return '—';
+  return String(v);
+}
+
 function formatUptimeSeconds(v: unknown): string {
   if (v === null || v === undefined || v === '') return '—';
   const n = typeof v === 'number' ? v : Number(v);
@@ -210,7 +215,7 @@ export default function ControlPlanePage() {
         ))}
         <div className={styles.sidebarBottom}>
           <span className={styles.greenDot} /> Paper mode
-          <div className={styles.version}>EPIC 15 · v1.0.0</div>
+          <div className={styles.version}>v1.0.0</div>
         </div>
       </aside>
 
@@ -288,7 +293,7 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
         <section className={s.card}>
           <h2>Status Sistem</h2>
           <div className={s.kpiRow}>
-            <div className={s.kpi}><span className={s.kpiValue}>{overview.mode}</span><span className={s.kpiLabel}>Mode</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(overview.mode)}</span><span className={s.kpiLabel}>Mode</span></div>
             <div className={s.kpi}><span className={s.kpiValue}>{overview.status}</span><span className={s.kpiLabel}>Status</span></div>
             <div className={s.kpi}><span className={s.kpiValue}>{formatUptimeSeconds(overview.uptime)}</span><span className={s.kpiLabel}>Uptime</span></div>
           </div>
@@ -299,7 +304,7 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
                 <tr key={svc.name}>
                   <td>{svc.name}</td>
                   <td><span className={`${s.badge} ${badgeClass(svc.status, s)}`}>{svc.status}</span></td>
-                  <td>{svc.latency_ms}ms</td>
+                  <td>{svc.latency_ms == null ? '—' : svc.latency_ms + 'ms'}</td>
                 </tr>
               ))}
             </tbody>
@@ -308,13 +313,13 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
         <section className={s.card}>
           <h2>KPI Hari Ini</h2>
           <div className={s.kpiRow}>
-            <div className={s.kpi}><span className={s.kpiValue}>{overview.kpis?.open_positions}</span><span className={s.kpiLabel}>Open positions</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{overview.kpis?.daily_pnl}</span><span className={s.kpiLabel}>Daily PnL</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{overview.kpis?.win_rate_today}%</span><span className={s.kpiLabel}>Win rate</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(overview.kpis?.open_positions)}</span><span className={s.kpiLabel}>Open positions</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(overview.kpis?.daily_pnl)}</span><span className={s.kpiLabel}>Daily PnL</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{overview.kpis?.win_rate_today == null ? '—' : overview.kpis.win_rate_today + '%'}</span><span className={s.kpiLabel}>Win rate</span></div>
           </div>
           <h3>Risk utilization</h3>
-          <div className={s.bar}><div className={s.barFill} style={{ width: `${overview.kpis?.risk_utilization}%` }} /></div>
-          <div className={s.mono}>{overview.kpis?.risk_utilization}% dari budget</div>
+          <div className={s.bar}><div className={s.barFill} style={{ width: `${overview.kpis?.risk_utilization ?? 0}%` }} /></div>
+          <div className={s.mono}>{overview.kpis?.risk_utilization == null ? '—' : overview.kpis.risk_utilization + '% dari budget'}</div>
         </section>
       </div>
     );
@@ -327,10 +332,10 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
         <section className={s.card}>
           <h2>Ringkasan Hari Ini</h2>
           <div className={s.kpiRow}>
-            <div className={s.kpi}><span className={s.kpiValue}>{trading.today?.trades}</span><span className={s.kpiLabel}>Trades</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{trading.today?.wins}W / {trading.today?.losses}L</span><span className={s.kpiLabel}>Win/Loss</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{trading.today?.net_pnl}</span><span className={s.kpiLabel}>Net PnL</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{trading.today?.profit_factor}</span><span className={s.kpiLabel}>Profit factor</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading.today?.trades)}</span><span className={s.kpiLabel}>Trades</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{trading.today?.wins == null || trading.today?.losses == null ? '—' : trading.today.wins + 'W / ' + trading.today.losses + 'L'}</span><span className={s.kpiLabel}>Win/Loss</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading.today?.unrealized_pnl)}</span><span className={s.kpiLabel}>Unrealized PnL</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading.today?.profit_factor)}</span><span className={s.kpiLabel}>Profit factor</span></div>
           </div>
         </section>
         <section className={s.card}>
@@ -366,19 +371,22 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
           <table className={s.table}>
             <thead><tr><th>Ticket</th><th>Symbol</th><th>Side</th><th>Vol</th><th>Open</th><th>Current</th><th>SL</th><th>TP</th><th>PnL</th></tr></thead>
             <tbody>
-              {positions.positions?.map((p: any) => (
+              {positions.positions?.map((p: any) => {
+                const pnl = p.unrealized_pnl ?? p.profit ?? null;
+                return (
                 <tr key={p.ticket}>
                   <td className={s.mono}>{p.ticket}</td>
                   <td><strong>{p.symbol}</strong></td>
                   <td>{p.side}</td>
-                  <td>{p.volume}</td>
-                  <td>{p.open_price}</td>
-                  <td>{p.current_price}</td>
-                  <td>{p.sl}</td>
-                  <td>{p.tp}</td>
-                  <td style={{ color: p.pnl > 0 ? '#027a48' : p.pnl < 0 ? '#b42318' : undefined }}>{p.pnl}</td>
+                  <td>{p.quantity ?? p.volume ?? '—'}</td>
+                  <td>{p.price_open ?? p.open_price ?? '—'}</td>
+                  <td>{p.price_current ?? p.current_price ?? '—'}</td>
+                  <td>{p.sl ?? '—'}</td>
+                  <td>{p.tp ?? '—'}</td>
+                  <td style={{ color: pnl == null ? undefined : pnl > 0 ? '#027a48' : pnl < 0 ? '#b42318' : undefined }}>{pnl == null ? '—' : pnl}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -393,14 +401,16 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
         <section className={s.card}>
           <h2>Session & Regime</h2>
           <div className={s.kpiRow}>
-            <div className={s.kpi}><span className={s.kpiValue}>{market.session}</span><span className={s.kpiLabel}>Active session</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{market.regime?.label}</span><span className={s.kpiLabel}>Regime ({Math.round((market.regime?.confidence || 0) * 100)}%)</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(market.session)}</span><span className={s.kpiLabel}>Active session</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(market.regime?.label)}</span><span className={s.kpiLabel}>{market.regime?.confidence == null ? 'Regime' : `Regime (${Math.round(market.regime.confidence * 100)}%)`}</span></div>
           </div>
           <h3>Sessions</h3>
           <table className={s.table}><tbody>
-            {market.sessions?.map((sess: any) => (
+            {market.sessions?.length ? market.sessions.map((sess: any) => (
               <tr key={sess.name}><td>{sess.name}</td><td><span className={`${s.badge} ${badgeClass(sess.status === 'open' ? 'OPEN' : sess.status.toUpperCase(), s)}`}>{sess.status}</span></td></tr>
-            ))}
+            )) : (
+              <tr><td>—</td><td>Tidak ada data sesi.</td></tr>
+            )}
           </tbody></table>
         </section>
         <section className={s.card}>
@@ -411,10 +421,10 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
               {market.symbols?.map((sym: any) => (
                 <tr key={sym.symbol}>
                   <td><strong>{sym.symbol}</strong></td>
-                  <td>{sym.price}</td>
-                  <td style={{ color: sym.change_pct > 0 ? '#027a48' : '#b42318' }}>{sym.change_pct}%</td>
-                  <td>{sym.spread}</td>
-                  <td><span className={`${s.badge} ${sym.volatility === 'HIGH' ? s.danger : sym.volatility === 'MEDIUM' ? s.warning : s.muted}`}>{sym.volatility}</span></td>
+                  <td>{sym.price ?? '—'}</td>
+                  <td style={{ color: sym.change_pct == null ? undefined : sym.change_pct > 0 ? '#027a48' : '#b42318' }}>{sym.change_pct == null ? '—' : `${sym.change_pct}%`}</td>
+                  <td>{sym.spread ?? '—'}</td>
+                  <td>{sym.volatility == null ? '—' : <span className={`${s.badge} ${sym.volatility === 'HIGH' ? s.danger : sym.volatility === 'MEDIUM' ? s.warning : s.muted}`}>{sym.volatility}</span>}</td>
                 </tr>
               ))}
             </tbody>
@@ -432,8 +442,8 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
           <h2>Supervisor</h2>
           <div className={s.kpiRow}>
             <div className={s.kpi}><span className={s.kpiValue}>{aiControl.supervisor?.status}</span><span className={s.kpiLabel}>Status</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{aiControl.supervisor?.token_used}/{aiControl.supervisor?.token_budget}</span><span className={s.kpiLabel}>Token budget</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{aiControl.supervisor?.max_concurrency}</span><span className={s.kpiLabel}>Max concurrency</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{aiControl.supervisor?.token_used == null || aiControl.supervisor?.token_budget == null ? '—' : `${aiControl.supervisor.token_used}/${aiControl.supervisor.token_budget}`}</span><span className={s.kpiLabel}>Token budget</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(aiControl.supervisor?.max_concurrency)}</span><span className={s.kpiLabel}>Max concurrency</span></div>
           </div>
         </section>
         <section className={s.card}>
@@ -520,12 +530,12 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
         <section className={s.card}>
           <h2>Risk Center</h2>
           <div className={s.kpiRow}>
-            <div className={s.kpi}><span className={s.kpiValue}>{overview?.kpis?.risk_utilization}%</span><span className={s.kpiLabel}>Risk utilization</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>15%</span><span className={s.kpiLabel}>Max drawdown</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>5%</span><span className={s.kpiLabel}>Daily loss limit</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{overview?.kpis?.risk_utilization == null ? '—' : `${overview.kpis.risk_utilization}%`}</span><span className={s.kpiLabel}>Risk utilization</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{health.risk_gate?.max_drawdown_pct == null ? '—' : `${health.risk_gate.max_drawdown_pct}%`}</span><span className={s.kpiLabel}>Max drawdown</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{health.risk_gate?.max_daily_loss == null ? '—' : `${health.risk_gate.max_daily_loss}`}</span><span className={s.kpiLabel}>Daily loss limit</span></div>
           </div>
           <h3>Risk budget</h3>
-          <div className={s.bar}><div className={s.barFillGreen} style={{ width: `${overview?.kpis?.risk_utilization}%` }} /></div>
+          <div className={s.bar}><div className={s.barFillGreen} style={{ width: `${overview?.kpis?.risk_utilization ?? 0}%` }} /></div>
         </section>
         <section className={s.card}>
           <h2>Safety Controls</h2>
@@ -660,7 +670,7 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
           <h2>AI Router — {providers.router?.name}</h2>
           <div className={s.kpiRow}>
             <div className={s.kpi}><span className={s.kpiValue}>{providers.router?.status}</span><span className={s.kpiLabel}>Status</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{providers.router?.latency_ms}ms</span><span className={s.kpiLabel}>Latency</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{providers.router?.latency_ms == null ? '—' : `${providers.router.latency_ms}ms`}</span><span className={s.kpiLabel}>Latency</span></div>
             <div className={s.kpi}><span className={s.kpiValue}>{providers.router?.failover_enabled ? 'ON' : 'OFF'}</span><span className={s.kpiLabel}>Failover</span></div>
           </div>
         </section>

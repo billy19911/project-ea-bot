@@ -2,6 +2,20 @@
 Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
+### Fixed — Honest Data Pass (Run 21)
+
+Menghapus "data fabrikasi" (angka `0`/`[]`/label `live` palsu) di endpoint overview & render UI, agar UI menampilkan `—` ketika data tidak tersedia (honesty over completeness).
+
+- **`/trading/overview`**: sebelumnya menaruh PnL belum terealisasi (`total_unrealized_pnl`) ke field `today.net_pnl` dan mengarang `trades/wins/losses: 0` + `recent_trades: []` sambil mengklaim `source: 'live'`. Kini memetakan field nyata (`trades_executed`, `win_rate`, `profit_factor`, `recent_trades` dengan `side`/`quantity`/`unrealized_pnl`) dan `null` saat sumber tidak tersedia.
+- **`/market/overview`**: `session`/`regime`/`volatility` tidak lagi dikarang; `null` bila tak ada data (harga tetap dari `bid`/`ask` nyata).
+- **`/system/overview`**: `mode` dan KPI tidak lagi `{}`/hardcode; dihitung dari health nyata, `null` bila gagal.
+- **`/ai-control/status`**: hapus daftar agent fabrikasi; `token_used`/`token_budget` `null` saat tidak ada.
+- **Risk Center UI**: hapus hardcode **15%** max drawdown / **5%** daily loss; kini memakai limit nyata dari Python `/health` (`risk_gate.max_drawdown_pct`, `max_daily_loss`).
+- **Positions UI**: perbaiki nama field yang salah (`volume`/`open_price`/`current_price`/`pnl`) → `quantity`/`price_open`/`price_current`/`unrealized_pnl`; kolom tanpa data menampilkan `—`.
+- **Token/cost jujur**: `ai-control` & `observability` menampilkan `—` untuk Total Tokens/Cost saat 0 LLM call (sebelumnya `0`/`$0.000`).
+- **Label roadmap dibersihkan dari UI**: `EPIC 15`, `Phase 23/24/27` di header/kartu/komentar CSS dihapus (konsisten dengan README yang bersih dari roadmap).
+- **Test**: `apps/api/test/overview-mapping.test.cjs` (regresi baru) menutup mapping jujur; suite Node **38/38** hijau.
+
 ### Changed — Hardening & UI Real-Data Iterations (Runs 10–19)
 
 - **CI always-green**: perbaiki workflow CI yang invalid, dependensi & audit, `node --test` portabel (Node 20 & 22), test DB default yang deterministik, config validator memuat `.env`; hasil CI 8/8 hijau.

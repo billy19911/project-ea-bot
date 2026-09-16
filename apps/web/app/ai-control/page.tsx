@@ -137,7 +137,7 @@ export default function AIControlPage() {
         <a href="/observability" className={styles.navItem}><span>📊</span> Observability</a>
         <div className={styles.sidebarBottom}>
           <span className={styles.greenDot} /> {source === 'live' ? 'Supervisor aktif' : 'Data tidak tersedia'}
-          <div className={styles.version}>Phase 23 · {source === 'live' ? 'Live' : 'Offline'}</div>
+          <div className={styles.version}>{source === 'live' ? 'Live' : 'Offline'}</div>
         </div>
       </aside>
 
@@ -285,8 +285,8 @@ export default function AIControlPage() {
           <section className={styles.card}>
             <h2>Penggunaan model LLM</h2>
             <div className={styles.modelSummary}>
-              <div><small>Total token</small><strong>{totalTokens.toLocaleString()}</strong></div>
-              <div><small>Total cost</small><strong>${totalCost.toFixed(3)}</strong></div>
+              <div><small>Total token</small><strong>{totalCalls > 0 ? totalTokens.toLocaleString() : '—'}</strong></div>
+              <div><small>Total cost</small><strong>{totalCalls > 0 ? `$${totalCost.toFixed(3)}` : '—'}</strong></div>
               <div><small>Avg per call</small><strong>{totalCalls > 0 ? `${Math.round(totalTokens / totalCalls)} token` : '—'}</strong></div>
             </div>
             <div className={styles.tableWrapper}>
