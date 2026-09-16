@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     mt5_login: int | None = Field(default=None, alias="MT5_LOGIN")
     mt5_password: str | None = Field(default=None, alias="MT5_PASSWORD")
     mt5_server: str = Field(default="", alias="MT5_SERVER")
+    mt5_live_data: bool = Field(default=False, alias="MT5_LIVE_DATA")
 
     # Database
     database_url: str = Field(default="sqlite:///./ea_bot.db", alias="DATABASE_URL")

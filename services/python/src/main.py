@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .agents.registry import agent_registry
 from .config import settings
+from .mt5 import connector
 from .mt5.endpoints import router as mt5_router
 from .orchestration.endpoints import router as orchestration_router
 from .orchestration.runtime import get_runtime
@@ -51,6 +52,10 @@ async def lifespan(app: FastAPI):
             settings.scheduler_poll_interval,
         )
 
+    if settings.mt5_live_data:
+        live_data_started = connector.use_live_data_mode()
+        logger.info("MT5 live data mode startup: %s", live_data_started)
+
     yield
 
     # Shutdown
@@ -59,6 +64,9 @@ async def lifespan(app: FastAPI):
             await get_runtime().scheduler.stop()
         except Exception:  # pragma: no cover - defensive
             logger.exception("Error stopping autonomous scheduler")
+
+    if connector.is_live_mode():
+        connector.shutdown()
 
 
 app = FastAPI(

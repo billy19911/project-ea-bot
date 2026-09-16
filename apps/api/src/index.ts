@@ -539,6 +539,12 @@ app.get('/positions', async (req, res) => {
   await sendProxy(res, '/mt5/positions', undefined, req);
 });
 
+app.get('/mt5/mode', async (req, res) => {
+  const log = (req as any).log;
+  log.info('mt5.mode');
+  await sendProxy(res, '/mt5/mode', undefined, req);
+});
+
 app.get('/market/overview', async (req, res) => {
   const log = (req as any).log;
   log.info('market.overview');

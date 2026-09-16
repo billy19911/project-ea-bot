@@ -575,6 +575,35 @@ class ExecutionEngine:
                 return self._parse_send_result(res)
 
         # 2. MetaTrader5 native library integration
+        # SAFETY: never send real orders when the connector is attached to a
+        # running terminal in read-only live-data mode (see mt5.connector).
+        # Check both import paths — the FastAPI app imports ``src.mt5`` while
+        # tests import ``mt5``, and they are distinct module instances.
+        _live_data_block = False
+        for _mod_name in ("mt5.connector", "src.mt5.connector"):
+            try:
+                import importlib
+
+                _conn = importlib.import_module(_mod_name)
+                if _conn.is_live_mode():
+                    _live_data_block = True
+                    break
+            except ImportError:
+                continue
+
+        if _live_data_block:
+            logger.warning(
+                "Execution blocked: MT5 live-data (read-only) mode is active — "
+                "native order_send is disabled."
+            )
+            return {
+                "success": False,
+                "ticket": None,
+                "error_code": 1,
+                "message": "LIVE DATA MODE (read-only) — order execution disabled.",
+                "price": None,
+            }
+
         try:
             import MetaTrader5 as mt5
 

@@ -2,6 +2,29 @@
 Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
+### Added — MT5 Live Read-Only Data Mode (Run 23)
+
+Connector dapat attach ke terminal MT5 yang **sedang berjalan** untuk membaca data pasar & akun **nyata** — tanpa kredensial dan **tanpa kemampuan eksekusi order**.
+
+- **`MT5_LIVE_DATA=true`** (env): memanggil `mt5.initialize()` untuk attach ke terminal yang sudah login; default `false` = paper mode seperti sebelumnya.
+- **Endpoint baru `GET /mt5/mode`**: `{"live_data": true, "execution": "disabled (read-only)"}` + proxy Node `GET /mt5/mode`.
+- **Safety berlapis**: `connector.execute_order()` menolak order di mode ini, dan jalur native `mt5.order_send()` di `execution/engine.py` diblokir (guard membaca kedua jalur import modul `mt5.connector` / `src.mt5.connector`).
+- **Dashboard jujur**: badge sidebar & topbar berubah jadi **LIVE DATA · READ-ONLY** saat mode aktif; tab Trading menampilkan kartu **Akun MT5 (Live)** (login, balance, equity, free margin, server, leverage) dari `/trading/overview`.
+- **`nullableValue`** kini membulatkan float (maks 2 desimal) — noise biner seperti `-120.70000000000002` tidak lagi bocor ke UI.
+- **`requirements.txt`**: `MetaTrader5 ; sys_platform == "win32"` (aman untuk CI Linux — paket di-skip).
+- **`.env.example` + README**: seksi baru "Mode data live MT5 (read-only)" dengan langkah install & run.
+
+### Fixed — MT5 Live Path Bugs (Run 23)
+
+6 bug di jalur live `services/python/src/mt5/connector.py` yang membuat data nyata tidak pernah terbaca (terverifikasi dengan terminal MT5 nyata):
+
+- `get_tick()`: memanggil `mt5.symbols_get_tick()` (tidak ada) → `mt5.symbol_info_tick()`; objek Tick tidak punya `.symbol` → pakai argumen symbol.
+- `get_symbol_info()`: cek `isinstance(raw, list)` padahal `symbols_get()` mengembalikan tuple → symbol info live selalu crash.
+- `get_ohlc()`: hardcode `TIMEFRAME_H1` → kini menghormati parameter timeframe (map M1–MN1); atribut numpy array `r.symbol` (tidak ada) → pakai argumen symbol.
+- `get_positions()`: `p.margin` (tidak ada di `TradePosition`) → `0.0`; `p.entry` (tidak ada) → `POSITION_REASON_CLIENT` → entry IN/OUT.
+- `get_orders()`: `o.volume`/`o.stoplimit` (tidak ada di `TradeOrder`) → field nyata + turunan stop limit.
+- **Test**: `tests/test_mt5_live_data_mode.py` (18 test, mock tanpa MT5 nyata — aman untuk CI Linux); suite Python **1154 passed**.
+
 ### Fixed — Honest UI Pass 2 (Run 22)
 
 Menutup sisa celah kejujuran data di Control Plane: KPI kini dibaca dari endpoint yang benar, Safety Controls tidak lagi hardcode, dan tab Learning tidak lagi merender "%" kosong.

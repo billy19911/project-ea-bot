@@ -23,6 +23,20 @@ router = APIRouter(prefix="/mt5", tags=["mt5-paper-trading"])
 
 
 # ---------------------------------------------------------------------------
+# Mode
+# ---------------------------------------------------------------------------
+
+
+@router.get("/mode")
+async def get_mode() -> dict:
+    """Report MT5 data mode."""
+    return {
+        "live_data": connector.is_live_mode(),
+        "execution": "disabled (read-only)" if connector.is_live_mode() else "paper",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Accounts
 # ---------------------------------------------------------------------------
 

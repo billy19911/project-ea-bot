@@ -254,6 +254,27 @@ localStorage.setItem('ea-bot-token', '<token>')
 | Node API | 3001 | `GET /health` |
 | Web (Next.js) | 3200 | buka `/` |
 
+### Mode data live MT5 (read-only)
+
+Secara default bot berjalan dalam **paper mode** (data simulasi). Untuk membaca
+data pasar & posisi **nyata** dari terminal MT5 yang sedang berjalan:
+
+```bash
+# 1. Install paket resmi (Windows only)
+cd services/python && .venv/Scripts/pip install MetaTrader5
+
+# 2. Jalankan Python service dengan mode live read-only
+MT5_LIVE_DATA=true uvicorn src.main:app --host 127.0.0.1 --port 8000
+```
+
+Yang terjadi saat `MT5_LIVE_DATA=true`:
+
+- Connector attach ke terminal MT5 yang sudah login (`mt5.initialize()`, tanpa kredensial).
+- Endpoint `/mt5/mode` melaporkan `{"live_data": true, "execution": "disabled (read-only)"}`.
+- Dashboard menampilkan badge **LIVE DATA · READ-ONLY** dan data akun/posisi nyata.
+- **Order eksekusi DIBLOKIR** di connector dan execution engine — mode ini hanya untuk membaca.
+- Tanpa variabel ini (default), semua tetap paper mode dan aman di CI Linux (paket MT5 di-skip).
+
 ---
 
 ## Dokumentasi

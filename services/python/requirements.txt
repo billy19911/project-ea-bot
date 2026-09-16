@@ -8,3 +8,4 @@ sqlalchemy==2.0.52
 python-multipart==0.0.32
 httpx==0.28.1
 openai==3.13.0
+MetaTrader5==5.0.6180 ; sys_platform == "win32"

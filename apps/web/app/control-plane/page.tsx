@@ -83,6 +83,12 @@ function formatContext(v: unknown): string {
 // Never prints a raw float and never invents a value when uptime is unknown.
 function nullableValue(v: unknown): string {
   if (v === null || v === undefined) return '—';
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) return '—';
+    // Round to at most 2 decimals so binary float noise (-120.70000000000002)
+    // never leaks into the UI. Integers stay integers.
+    return Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100);
+  }
   return String(v);
 }
 
@@ -146,7 +152,7 @@ export default function ControlPlanePage() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
-    const [overview, trading, positions, market, aiControl, tasks, decisions, execution, audit, health, committee, telegram, providers, models, learning, reconciliation] = await Promise.all([
+    const [overview, trading, positions, market, aiControl, tasks, decisions, execution, audit, health, committee, telegram, providers, models, learning, reconciliation, mt5Mode] = await Promise.all([
       fetchJson('/system/overview'),
       fetchJson('/trading/overview'),
       fetchJson('/positions'),
@@ -163,8 +169,9 @@ export default function ControlPlanePage() {
       fetchJson('/ai/models'),
       fetchJson('/learning/analytics'),
       fetchJson('/reconciliation/status'),
+      fetchJson('/mt5/mode'),
     ]);
-    setData({ overview, trading, positions, market, aiControl, tasks, decisions, execution, audit, health, committee, telegram, providers, models, learning, reconciliation });
+    setData({ overview, trading, positions, market, aiControl, tasks, decisions, execution, audit, health, committee, telegram, providers, models, learning, reconciliation, mt5Mode });
     setLoading(false);
   }, [fetchJson]);
 
@@ -210,6 +217,8 @@ export default function ControlPlanePage() {
     }
   };
 
+  const mt5Mode = data.mt5Mode as { live_data?: boolean; execution?: string } | undefined;
+
   return (
     <div className={styles.shell}>
       <aside className={styles.sidebar}>
@@ -231,7 +240,7 @@ export default function ControlPlanePage() {
           </button>
         ))}
         <div className={styles.sidebarBottom}>
-          <span className={styles.greenDot} /> Paper mode
+          <span className={styles.greenDot} /> {mt5Mode?.live_data ? 'Live data · read-only' : 'Paper mode'}
           <div className={styles.version}>v1.0.0</div>
         </div>
       </aside>
@@ -243,7 +252,7 @@ export default function ControlPlanePage() {
             <h1>{TABS.find((t) => t.id === tab)?.label}</h1>
           </div>
           <div>
-            <span className={styles.envBadge}>PAPER</span>
+            <span className={styles.envBadge}>{mt5Mode?.live_data ? 'LIVE DATA · READ-ONLY' : 'PAPER'}</span>
             <button
               className={styles.tab}
               style={{ marginLeft: 10 }}
@@ -353,6 +362,18 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
     if (!trading) return <div className={s.empty}>Tidak ada data trading.</div>;
     return (
       <div className={s.grid}>
+        {trading.account && (
+          <section className={s.card}>
+            <h2>Akun MT5 (Live)</h2>
+            <div className={s.kpiRow}>
+              <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading.account.login)}</span><span className={s.kpiLabel}>Login</span></div>
+              <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading.account.balance)}</span><span className={s.kpiLabel}>Balance ({trading.account.currency ?? '—'})</span></div>
+              <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading.account.equity)}</span><span className={s.kpiLabel}>Equity</span></div>
+              <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading.account.free_margin)}</span><span className={s.kpiLabel}>Free margin</span></div>
+            </div>
+            <div className={s.mono}>{trading.account.server ?? '—'} · leverage {trading.account.leverage ?? '—'}</div>
+          </section>
+        )}
         <section className={s.card}>
           <h2>Ringkasan Hari Ini</h2>
           <div className={s.kpiRow}>

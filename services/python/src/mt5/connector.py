@@ -93,6 +93,28 @@ def use_live_mode(
     return True
 
 
+def use_live_data_mode() -> bool:
+    """Connect to running MT5 terminal for read-only data without credentials."""
+    global _live_mode, _mt5_available
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        _mt5_available = False
+        return False
+
+    try:
+        ok = mt5.initialize()
+    except Exception:
+        # A missing/dead terminal must never break service startup.
+        _mt5_available = False
+        return False
+    if ok:
+        _live_mode = True
+        _mt5_available = True
+        return True
+    return False
+
+
 def is_live_mode() -> bool:
     """Return True if connected to a live MT5 terminal."""
     return _live_mode
@@ -231,7 +253,7 @@ def get_symbol_info(symbol: str) -> Optional[SymbolInfo]:
             raw = mt5.symbols_get(symbol)
             if raw is None:
                 return None
-            s = raw[0] if isinstance(raw, list) else raw
+            s = raw[0] if isinstance(raw, (list, tuple)) else raw
             return SymbolInfo(
                 symbol=s.name,
                 bid=s.bid,
@@ -273,16 +295,15 @@ def get_tick(symbol: str) -> Optional[Tick]:
         try:
             import MetaTrader5 as mt5
 
-            ticks = mt5.symbols_get_tick(symbol)
-            if ticks is None or len(ticks) == 0:
+            t = mt5.symbol_info_tick(symbol)
+            if t is None:
                 return None
-            t = ticks[-1]
             return Tick(
-                symbol=t.symbol,
+                symbol=symbol,
                 bid=t.bid,
                 ask=t.ask,
                 last=t.last,
-                volume=t.volume,
+                volume=float(t.volume),
                 time=datetime.fromtimestamp(t.time),
             )
         except Exception:
@@ -308,12 +329,24 @@ def get_ohlc(symbol: str, timeframe: str = "H1", count: int = 100) -> list[OHLC]
         try:
             import MetaTrader5 as mt5
 
-            rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_H1, 0, count)
+            _TF_MAP = {
+                "M1": mt5.TIMEFRAME_M1,
+                "M5": mt5.TIMEFRAME_M5,
+                "M15": mt5.TIMEFRAME_M15,
+                "M30": mt5.TIMEFRAME_M30,
+                "H1": mt5.TIMEFRAME_H1,
+                "H4": mt5.TIMEFRAME_H4,
+                "D1": mt5.TIMEFRAME_D1,
+                "W1": mt5.TIMEFRAME_W1,
+                "MN1": mt5.TIMEFRAME_MN1,
+            }
+            tf = _TF_MAP.get(str(timeframe).upper(), mt5.TIMEFRAME_H1)
+            rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
             if rates is None:
                 return []
             return [
                 OHLC(
-                    symbol=r.symbol,
+                    symbol=symbol,
                     timeframe=timeframe,
                     open=r["open"],
                     high=r["high"],
@@ -373,8 +406,12 @@ def get_positions() -> list[Position]:
                     swap=p.swap,
                     profit=p.profit,
                     unrealized_pnl=p.profit,
-                    margin=p.margin,
-                    entry=("POSITION_ENTRY_IN" if p.entry == 0 else "POSITION_ENTRY_OUT"),
+                    margin=0.0,
+                    entry=(
+                        "POSITION_ENTRY_IN"
+                        if p.reason == mt5.POSITION_REASON_CLIENT
+                        else "POSITION_ENTRY_OUT"
+                    ),
                     status="OPEN",
                     time=datetime.fromtimestamp(p.time),
                     time_update=datetime.fromtimestamp(p.time_update),
@@ -435,11 +472,11 @@ def get_orders() -> list[Order]:
                 Order(
                     ticket=o.ticket,
                     symbol=o.symbol,
-                    side="BUY" if o.type == 0 else "SELL",
+                    side="BUY" if o.type in (0, 2, 4) else "SELL",
                     order_type=str(o.type),
                     price=o.price_open,
-                    stop_price=o.stoplimit,
-                    quantity=o.volume,
+                    stop_price=getattr(o, "price_stoplimit", None),
+                    quantity=o.volume_initial,
                     filled_qty=o.volume_current,
                     status=str(o.state),
                     time_setup=datetime.fromtimestamp(o.time_setup),
@@ -458,41 +495,14 @@ def get_orders() -> list[Order]:
 def execute_order(request) -> dict:
     """Execute an order (paper trading — simulated, no real execution)."""
     if _live_mode:
-        try:
-            import MetaTrader5 as mt5
-
-            req = request if isinstance(request, dict) else request.model_dump()
-            order_type = mt5.ORDER_TYPE_BUY if req["side"] == "BUY" else mt5.ORDER_TYPE_SELL
-            price = req.get("price") or (
-                get_tick(req["symbol"]).ask if req["side"] == "BUY" else get_tick(req["symbol"]).bid
-            )
-            request_obj = {
-                "action": mt5.TRADE_ACTION_DEAL,
-                "symbol": req["symbol"],
-                "volume": req["quantity"],
-                "type": order_type,
-                "price": price,
-                "deviation": 20,
-                "magic": 123456,
-                "comment": req.get("comment", "paper"),
-                "type_time": mt5.ORDER_TIME_GTC,
-            }
-            result = mt5.order_send(request_obj)
-            return {
-                "success": result.retcode == mt5.TRADE_RETCODE_DONE,
-                "order_id": (result.order if result.retcode == mt5.TRADE_RETCODE_DONE else None),
-                "message": result.comment,
-                "price": result.price,
-                "executed_at": datetime.now(),
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "order_id": None,
-                "message": str(e),
-                "price": None,
-                "executed_at": None,
-            }
+        return {
+            "success": False,
+            "order_id": None,
+            "message": "LIVE DATA MODE (read-only) — order execution disabled. "
+            "Paper order not sent to broker.",
+            "price": None,
+            "executed_at": None,
+        }
 
     # Simulation — always succeeds, paper trading
     sym = request.symbol if hasattr(request, "symbol") else request.get("symbol", "EURUSD")
