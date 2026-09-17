@@ -36,9 +36,13 @@ def _clean_state():
     """Reset module-level manager state around every test."""
     terminals._selected_id = None
     terminals._execution_armed = False
+    terminals._account_cache = {}
+    terminals._account_cache_ts = None
     yield
     terminals._selected_id = None
     terminals._execution_armed = False
+    terminals._account_cache = {}
+    terminals._account_cache_ts = None
 
 
 def _write_config(tmp_path, payload):
@@ -417,4 +421,193 @@ class TestTerminalEndpoints:
         monkeypatch.setattr(terminals, "_detect_attached_path", lambda: None)
 
         result = _run(endpoint(type("R", (), {"armed": True})()))
+        assert getattr(result, "status_code", None) == 400
+
+
+# ---------------------------------------------------------------------------
+# F7 — account probe: read-only, restores the binding, never fabricates
+# ---------------------------------------------------------------------------
+
+
+def _fake_mt5(monkeypatch, accounts_by_path):
+    """Install a fake MetaTrader5 module.
+
+    ``accounts_by_path`` maps a ``terminal64.exe`` path -> dict of account
+    fields. ``initialize(path)`` records the path as the bound terminal (like
+    the real binding does) and ``account_info()`` returns the account for the
+    currently bound path, or ``None`` when unknown.
+    """
+    import types
+
+    fake = types.ModuleType("MetaTrader5")
+
+    def initialize(path=None):
+        fake._bound_path = path
+        return fake._init_ok
+
+    def account_info():
+        acct = accounts_by_path.get(getattr(fake, "_bound_path", None))
+        if acct is None:
+            return None
+        return types.SimpleNamespace(**acct)
+
+    fake.initialize = initialize
+    fake.account_info = account_info
+    fake.shutdown = lambda: None
+    fake._init_ok = True
+    fake._bound_path = None
+    monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
+    return fake
+
+
+def _acct(login, mode="0"):
+    return {
+        "login": login,
+        "server": "Broker-Demo",
+        "trade_mode": mode,
+        "balance": 1000.0,
+        "equity": 1000.0,
+        "currency": "USD",
+    }
+
+
+class TestProbeAccounts:
+    def test_refuses_while_armed(self, monkeypatch, tmp_path):
+        """A probe next to armed execution is refused (fail-closed)."""
+        _use_config(monkeypatch, tmp_path, CONFIG_TWO)
+        terminals._execution_armed = True
+
+        result = terminals.probe_accounts()
+        assert result["ok"] is False
+        assert "armed" in result["message"].lower()
+
+    def test_refuses_with_no_running_terminal(self, monkeypatch, tmp_path):
+        _use_config(monkeypatch, tmp_path, CONFIG_TWO)
+        monkeypatch.setattr(terminals, "scan_running_terminals", lambda: [])
+        monkeypatch.setattr(terminals, "_detect_attached_path", lambda: None)
+
+        result = terminals.probe_accounts()
+        assert result["ok"] is False
+        assert "berjalan" in result["message"].lower()
+
+    def test_probes_every_running_terminal_and_restores_binding(self, monkeypatch, tmp_path):
+        """Two terminals → both read; binding returns to the original one."""
+        _use_config(monkeypatch, tmp_path, CONFIG_TWO)
+        monkeypatch.setattr(
+            terminals,
+            "scan_running_terminals",
+            lambda: [
+                {"pid": 1, "exe": r"C:\mt\A\terminal64.exe", "folder": r"C:\mt\A"},
+                {"pid": 2, "exe": r"C:\mt\C\terminal64.exe", "folder": r"C:\mt\C"},
+            ],
+        )
+        # Binding currently on A.
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\A"))
+        fake = _fake_mt5(
+            monkeypatch,
+            {
+                r"C:\mt\A\terminal64.exe": _acct(111, "0"),
+                r"C:\mt\C\terminal64.exe": _acct(222, "2"),
+            },
+        )
+        fake.initialize(path=r"C:\mt\A\terminal64.exe")  # simulate the live binding
+
+        real_connector = importlib.import_module("mt5.connector")
+        monkeypatch.setattr(real_connector, "shutdown", lambda: None)
+        monkeypatch.setattr(
+            real_connector,
+            "use_live_data_mode",
+            lambda path=None: fake.initialize(path=path) and True,
+        )
+
+        result = terminals.probe_accounts()
+        assert result["ok"] is True
+        assert result["restored"] is True
+        by_id = {r["id"]: r for r in result["results"]}
+        assert by_id["a"]["ok"] is True
+        assert by_id["a"]["account"]["login"] == 111
+        assert by_id["a"]["account"]["mode"] == "DEMO"
+        assert by_id["c"]["account"]["login"] == 222
+        assert by_id["c"]["account"]["mode"] == "LIVE"
+        # Binding restored to A (the original).
+        assert fake._bound_path == r"C:\mt\A\terminal64.exe"
+
+    def test_probe_restores_binding_even_when_a_terminal_fails(self, monkeypatch, tmp_path):
+        """A crashing terminal must not leave the binding parked elsewhere."""
+        _use_config(monkeypatch, tmp_path, CONFIG_TWO)
+        monkeypatch.setattr(
+            terminals,
+            "scan_running_terminals",
+            lambda: [
+                {"pid": 1, "exe": r"C:\mt\A\terminal64.exe", "folder": r"C:\mt\A"},
+                {"pid": 2, "exe": r"C:\mt\C\terminal64.exe", "folder": r"C:\mt\C"},
+            ],
+        )
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\A"))
+        fake = _fake_mt5(monkeypatch, {r"C:\mt\A\terminal64.exe": _acct(111)})
+        fake.initialize(path=r"C:\mt\A\terminal64.exe")
+
+        real_connector = importlib.import_module("mt5.connector")
+
+        def failing_use(path=None):
+            if path == r"C:\mt\C\terminal64.exe":
+                raise RuntimeError("terminal crashed")
+            return fake.initialize(path=path) and True
+
+        monkeypatch.setattr(real_connector, "shutdown", lambda: None)
+        monkeypatch.setattr(real_connector, "use_live_data_mode", failing_use)
+
+        result = terminals.probe_accounts()
+        assert result["ok"] is True
+        by_id = {r["id"]: r for r in result["results"]}
+        assert by_id["a"]["ok"] is True
+        assert by_id["c"]["ok"] is False
+        assert "terminal crashed" in by_id["c"]["error"]
+        # Restore still happened.
+        assert result["restored"] is True
+        assert fake._bound_path == r"C:\mt\A\terminal64.exe"
+
+    def test_probe_never_fabricates_when_account_info_empty(self, monkeypatch, tmp_path):
+        _use_config(monkeypatch, tmp_path, CONFIG_TWO)
+        monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\A"))
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\A"))
+        _fake_mt5(monkeypatch, {})  # account_info() returns None everywhere
+
+        real_connector = importlib.import_module("mt5.connector")
+        monkeypatch.setattr(real_connector, "shutdown", lambda: None)
+        monkeypatch.setattr(real_connector, "use_live_data_mode", lambda path=None: True)
+
+        result = terminals.probe_accounts()
+        assert result["ok"] is True
+        assert result["results"][0]["ok"] is False
+        assert result["results"][0]["account"] is None
+        assert "account_info" in result["results"][0]["error"]
+
+    def test_probe_cache_enriches_list_terminals(self, monkeypatch, tmp_path):
+        """After a probe, list_terminals() reports the account without re-probing."""
+        _use_config(monkeypatch, tmp_path, CONFIG_TWO)
+        monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\A"))
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\A"))
+        fake = _fake_mt5(monkeypatch, {r"C:\mt\A\terminal64.exe": _acct(111, "0")})
+        fake.initialize(path=r"C:\mt\A\terminal64.exe")
+
+        real_connector = importlib.import_module("mt5.connector")
+        monkeypatch.setattr(real_connector, "shutdown", lambda: None)
+        monkeypatch.setattr(real_connector, "use_live_data_mode", lambda path=None: True)
+
+        terminals.probe_accounts()
+        view = terminals.list_terminals()
+        by_id = {t["id"]: t for t in view["terminals"]}
+        assert by_id["a"]["account"]["login"] == 111
+        assert by_id["a"]["account"]["mode"] == "DEMO"
+        assert view["accounts_probed_at"] is not None
+
+    def test_probe_endpoint_returns_400_on_refusal(self, monkeypatch, tmp_path):
+        from mt5.endpoints import probe_terminal_accounts as endpoint
+
+        _use_config(monkeypatch, tmp_path, CONFIG_TWO)
+        monkeypatch.setattr(terminals, "scan_running_terminals", lambda: [])
+        monkeypatch.setattr(terminals, "_detect_attached_path", lambda: None)
+
+        result = _run(endpoint())
         assert getattr(result, "status_code", None) == 400

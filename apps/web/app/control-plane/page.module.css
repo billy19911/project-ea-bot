@@ -225,6 +225,24 @@
 
 .loading { color: #667085; padding: 24px; font-size: 14px; }
 
+/* Zona berbahaya (F3): arm/disarm eksekusi nyata dipisah visual dari aksi
+   read-only — merah = butuh kesadaran penuh. */
+.dangerZone {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid #fecdca;
+  background: #fef3f2;
+  border-radius: 10px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dangerZone strong { color: #b42318; font-size: 13px; }
+
+.actions { margin-top: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
 @media (max-width: 900px) {
   .shell { grid-template-columns: 1fr; }
   .sidebar { flex-direction: row; flex-wrap: wrap; }

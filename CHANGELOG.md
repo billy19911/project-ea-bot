@@ -2,6 +2,18 @@
 Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
+### Added — UI/UX Fase 3: Panel Terminal & Akun MT5 di Atas Control Plane
+
+Panel terminal dipromosikan dari tab "Trading" ke posisi teratas Control Plane
+(selalu terlihat di semua tab), dengan info akun per-terminal yang diambil
+lewat probe read-only. Tanpa dependency baru, tanpa menyentuh jalur eksekusi.
+
+- **`services/python/src/mt5/terminals.py`**: `probe_accounts()` — probe read-only: simpan binding asli, attach tiap terminal berjalan satu per satu, baca akun, lalu **selalu** restore binding asli di `finally` (kegagalan restore dilaporkan, bukan disembunyikan). Hasil di-cache di `_account_cache` (per folder) dan dipakai `list_terminals()` untuk enrich tanpa menyentuh binding. `_binding_lock` baru menyinkronkan probe vs `select_terminal` (satu binding = satu lock).
+- **`services/python/src/mt5/endpoints.py`**: `POST /mt5/terminals/probe` (read-only, tanpa jalur order).
+- **`apps/api/src/index.ts`**: proxy `POST /mt5/terminals/probe` + parameter timeout opsional di `sendPostProxy` (probe bisa >10s karena attach per terminal).
+- **`apps/web/app/control-plane/page.tsx` + `page.module.css`**: tabel terminal kini punya kolom **Akun, Server, Mode, Balance** (badge LIVE/DEMO), tombol **"Cek akun"** (disabled tanpa token), footer "Terpilih: … · akun dicek HH.MM", dan zona berbahaya terpisah visual untuk arm/disarm. Kolom kosong menampilkan "—" (tanpa fabrikasi); probe belum pernah dijalankan → "Belum diperiksa".
+- **Test**: `tests/test_mt5_terminals.py` +7 test (32 total di file) mengunci read-only + restore + anti-fabrikasi; suite Python **1194 passed**.
+
 ### Added — UI/UX Fase 1+2: Design Tokens & Single AppShell
 
 Redesign dashboard web (rencana: `docs/UI_UX_REDESIGN_PLAN.md`) dengan prinsip

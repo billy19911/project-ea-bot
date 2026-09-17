@@ -96,6 +96,21 @@ async def arm_terminal(request: ArmRequest):
     return result
 
 
+@router.post("/terminals/probe")
+async def probe_terminal_accounts():
+    """Read account info (login/server/mode/balance) from every running terminal.
+
+    Read-only: no orders, no arm changes, no selection changes. The binding is
+    restored to the originally attached terminal before returning (see
+    ``terminal_manager.probe_accounts``). Returns 400 when the probe refuses
+    (execution armed / nothing running) so the caller never sees a fake success.
+    """
+    result = terminal_manager.probe_accounts()
+    if not result.get("ok"):
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=result)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Accounts
 # ---------------------------------------------------------------------------

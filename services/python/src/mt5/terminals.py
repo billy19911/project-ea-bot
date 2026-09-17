@@ -24,6 +24,8 @@ import json
 import logging
 import ntpath
 import os
+import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -38,6 +40,7 @@ __all__ = [
     "scan_running_terminals",
     "load_config",
     "sync_selection_from_attached",
+    "probe_accounts",
 ]
 
 # Default config location: services/python/mt5_terminals.json
@@ -46,6 +49,16 @@ _DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "mt5_terminals.json"
 # Manager state (module-level, process-wide).
 _selected_id: Optional[str] = None
 _execution_armed: bool = False
+
+# Account probe cache (F3): normalized folder -> account summary. Filled ONLY by
+# ``probe_accounts()``; ``list_terminals()`` reads it to enrich entries without
+# touching the binding. Never contains credentials — summary fields only.
+_account_cache: dict[str, dict[str, Any]] = {}
+_account_cache_ts: Optional[str] = None
+# The MetaTrader5 binding is process-wide (one terminal per process), so any
+# operation that MOVES it (select, arm, probe) takes this lock — one binding
+# operation at a time, and a probe can never interleave with a switch.
+_binding_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +205,7 @@ def list_terminals() -> dict[str, Any]:
                 "pid": proc["pid"] if proc else None,
                 "attached": bool(attached_norm and attached_norm == key),
                 "selected": t["id"] == _selected_id,
+                "account": _account_cache.get(key),
             }
         )
 
@@ -213,6 +227,7 @@ def list_terminals() -> dict[str, Any]:
                 "pid": r["pid"],
                 "attached": bool(attached_norm and attached_norm == key),
                 "selected": auto_id == _selected_id,
+                "account": _account_cache.get(key),
             }
         )
 
@@ -221,6 +236,7 @@ def list_terminals() -> dict[str, Any]:
         "selected_id": _selected_id,
         "execution_armed": _execution_armed,
         "attached_path": attached_folder,
+        "accounts_probed_at": _account_cache_ts,
     }
 
 
@@ -250,6 +266,172 @@ def sync_selection_from_attached() -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Account probe (F3) — read-only, restores the binding in a ``finally``
+# ---------------------------------------------------------------------------
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _read_account_summary() -> Optional[dict[str, Any]]:
+    """Read the CURRENTLY attached account (no binding changes).
+
+    Returns ``None`` when MetaTrader5 is unavailable or ``account_info()``
+    has no data — never fabricates values. Contains no credentials.
+    """
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        return None
+    try:
+        info = mt5.account_info()
+    except Exception:
+        return None
+    if info is None:
+        return None
+
+    raw_mode = str(getattr(info, "trade_mode", ""))
+    # MT5 trade_mode enum: 0=DEMO, 1=CONTEST, 2=REAL. Unknown values map to
+    # None so the UI badge can never mislabel an account.
+    mode = {"0": "DEMO", "1": "CONTEST", "2": "LIVE"}.get(raw_mode)
+    return {
+        "login": getattr(info, "login", None),
+        "server": getattr(info, "server", None),
+        "mode": mode,
+        "trade_mode": raw_mode or None,
+        "balance": getattr(info, "balance", None),
+        "equity": getattr(info, "equity", None),
+        "currency": getattr(info, "currency", None),
+    }
+
+
+def probe_accounts() -> dict[str, Any]:
+    """Read account info from EVERY running terminal (read-only).
+
+    Safety model:
+    - Refuses while execution is armed: the probe moves the process-wide
+      binding temporarily and must not run next to live-order permission.
+    - Restores the binding to the originally attached terminal in a
+      ``finally`` block — a failed probe can never leave the binding parked
+      on a terminal the operator did not choose. If the restore itself fails,
+      the result says so honestly (``restored: false``) and the selected
+      terminal reports ``attached: false`` (fail-closed for orders).
+    - Never sends orders, never changes the arm flag, never changes selection.
+    """
+    global _account_cache, _account_cache_ts
+
+    if _execution_armed:
+        return {
+            "ok": False,
+            "message": (
+                "Execution sedang ARMED. Probe memindahkan binding sementara, "
+                "jadi harus disarmed dulu — klik Disarm lalu coba lagi."
+            ),
+            "execution_armed": True,
+        }
+
+    with _binding_lock:
+        view = list_terminals()
+        running = [t for t in view["terminals"] if t.get("running")]
+        if not running:
+            return {
+                "ok": False,
+                "message": "Tidak ada terminal yang berjalan — tidak ada yang bisa dicek.",
+                "execution_armed": _execution_armed,
+            }
+
+        from . import connector
+
+        original_folder = view["attached_path"]
+        original_path: Optional[str] = None
+        if original_folder:
+            key = _norm(original_folder)
+            match = next(
+                (t for t in view["terminals"] if t.get("folder") and _norm(t["folder"]) == key),
+                None,
+            )
+            if match:
+                original_path = match["path"]
+        if original_path is None and view["selected_id"]:
+            match = next((t for t in view["terminals"] if t["id"] == view["selected_id"]), None)
+            if match:
+                original_path = match["path"]
+
+        results: list[dict[str, Any]] = []
+        fresh: dict[str, dict[str, Any]] = {}
+        current_key = _norm(original_folder) if original_folder else None
+        try:
+            for t in running:
+                entry: dict[str, Any] = {
+                    "id": t["id"],
+                    "label": t.get("label") or t["id"],
+                    "ok": False,
+                    "account": None,
+                    "error": None,
+                }
+                t_key = _norm(t["folder"]) if t.get("folder") else None
+                try:
+                    if t_key and current_key == t_key:
+                        attached_ok = True  # binding is already here — read directly
+                    else:
+                        connector.shutdown()
+                        attached_ok = connector.use_live_data_mode(path=t["path"])
+                        current_key = t_key if attached_ok else None
+                    if not attached_ok:
+                        entry["error"] = "Gagal attach ke terminal (initialize gagal)."
+                    else:
+                        summary = _read_account_summary()
+                        if summary is None:
+                            entry["error"] = "account_info() tidak mengembalikan data."
+                        else:
+                            entry["ok"] = True
+                            entry["account"] = summary
+                            if t_key:
+                                fresh[t_key] = summary
+                except Exception as exc:  # one bad terminal must not abort the probe
+                    entry["error"] = str(exc)[:160]
+                results.append(entry)
+        finally:
+            # ALWAYS put the binding back where it was. Failure here is
+            # reported, never hidden.
+            restored = False
+            try:
+                connector.shutdown()
+                if original_path:
+                    restored = connector.use_live_data_mode(path=original_path)
+                elif original_folder is None:
+                    restored = True  # nothing was attached — detached is correct
+                else:
+                    # A binding existed but its path is unknown, so we cannot
+                    # guarantee where it lands. Fail-closed: report honestly
+                    # and let the operator re-select.
+                    restored = False
+            except Exception:
+                restored = False
+
+        _account_cache = fresh
+        _account_cache_ts = _utc_now_iso()
+
+        ok_count = sum(1 for r in results if r["ok"])
+        message = f"Cek akun selesai: {ok_count}/{len(results)} terminal terbaca."
+        if not restored:
+            message += (
+                " PERINGATAN: binding gagal dipulihkan ke terminal semula — "
+                "pilih ulang terminal yang benar sebelum eksekusi."
+            )
+        return {
+            "ok": True,
+            "message": message,
+            "probed_at": _account_cache_ts,
+            "results": results,
+            "restored": restored,
+            "attached_path": _detect_attached_path(),
+            "execution_armed": _execution_armed,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Selection / re-attach
 # ---------------------------------------------------------------------------
 
@@ -260,6 +442,12 @@ def select_terminal(terminal_id: str) -> dict[str, Any]:
     Switching terminals ALWAYS disarms execution (safety: an arm state must
     never silently carry over to a different terminal).
     """
+    with _binding_lock:
+        return _select_terminal_locked(terminal_id)
+
+
+def _select_terminal_locked(terminal_id: str) -> dict[str, Any]:
+    """Body of ``select_terminal`` — caller holds ``_binding_lock``."""
     global _selected_id, _execution_armed
 
     view = list_terminals()

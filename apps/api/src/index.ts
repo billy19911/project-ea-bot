@@ -176,10 +176,11 @@ async function sendPostProxy(
   path: string,
   req: Request,
   body: unknown = {},
+  timeoutMs?: number,
 ): Promise<void> {
   const traceId = traceIdFromRequest(req);
   const headers = traceId ? { 'X-Trace-Id': traceId } : undefined;
-  const result = await postJson<any>(path, body ?? {}, undefined, headers);
+  const result = await postJson<any>(path, body ?? {}, timeoutMs, headers);
   if (!result.ok) {
     // The Python service answered with a non-2xx: preserve its status and
     // message (e.g. a 400 validation rejection like "terminal not running")
@@ -586,6 +587,14 @@ app.post('/mt5/terminals/arm', authenticate, async (req, res) => {
   const log = (req as any).log;
   log.info('mt5.terminals.arm');
   await sendPostProxy(res, '/mt5/terminals/arm', req, req.body ?? {});
+});
+
+// Probe akun (F3): read-only, memindahkan binding sementara lalu memulihkannya
+// di Python. Timeout lebih longgar karena menyentuh beberapa terminal sekaligus.
+app.post('/mt5/terminals/probe', authenticate, async (req, res) => {
+  const log = (req as any).log;
+  log.info('mt5.terminals.probe');
+  await sendPostProxy(res, '/mt5/terminals/probe', req, req.body ?? {}, 30000);
 });
 
 app.get('/market/overview', async (req, res) => {
