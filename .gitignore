@@ -4,6 +4,8 @@
 node_modules/
 .env
 .env.local
+.env.runtime
+logs/
 .venv/
 venv/
 __pycache__/

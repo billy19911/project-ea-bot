@@ -221,6 +221,34 @@ npm run dev
 
 ## Cara Menjalankan
 
+### Cara cepat — satu klik (Windows)
+
+```
+start.bat
+```
+
+Satu perintah itu menyalakan **ketiga** service (Python API :8000, Node API :3001,
+Web :3200), menunggu sampai sehat, lalu membuka dashboard di browser. Skrip juga
+otomatis:
+
+- memuat konfigurasi lokal dari `.env.runtime` (dibuat otomatis bila belum ada),
+- membuat `JWT_SECRET` acak sekali dan menyimpannya ke `.env.runtime` (gitignored),
+- melewati service yang **sudah berjalan** (aman dipanggil berulang),
+- menulis log ke `logs/*.log`.
+
+| Perintah | Fungsi |
+|---|---|
+| `start.bat` / `npm run up` | nyalakan semua service + buka dashboard |
+| `start.bat -NoBrowser` | sama, tanpa membuka browser |
+| `stop.bat` / `npm run down` | hentikan semua service (hanya port 8000/3001/3200) |
+| `status.bat` / `npm run status` | cek kesehatan ketiga service |
+| `token.bat` / `npm run token` | buat dev token & copy ke clipboard (isi `localStorage`) |
+
+> Script hanya menyentuh port 8000/3001/3200 — **tidak pernah** menyentuh
+> terminal MT5 yang sedang berjalan.
+
+### Cara manual (3 terminal)
+
 ```bash
 # Terminal 1 — Python service (FastAPI) :8000
 cd services/python
