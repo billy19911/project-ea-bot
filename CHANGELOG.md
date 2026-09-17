@@ -3,6 +3,16 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — UI/UX Ide #6: Pusat Riset Tersambung (ResearchEngine nyata)
+- **Temuan:** `ResearchEngine` (583 baris) sudah lengkap — hipotesis, versi strategi, eksperimen, backtest deterministik (EMA crossover dengan `trading.indicators.ema` NYATA), walk-forward 70/30, perbandingan — tapi **terisolasi total** (nol pemakai). Halaman `/` hanya teater: baris eksperimen hardcoded kosong + tombol backtest tak tersambung.
+- **Router baru** `src/research/endpoints.py`: `/research/overview`, `/research/experiments` (GET/POST), `/research/experiments/{id}` (detail + provenance + trades preview), `/research/experiments/{id}/backtest`, `/research/compare`.
+- **Data nyata**: backtest menolak (ok:false + alasan) saat live mode OFF atau bar < 60 — **tidak pernah** simulasi di atas data acak. Provenance per run: simbol, timeframe, jumlah bar, akun MT5 read-only.
+- **Accessor read-only** di `engine.py` (`list_experiments`, `get_backtest_result`, dst) — engine tidak diubah perilakunya.
+- **Proxy Node**: GET via `sendProxy`, POST via `sendPostProxy` (status 4xx Python dipertahankan → pesan validasi jujur di UI).
+- **UI `/` dirombak total** (23 KB): 3 tab (Eksperimen/Backtest/Perbandingan) — buat eksperimen dari pasangan EMA, jalankan backtest atas bar nyata, lihat metrik + walk-forward + trade preview, bandingkan 2 eksperimen. Catatan jujur selalu tampil: hasil di memori layanan (hilang saat restart), PnL = selisih harga per unit (ukuran posisi tidak dimodelkan).
+- **Test**: 9 test baru (`test_research_endpoints.py`) — penolakan live-off, bar kurang, simbol/timeframe invalid, 400/404 validasi, payload JSON-safe (inf → null). Suite Python **1244 passed**; Node 41/41; tsc 0; ESLint 0; build sukses.
+- **Terbukti end-to-end** (browser, data nyata akun demo 49662626): backtest XAUUSD H1 500 bar → 50 trades, win rate 28%, PF 1.15, PnL +103.61/unit; eksperimen EMA 5/15 → 32 trades, PF 1.04; perbandingan A/B menampilkan delta lengkap.
+
 ### Added — UI/UX Ide #9: Laporan Harian (deal nyata MT5, read-only)
 - **Modul `src/reports/daily.py`** (baru): agregasi deal tertutup dari
   `mt5.history_deals_get` terminal terpilih — read-only, tanpa order. Deal

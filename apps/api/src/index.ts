@@ -655,6 +655,34 @@ app.get('/reports/daily', async (req, res) => {
   await sendProxy(res, `/reports/daily?days=${days}`, undefined, req);
 });
 
+// Research Center (UI/UX ide #6): wires the existing Python ResearchEngine.
+// GET routes proxy straight through; POST routes preserve Python's 4xx
+// validation detail (sendPostProxy) so the UI can show honest messages.
+app.get('/research/overview', async (req, res) => {
+  await sendProxy(res, '/research/overview', undefined, req);
+});
+
+app.get('/research/experiments', async (req, res) => {
+  await sendProxy(res, '/research/experiments', undefined, req);
+});
+
+app.post('/research/experiments', authenticate, async (req, res) => {
+  await sendPostProxy(res, '/research/experiments', req, req.body ?? {});
+});
+
+app.get('/research/experiments/:id', async (req, res) => {
+  await sendProxy(res, `/research/experiments/${encodeURIComponent(req.params.id)}`, undefined, req);
+});
+
+app.post('/research/experiments/:id/backtest', authenticate, async (req, res) => {
+  const experimentId = String(req.params.id);
+  await sendPostProxy(res, `/research/experiments/${encodeURIComponent(experimentId)}/backtest`, req, req.body ?? {}, 60000);
+});
+
+app.post('/research/compare', authenticate, async (req, res) => {
+  await sendPostProxy(res, '/research/compare', req, req.body ?? {});
+});
+
 app.get('/market/overview', async (req, res) => {
   const log = (req as any).log;
   log.info('market.overview');

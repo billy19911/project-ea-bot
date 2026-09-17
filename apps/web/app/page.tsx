@@ -1,98 +1,707 @@
 'use client';
 
+/**
+ * Pusat Riset (UI/UX ide #6) — tersambung ke ResearchEngine NYATA di layanan
+ * Python lewat proxy Node:
+ *
+ *   GET  /research/overview                     — counts + catatan jujur
+ *   GET  /research/experiments                  — daftar eksperimen
+ *   POST /research/experiments                  — buat eksperimen (EMA pair)
+ *   POST /research/experiments/:id/backtest     — backtest atas bar NYATA MT5
+ *   GET  /research/experiments/:id              — detail + provenance + trades
+ *   POST /research/compare                      — bandingkan 2 eksperimen
+ *
+ * Aturan jujur:
+ * - tidak ada baris eksperimen fabrikasi — daftar datang dari backend;
+ * - backtest menolak saat live mode OFF / bar kurang, dan alasannya ditampilkan;
+ * - hasil disimpan di memori layanan Python — catatan itu selalu tampil;
+ * - PnL = selisih harga per unit (ukuran posisi tidak dimodelkan) — dilabeli.
+ */
+
 import Head from 'next/head';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../lib/api';
 import AppShell from '../components/AppShell';
 
-type SourceState = 'live' | 'unavailable';
-type AiModel = { id: string; provider: string; context: number; is_free: boolean; capabilities?: string[] };
-type ModelsState = { models: AiModel[]; source: SourceState };
+type Overview = {
+  ok: boolean;
+  hypotheses: number;
+  experiments: number;
+  completed: number;
+  engine_note?: string;
+  data_note?: string;
+};
 
-type Experiment = { id: string; name: string; strategy: string; period: string; status: 'Selesai' | 'Berjalan' | 'Menunggu'; pnl: number; sharpe: number; drawdown: number; trades: number };
+type Metrics = {
+  total_trades: number;
+  win_rate: number | null;
+  profit_factor: number | null;
+  sharpe_ratio: number | null;
+  max_drawdown: number | null;
+  expectation: number | null;
+  net_pnl: number | null;
+};
+
+type ExperimentRow = {
+  id: string;
+  name: string;
+  strategy_version: string;
+  parameters: Record<string, number | string | boolean>;
+  status: string;
+  has_result: boolean;
+  metrics: Metrics | null;
+};
+
+type WalkForwardWindow = { name: string; range: number[]; metrics: Metrics };
+
+type Provenance = {
+  symbol: string;
+  timeframe: string;
+  bars: number;
+  ran_at: string;
+  source: string;
+  account: { login: number | null; server: string | null; currency: string | null } | null;
+};
+
+type RunResult = {
+  ok: boolean;
+  reason?: string;
+  metrics?: Metrics;
+  provenance?: Provenance;
+  walk_forward?: { enabled: boolean; train_ratio?: number; windows?: WalkForwardWindow[] };
+  trades_total?: number;
+  trades_preview?: Array<Record<string, unknown>>;
+};
+
+type Detail = {
+  ok: boolean;
+  metrics: Metrics | null;
+  walk_forward: { enabled: boolean; windows?: WalkForwardWindow[] } | null;
+  trades_total: number;
+  trades_preview: Array<Record<string, unknown>>;
+  provenance: Provenance | null;
+};
+
+const TABS = ['Eksperimen', 'Backtest', 'Perbandingan'] as const;
+
+function fmt(value: number | null | undefined, digits = 2): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—';
+  return value.toFixed(digits);
+}
+
+function fmtPct(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—';
+  return `${value.toFixed(1)}%`;
+}
 
 export default function Home() {
-  const [researchTab, setResearchTab] = useState('Eksperimen');
-  // No experiments API exists yet. Keep this as real (empty) state rather than
-  // fabricating rows; it is populated once ResearchEngine produces runs.
-  const [experiments] = useState<Experiment[]>([]);
+  const [tab, setTab] = useState<(typeof TABS)[number]>('Eksperimen');
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [experiments, setExperiments] = useState<ExperimentRow[]>([]);
+  const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState<string[]>([]);
-  const [modelsState, setModelsState] = useState<ModelsState>({ models: [], source: 'unavailable' });
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await apiFetch(`/ai/models`);
-        if (!res.ok) {
-          if (!cancelled) setModelsState({ models: [], source: 'unavailable' });
-          return;
-        }
-        const data = await res.json();
-        if (cancelled) return;
-        setModelsState({
-          models: Array.isArray(data.models) ? data.models : [],
-          source: data.source === 'live' ? 'live' : 'unavailable',
-        });
-      } catch {
-        if (!cancelled) setModelsState({ models: [], source: 'unavailable' });
+  const [busy, setBusy] = useState(false);
+
+  // Create-experiment form
+  const [fast, setFast] = useState('3');
+  const [slow, setSlow] = useState('8');
+
+  // Backtest form
+  const [selectedId, setSelectedId] = useState('');
+  const [symbol, setSymbol] = useState('XAUUSD');
+  const [timeframe, setTimeframe] = useState('H1');
+  const [bars, setBars] = useState('500');
+  const [runResult, setRunResult] = useState<RunResult | null>(null);
+
+  // Detail
+  const [detail, setDetail] = useState<Detail | null>(null);
+
+  // Compare
+  const [cmpA, setCmpA] = useState('');
+  const [cmpB, setCmpB] = useState('');
+  const [cmpResult, setCmpResult] = useState<Record<string, unknown> | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [ovRes, exRes] = await Promise.all([
+        apiFetch('/research/overview'),
+        apiFetch('/research/experiments'),
+      ]);
+      if (ovRes.status === 401 || exRes.status === 401) {
+        setError('Sesi tidak valid — buka halaman Masuk untuk mendapatkan token.');
+        return;
       }
-    })();
-    return () => { cancelled = true; };
+      if (!ovRes.ok || !exRes.ok) {
+        setError('Layanan riset tidak menjawab — periksa Python API (:8000).');
+        return;
+      }
+      const ov = (await ovRes.json()) as Overview;
+      const ex = (await exRes.json()) as { experiments: ExperimentRow[] };
+      setOverview(ov);
+      setExperiments(ex.experiments ?? []);
+      setError('');
+      const withResults = (ex.experiments ?? []).filter((e) => e.has_result);
+      setSelectedId((current) => current || withResults[0]?.id || ex.experiments?.[0]?.id || '');
+    } catch {
+      setError('Layanan riset tidak menjawab — periksa Python API (:8000).');
+    }
   }, []);
-  const filtered = useMemo(() => experiments.filter((item) => item.name.toLowerCase().includes(query.toLowerCase()) || item.strategy.toLowerCase().includes(query.toLowerCase())), [experiments, query]);
-  const runBacktest = () => { setNotice('Permintaan backtest dicatat. Jalankan pipeline di Control Plane untuk hasil nyata.'); setTimeout(() => setNotice(''), 4000); setResearchTab('Backtest'); };
 
-  return <>
-    <Head><title>EA Bot — Pusat Riset</title><meta name="description" content="EA Bot research center" /></Head>
-    <AppShell
-      activeKey="research"
-      eyebrow="EA BOT / PUSAT RISET"
-      title="Pusat Riset"
-      actions={
-        <>
-          <span className={`${styles.badge} ${modelsState.source === 'live' ? styles.success : styles.muted}`}>{modelsState.source === 'live' ? 'MODELS LIVE' : 'MODELS N/A'}</span>
-        </>
-      }
-    >
-      {/* Hanya SATU strip tab di halaman ini (sub-tab Research). Pengaturan
-          pindah ke halaman /settings — sebelumnya dua baris tab bertumpuk. */}
-      {notice && <div className={styles.notice}>{notice}</div>}
-      <ResearchView tab={researchTab} setTab={setResearchTab} experiments={experiments} filtered={filtered} query={query} setQuery={setQuery} selected={selected} setSelected={setSelected} runBacktest={runBacktest} />
-    </AppShell>
-  </>;
-}
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
-function ResearchView({ tab, setTab, experiments, filtered, query, setQuery, selected, setSelected, runBacktest }: { tab: string; setTab: (tab: string) => void; experiments: Experiment[]; filtered: Experiment[]; query: string; setQuery: (value: string) => void; selected: string[]; setSelected: (ids: string[]) => void; runBacktest: () => void }) {
-  const tabs = ['Eksperimen', 'Backtest', 'Perbandingan', 'Hasil Riset'];
-  return <div className={styles.pageBody}><nav className={styles.tabs}>{tabs.map((item) => <button key={item} className={tab === item ? styles.tabActive : ''} onClick={() => setTab(item)}>{item}</button>)}</nav>
-    {tab === 'Eksperimen' && <><div className={styles.sectionHead}><div><h2>Eksperimen strategi</h2><p>Hipotesis, parameter, dan hasil validasi terpusat.</p></div><button className={styles.primary} onClick={runBacktest}>＋ Jalankan backtest</button></div><div className={styles.toolbar}><input aria-label="Cari eksperimen" placeholder="Cari nama atau strategi..." value={query} onChange={(event) => setQuery(event.target.value)} /><select defaultValue="all" aria-label="Filter status"><option value="all">Semua status</option><option>Selesai</option><option>Berjalan</option><option>Menunggu</option></select><span className={styles.resultCount}>{filtered.length} eksperimen</span></div><ExperimentTable items={filtered} /></>}
-    {tab === 'Backtest' && <BacktestPanel runBacktest={runBacktest} />}
-    {tab === 'Perbandingan' && <Comparison experiments={experiments} selected={selected} setSelected={setSelected} />}
-    {tab === 'Hasil Riset' && <Results />}
-  </div>;
-}
-
-function ExperimentTable({ items }: { items: Experiment[] }) { return <div className={styles.tableCard}><table><thead><tr><th>Eksperimen</th><th>Strategi</th><th>Periode</th><th>Status</th><th>PnL</th><th>Sharpe</th><th>Max DD</th><th>Trades</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id}</small></td><td>{item.strategy}</td><td>{item.period}</td><td><span className={`${styles.badge} ${item.status === 'Selesai' ? styles.success : item.status === 'Berjalan' ? styles.warning : styles.muted}`}>{item.status}</span></td><td className={item.pnl > 0 ? styles.positive : ''}>{item.pnl ? `+${item.pnl.toFixed(1)}%` : '—'}</td><td>{item.sharpe || '—'}</td><td>{item.drawdown ? `${item.drawdown}%` : '—'}</td><td>{item.trades || '—'}</td></tr>)}</tbody></table>{!items.length && <div className={styles.empty}>Belum ada eksperimen. Data akan muncul setelah ResearchEngine dijalankan. <a href="/control-plane">Buka Control Plane</a></div>}</div>; }
-
-function BacktestPanel({ runBacktest }: { runBacktest: () => void }) { return <><div className={styles.sectionHead}><div><h2>Backtest</h2><p>Jalankan simulasi historis dengan ResearchEngine.</p></div><button className={styles.primary} onClick={runBacktest}>Jalankan simulasi</button></div><div className={styles.backtestGrid}><div className={styles.card}><h3>Konfigurasi</h3><label>Data historis<select defaultValue="gold"><option>XAUUSD · H1 · 2022—2024</option><option>XAUUSD · M15 · 2024</option></select></label><label>Modal awal<input defaultValue="10000" type="number" /></label><div className={styles.inline}><label>Komisi<input defaultValue="0.0" /></label><label>Slippage<input defaultValue="2" /></label></div></div><div className={styles.card}><h3>Hasil terakhir</h3><div className={styles.empty}>Belum ada hasil backtest.</div><div className={styles.resultNote}>Jalankan pipeline di Control Plane untuk menghasilkan metrik nyata.</div></div></div></>; }
-function Comparison({ experiments, selected, setSelected }: { experiments: Experiment[]; selected: string[]; setSelected: (ids: string[]) => void }) {
-  const names = experiments.filter((item) => item.status === 'Selesai');
-  const a = names.find((item) => item.id === selected[0]);
-  const b = names.find((item) => item.id === selected[1]);
-  const ready = Boolean(a && b);
-  const fmtDelta = (valueA: number, valueB: number, unit = '') => {
-    const delta = valueB - valueA;
-    const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
-    return `${sign}${Math.abs(delta).toFixed(2)}${unit}`;
+  const flash = (message: string) => {
+    setNotice(message);
+    window.setTimeout(() => setNotice(''), 5000);
   };
-  const rows: [string, string, string, string, boolean][] = ready ? [
-    ['Net PnL', `${a!.pnl.toFixed(1)}%`, `${b!.pnl.toFixed(1)}%`, fmtDelta(a!.pnl, b!.pnl, '%'), b!.pnl - a!.pnl >= 0],
-    ['Sharpe ratio', a!.sharpe.toFixed(2), b!.sharpe.toFixed(2), fmtDelta(a!.sharpe, b!.sharpe), b!.sharpe - a!.sharpe >= 0],
-    ['Max drawdown', `${a!.drawdown.toFixed(1)}%`, `${b!.drawdown.toFixed(1)}%`, fmtDelta(a!.drawdown, b!.drawdown, '%'), b!.drawdown - a!.drawdown <= 0],
-    ['Trades', `${a!.trades}`, `${b!.trades}`, fmtDelta(a!.trades, b!.trades), b!.trades - a!.trades >= 0],
-  ] : [];
-  return <><div className={styles.sectionHead}><div><h2>Perbandingan hasil</h2><p>Pilih dua eksperimen selesai untuk melihat delta metrik.</p></div>{names.length >= 2 && <div className={styles.compareSelect}>{names.map((item) => <label key={item.id}><input type="checkbox" checked={selected.includes(item.id)} disabled={!selected.includes(item.id) && selected.length >= 2} onChange={() => setSelected(selected.includes(item.id) ? selected.filter((id) => id !== item.id) : [...selected, item.id])} /> {item.id}</label>)}</div>}</div>{ready ? <div className={styles.tableCard}><table><thead><tr><th>Metrik</th><th>Eksperimen A</th><th>Eksperimen B</th><th>Delta B − A</th></tr></thead><tbody>{rows.map(([label, aVal, bVal, delta, good]) => <tr key={label}><td><strong>{label}</strong></td><td>{aVal}</td><td>{bVal}</td><td className={good ? styles.positive : styles.negative}>{delta}</td></tr>)}</tbody></table></div> : <div className={styles.empty}>Pilih dua eksperimen selesai untuk membandingkan.</div>}</>; }
-function Results() { return <><div className={styles.sectionHead}><div><h2>Hasil riset</h2><p>Kesimpulan yang siap dipakai untuk review strategi.</p></div></div><div className={styles.empty}>Belum ada hasil riset. Temuan akan muncul setelah eksperimen dijalankan di Control Plane.</div></>; }
+
+  const createExperiment = async () => {
+    setBusy(true);
+    try {
+      const res = await apiFetch('/research/experiments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fast_ema_period: Number(fast) || 3,
+          slow_ema_period: Number(slow) || 8,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(String(data.detail || 'Gagal membuat eksperimen.'));
+        return;
+      }
+      setError('');
+      flash(`Eksperimen dibuat: EMA ${fast}/${slow}. Jalankan backtest di tab Backtest.`);
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runBacktest = async () => {
+    if (!selectedId) {
+      setError('Pilih eksperimen dulu.');
+      return;
+    }
+    setBusy(true);
+    setRunResult(null);
+    try {
+      const res = await apiFetch(`/research/experiments/${encodeURIComponent(selectedId)}/backtest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: symbol.trim().toUpperCase(),
+          timeframe,
+          bars: Number(bars) || 500,
+        }),
+      });
+      const data = (await res.json()) as RunResult;
+      if (!res.ok) {
+        setError(String((data as { detail?: string }).detail || 'Backtest gagal dijalankan.'));
+        return;
+      }
+      setError('');
+      setRunResult(data);
+      if (!data.ok && data.reason) flash(data.reason);
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loadDetail = async (id: string) => {
+    try {
+      const res = await apiFetch(`/research/experiments/${encodeURIComponent(id)}`);
+      if (!res.ok) {
+        setDetail(null);
+        return;
+      }
+      setDetail((await res.json()) as Detail);
+    } catch {
+      setDetail(null);
+    }
+  };
+
+  const runCompare = async () => {
+    if (!cmpA || !cmpB) {
+      setError('Pilih dua eksperimen dengan hasil backtest.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await apiFetch('/research/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_a: cmpA, id_b: cmpB }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(String(data.detail || 'Perbandingan gagal.'));
+        return;
+      }
+      setError('');
+      setCmpResult(data);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const withResults = experiments.filter((e) => e.has_result);
+
+  return (
+    <>
+      <Head>
+        <title>EA Bot — Pusat Riset</title>
+        <meta name="description" content="EA Bot research center" />
+      </Head>
+      <AppShell
+        activeKey="research"
+        eyebrow="EA BOT / PUSAT RISET"
+        title="Pusat Riset"
+        actions={
+          <span className={`${styles.badge} ${styles.success}`}>
+            {overview ? `${overview.experiments} EKSPERIMEN` : 'MEMUAT…'}
+          </span>
+        }
+      >
+        <div className={styles.pageBody}>
+          {error && <div className={styles.noticeError}>{error}</div>}
+          {notice && <div className={styles.notice}>{notice}</div>}
+
+          <nav className={styles.tabs}>
+            {TABS.map((item) => (
+              <button
+                key={item}
+                className={tab === item ? styles.tabActive : ''}
+                onClick={() => setTab(item)}
+              >
+                {item}
+              </button>
+            ))}
+          </nav>
+
+          {tab === 'Eksperimen' && (
+            <>
+              <div className={styles.sectionHead}>
+                <div>
+                  <h2>Eksperimen strategi</h2>
+                  <p>
+                    Hipotesis baseline: EMA crossover (implementasi indikator nyata
+                    proyek). Buat eksperimen dengan pasangan periode EMA.
+                  </p>
+                </div>
+              </div>
+              <div className={styles.toolbar}>
+                <label className={styles.field}>
+                  EMA cepat
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={fast}
+                    onChange={(e) => setFast(e.target.value)}
+                  />
+                </label>
+                <label className={styles.field}>
+                  EMA lambat
+                  <input
+                    type="number"
+                    min={2}
+                    max={400}
+                    value={slow}
+                    onChange={(e) => setSlow(e.target.value)}
+                  />
+                </label>
+                <button className={styles.primary} onClick={createExperiment} disabled={busy}>
+                  ＋ Buat eksperimen
+                </button>
+                <span className={styles.resultCount}>{experiments.length} eksperimen</span>
+              </div>
+              <ExperimentTable
+                items={experiments}
+                onSelect={(id) => {
+                  void loadDetail(id);
+                }}
+              />
+              {detail && <DetailCard detail={detail} />}
+            </>
+          )}
+
+          {tab === 'Backtest' && (
+            <>
+              <div className={styles.sectionHead}>
+                <div>
+                  <h2>Backtest</h2>
+                  <p>
+                    Simulasi deterministik atas bar harga NYATA dari terminal MT5
+                    yang terpasang (read-only). Bukan data acak.
+                  </p>
+                </div>
+              </div>
+              <div className={styles.card}>
+                <label className={styles.field}>
+                  Eksperimen
+                  <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
+                    {experiments.length === 0 && <option value="">(belum ada — buat dulu)</option>}
+                    {experiments.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name} · {e.id.slice(0, 8)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className={styles.inline}>
+                  <label className={styles.field}>
+                    Simbol
+                    <input value={symbol} onChange={(e) => setSymbol(e.target.value)} />
+                  </label>
+                  <label className={styles.field}>
+                    Timeframe
+                    <select value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
+                      {['M5', 'M15', 'M30', 'H1', 'H4', 'D1'].map((tf) => (
+                        <option key={tf}>{tf}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={styles.field}>
+                    Jumlah bar
+                    <input
+                      type="number"
+                      min={100}
+                      max={2000}
+                      value={bars}
+                      onChange={(e) => setBars(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <button className={styles.primary} onClick={runBacktest} disabled={busy || !selectedId}>
+                  {busy ? 'Menjalankan…' : 'Jalankan backtest'}
+                </button>
+              </div>
+              {runResult && <RunResultCard result={runResult} />}
+            </>
+          )}
+
+          {tab === 'Perbandingan' && (
+            <>
+              <div className={styles.sectionHead}>
+                <div>
+                  <h2>Perbandingan hasil</h2>
+                  <p>Bandingkan dua eksperimen yang sudah punya hasil backtest.</p>
+                </div>
+              </div>
+              {withResults.length < 2 ? (
+                <div className={styles.empty}>
+                  Butuh dua eksperimen dengan hasil. Jalankan backtest dulu di tab Backtest.
+                </div>
+              ) : (
+                <div className={styles.card}>
+                  <div className={styles.inline}>
+                    <label className={styles.field}>
+                      Eksperimen A
+                      <select value={cmpA} onChange={(e) => setCmpA(e.target.value)}>
+                        <option value="">(pilih)</option>
+                        {withResults.map((e) => (
+                          <option key={e.id} value={e.id}>
+                            {e.name} · {e.id.slice(0, 8)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className={styles.field}>
+                      Eksperimen B
+                      <select value={cmpB} onChange={(e) => setCmpB(e.target.value)}>
+                        <option value="">(pilih)</option>
+                        {withResults.map((e) => (
+                          <option key={e.id} value={e.id}>
+                            {e.name} · {e.id.slice(0, 8)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button className={styles.primary} onClick={runCompare} disabled={busy}>
+                      Bandingkan
+                    </button>
+                  </div>
+                </div>
+              )}
+              {cmpResult && <CompareCard result={cmpResult} />}
+            </>
+          )}
+
+          {(overview?.engine_note || overview?.data_note) && (
+            <p className={styles.mutedText}>
+              {overview?.engine_note} {overview?.data_note}
+            </p>
+          )}
+        </div>
+      </AppShell>
+    </>
+  );
+}
+
+function ExperimentTable({ items, onSelect }: { items: ExperimentRow[]; onSelect: (id: string) => void }) {
+  if (!items.length) {
+    return (
+      <div className={styles.empty}>
+        Belum ada eksperimen. Buat satu dengan pasangan periode EMA di atas — backtest
+        berjalan atas bar nyata dari terminal MT5.
+      </div>
+    );
+  }
+  return (
+    <div className={styles.tableCard}>
+      <table>
+        <thead>
+          <tr>
+            <th>Eksperimen</th>
+            <th>Parameter</th>
+            <th>Status</th>
+            <th>Trades</th>
+            <th>Win rate</th>
+            <th>PnL / unit</th>
+            <th>Max DD</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.id}>
+              <td>
+                <strong>{item.name}</strong>
+                <small>{item.id.slice(0, 8)}</small>
+              </td>
+              <td>
+                {Object.entries(item.parameters)
+                  .map(([k, v]) => `${k}=${v}`)
+                  .join(', ') || '—'}
+              </td>
+              <td>
+                <span
+                  className={`${styles.badge} ${
+                    item.has_result ? styles.success : styles.muted
+                  }`}
+                >
+                  {item.has_result ? 'Ada hasil' : 'Belum diuji'}
+                </span>
+              </td>
+              <td>{item.metrics ? item.metrics.total_trades : '—'}</td>
+              <td>{item.metrics ? fmtPct(item.metrics.win_rate) : '—'}</td>
+              <td
+                className={
+                  item.metrics && (item.metrics.net_pnl ?? 0) > 0 ? styles.positive : ''
+                }
+              >
+                {item.metrics ? fmt(item.metrics.net_pnl) : '—'}
+              </td>
+              <td>{item.metrics ? fmtPct(item.metrics.max_drawdown) : '—'}</td>
+              <td>
+                <button onClick={() => onSelect(item.id)}>Detail</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function MetricsGrid({ metrics }: { metrics: Metrics }) {
+  return (
+    <div className={styles.metrics}>
+      <div>
+        <small>Trades</small>
+        <strong>{metrics.total_trades}</strong>
+      </div>
+      <div>
+        <small>Win rate</small>
+        <strong>{fmtPct(metrics.win_rate)}</strong>
+      </div>
+      <div>
+        <small>Profit factor</small>
+        <strong>{fmt(metrics.profit_factor)}</strong>
+      </div>
+      <div>
+        <small>Sharpe</small>
+        <strong>{fmt(metrics.sharpe_ratio)}</strong>
+      </div>
+      <div>
+        <small>Max drawdown</small>
+        <strong>{fmtPct(metrics.max_drawdown)}</strong>
+      </div>
+      <div>
+        <small>Ekspektasi / trade</small>
+        <strong>{fmt(metrics.expectation)}</strong>
+      </div>
+      <div>
+        <small>PnL / unit</small>
+        <strong className={(metrics.net_pnl ?? 0) > 0 ? styles.positive : styles.negative}>
+          {fmt(metrics.net_pnl)}
+        </strong>
+      </div>
+    </div>
+  );
+}
+
+function WalkForwardCard({ wf }: { wf: { enabled: boolean; train_ratio?: number; windows?: WalkForwardWindow[] } }) {
+  if (!wf.enabled || !wf.windows?.length) return null;
+  return (
+    <div className={styles.card}>
+      <h3>Walk-forward (split {wf.train_ratio ? `${Math.round(wf.train_ratio * 100)}/${Math.round((1 - wf.train_ratio) * 100)}` : '70/30'})</h3>
+      <div className={styles.tableCard}>
+        <table>
+          <thead>
+            <tr>
+              <th>Jendela</th>
+              <th>Bar</th>
+              <th>Trades</th>
+              <th>Win rate</th>
+              <th>PnL / unit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {wf.windows.map((w) => (
+              <tr key={w.name}>
+                <td>{w.name}</td>
+                <td>
+                  {w.range[0]}–{w.range[1]}
+                </td>
+                <td>{w.metrics.total_trades}</td>
+                <td>{fmtPct(w.metrics.win_rate)}</td>
+                <td className={(w.metrics.net_pnl ?? 0) > 0 ? styles.positive : ''}>
+                  {fmt(w.metrics.net_pnl)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ProvenanceLine({ provenance }: { provenance: Provenance }) {
+  const account = provenance.account;
+  return (
+    <p className={styles.mutedText}>
+      Sumber: {provenance.symbol} · {provenance.timeframe} · {provenance.bars} bar nyata
+      {account?.login ? ` — akun ${account.login} (${account.server ?? '—'})` : ''} ·{' '}
+      {provenance.ran_at.replace('T', ' ').replace('+00:00', ' UTC')}
+    </p>
+  );
+}
+
+function TradesPreview({ trades }: { trades: Array<Record<string, unknown>> }) {
+  if (!trades.length) return null;
+  return (
+    <div className={styles.card}>
+      <h3>Trade terakhir (preview)</h3>
+      <div className={styles.tableCard}>
+        <table>
+          <thead>
+            <tr>
+              <th>Entry</th>
+              <th>Exit</th>
+              <th>Arah</th>
+              <th>PnL / unit</th>
+              <th>Alasan keluar</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trades.map((t, i) => (
+              <tr key={i}>
+                <td>{fmt(Number(t.entry))}</td>
+                <td>{fmt(Number(t.exit))}</td>
+                <td>{Number(t.direction) === 1 ? 'Long' : 'Short'}</td>
+                <td className={Number(t.pnl) > 0 ? styles.positive : styles.negative}>
+                  {fmt(Number(t.pnl))}
+                </td>
+                <td>{String(t.exit_reason ?? '—')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function RunResultCard({ result }: { result: RunResult }) {
+  if (!result.ok) {
+    return <div className={styles.noticeError}>{result.reason ?? 'Backtest tidak berjalan.'}</div>;
+  }
+  return (
+    <>
+      {result.provenance && <ProvenanceLine provenance={result.provenance} />}
+      {result.metrics && <MetricsGrid metrics={result.metrics} />}
+      {result.walk_forward && <WalkForwardCard wf={result.walk_forward} />}
+      {result.trades_preview && <TradesPreview trades={result.trades_preview} />}
+    </>
+  );
+}
+
+function DetailCard({ detail }: { detail: Detail }) {
+  if (!detail.metrics) {
+    return <div className={styles.empty}>Eksperimen ini belum punya hasil backtest.</div>;
+  }
+  return (
+    <>
+      {detail.provenance && <ProvenanceLine provenance={detail.provenance} />}
+      <MetricsGrid metrics={detail.metrics} />
+      {detail.walk_forward && <WalkForwardCard wf={detail.walk_forward} />}
+      <TradesPreview trades={detail.trades_preview} />
+    </>
+  );
+}
+
+const COMPARE_METRICS: Array<[string, string]> = [
+  ['total_trades', 'Trades'],
+  ['win_rate', 'Win rate (%)'],
+  ['profit_factor', 'Profit factor'],
+  ['sharpe_ratio', 'Sharpe'],
+  ['max_drawdown', 'Max drawdown (%)'],
+  ['expectation', 'Ekspektasi / trade'],
+  ['net_pnl', 'PnL / unit'],
+];
+
+function CompareCard({ result }: { result: Record<string, unknown> }) {
+  const a = result.experiment_1 as Record<string, unknown>;
+  const b = result.experiment_2 as Record<string, unknown>;
+  const diff = result.difference as Record<string, unknown>;
+  return (
+    <div className={styles.tableCard}>
+      <table>
+        <thead>
+          <tr>
+            <th>Metrik</th>
+            <th>A: {String(a.name)}</th>
+            <th>B: {String(b.name)}</th>
+            <th>Delta B − A</th>
+          </tr>
+        </thead>
+        <tbody>
+          {COMPARE_METRICS.map(([key, label]) => {
+            const av = a[key] as number | null;
+            const bv = b[key] as number | null;
+            const dv = diff[key] as number | null;
+            return (
+              <tr key={key}>
+                <td>
+                  <strong>{label}</strong>
+                </td>
+                <td>{fmt(av)}</td>
+                <td>{fmt(bv)}</td>
+                <td className={(dv ?? 0) >= 0 ? styles.positive : styles.negative}>
+                  {dv === null || dv === undefined ? '—' : `${dv >= 0 ? '+' : ''}${fmt(dv)}`}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}

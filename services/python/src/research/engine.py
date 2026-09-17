@@ -524,6 +524,24 @@ class ResearchEngine:
             "max_drawdown": max_drawdown,
         }
 
+    # -- Read-only accessors (UI/UX ide #6) -----------------------------------
+
+    def list_hypotheses(self) -> list[Hypothesis]:
+        """Return all registered hypotheses (insertion order)."""
+        return list(self._hypotheses.values())
+
+    def list_experiments(self) -> list[Experiment]:
+        """Return all registered experiments (insertion order)."""
+        return list(self._experiments.values())
+
+    def get_experiment(self, experiment_id: str) -> Experiment | None:
+        """Return an experiment by id, or None when unknown."""
+        return self._experiments.get(experiment_id)
+
+    def get_backtest_result(self, experiment_id: str) -> BacktestResult | None:
+        """Return the stored backtest result for an experiment, or None."""
+        return self._backtest_results.get(experiment_id)
+
     # -- Comparison -----------------------------------------------------------
 
     def compare_experiments(self, exp1: Experiment, exp2: Experiment) -> dict[str, Any]:

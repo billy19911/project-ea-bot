@@ -23,6 +23,7 @@ from .observability.sampler import get_trend_sampler
 from .orchestration.endpoints import router as orchestration_router
 from .orchestration.runtime import get_runtime
 from .reports.endpoints import router as reports_router
+from .research.endpoints import router as research_router
 from .strategy.endpoints import register_live_strategy
 from .strategy.endpoints import router as strategy_router
 from .system.endpoints import router as system_router
@@ -169,6 +170,7 @@ app.include_router(orchestration_router)
 app.include_router(system_router)
 app.include_router(strategy_router)
 app.include_router(reports_router)
+app.include_router(research_router)
 
 
 @app.get("/health")
