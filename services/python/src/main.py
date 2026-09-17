@@ -68,18 +68,37 @@ async def lifespan(app: FastAPI):
     # (EPIC 13) — idempotent, so a warm reload does not duplicate it.
     register_live_strategy()
 
+    # Runtime settings (UI/UX ide #7): stored operator values win over the
+    # environment default and are pushed into the live objects now. Runs even
+    # when the scheduler is disabled — the supervisor knob still applies.
+    # Only knobs actually consumed by the runtime are stored; see
+    # system/settings_store.py.
+    stored: dict[str, float] = {}
+    try:
+        from .system.endpoints import _apply_to_runtime
+        from .system.settings_store import get_settings_store
+
+        stored = get_settings_store().snapshot().values
+        pushed = _apply_to_runtime(stored)
+        logger.info("Runtime settings applied at startup: %s", pushed)
+    except Exception:  # pragma: no cover - defensive, never block startup
+        logger.exception("Gagal menerapkan runtime settings saat startup")
+
     # Autonomous scheduler (PRD_V2 §10.3, §32.17) — optional, non-blocking.
     scheduler_task = None
     if settings.scheduler_enabled:
         runtime = get_runtime()
-        runtime.scheduler.poll_interval = settings.scheduler_poll_interval
+        # Env value seeds the scheduler; a stored override (above) wins.
+        if "scheduler_poll_interval" not in stored:
+            runtime.scheduler.poll_interval = settings.scheduler_poll_interval
+
         # start() creates the loop via asyncio.create_task, so startup is not
         # blocked. It returns immediately.
         await runtime.scheduler.start()
         scheduler_task = runtime.scheduler._task
         logger.info(
             "Autonomous scheduler started (poll_interval=%s)",
-            settings.scheduler_poll_interval,
+            runtime.scheduler.poll_interval,
         )
 
     if settings.mt5_live_data:

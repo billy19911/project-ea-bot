@@ -8,7 +8,7 @@ import express, { type Response, type Request } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { logger, createChild } from './logger';
-import { getJson, postJson } from './pythonClient';
+import { getJson, postJson, putJson } from './pythonClient';
 import { authenticate, authorize, generateToken, AuthRequest } from './middleware/auth';
 import { auditMiddleware, fetchAuditLogs } from './middleware/audit';
 import { validatePayload, sanitizeInput, securityHeaders, preventParameterPollution } from './middleware/security';
@@ -511,6 +511,45 @@ app.patch('/strategies/:id/active', async (req, res) => {
 // ── EPIC 15: Control Plane endpoints ────────────────────────────────────────
 // All of these proxy REAL data from the Python service (see pythonClient.ts).
 // On failure they return 503 with source="unavailable".
+
+/**
+ * PUT counterpart to {@link sendPostProxy}: forwards a JSON body to the Python
+ * service and preserves upstream 4xx bodies (validation errors) verbatim so the
+ * settings form (UI/UX ide #7) can show real messages.
+ */
+async function sendPutProxy(
+  res: Response,
+  path: string,
+  req: Request,
+  body: unknown = {},
+  timeoutMs?: number,
+): Promise<void> {
+  const traceId = traceIdFromRequest(req);
+  const headers = traceId ? { 'X-Trace-Id': traceId } : undefined;
+  const result = await putJson<any>(path, body ?? {}, timeoutMs, headers);
+  if (!result.ok) {
+    const upstreamStatus = result.upstreamStatus;
+    if (typeof upstreamStatus === 'number' && upstreamStatus >= 400 && upstreamStatus < 500) {
+      const payload =
+        result.upstreamBody && typeof result.upstreamBody === 'object'
+          ? (result.upstreamBody as Record<string, unknown>)
+          : { error: result.error };
+      res.status(upstreamStatus).json({ ...payload, source: 'live' });
+      return;
+    }
+    res.status(503).json({ error: 'python_service_unavailable', source: 'unavailable' });
+    return;
+  }
+  res.json({ ...(result.data as Record<string, unknown>), source: 'live' });
+}
+
+app.get('/settings', async (req, res) => {
+  await sendProxy(res, '/settings', undefined, req);
+});
+
+app.put('/settings', authenticate, async (req, res) => {
+  await sendPutProxy(res, '/settings', req, req.body ?? {});
+});
 
 app.get('/system/overview', async (req, res) => {
   const log = (req as any).log;

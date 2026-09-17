@@ -49,3 +49,6 @@ secrets/
 # Next.js / TS build artifacts
 *.tsbuildinfo
 apps/web/.next/
+
+# Runtime settings yang ditulis operator dari dashboard (ide #7) — state, bukan kode.
+services/python/runtime_settings.json

@@ -13,7 +13,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 
-const { getJson, postJson, DEFAULT_PYTHON_SERVICE_URL } = require('../dist/pythonClient.js');
+const { getJson, postJson, putJson, DEFAULT_PYTHON_SERVICE_URL } = require('../dist/pythonClient.js');
 
 function withServer(handler) {
   return new Promise((resolve) => {
@@ -198,6 +198,54 @@ test('postJson resolves to unavailable when the service is down', async () => {
     assert.equal(result.ok, false);
     assert.equal(result.source, 'unavailable');
   } finally {
+    delete process.env.PYTHON_SERVICE_URL;
+  }
+});
+
+test('putJson forwards method PUT, the JSON body and X-Trace-Id (ide #7)', async () => {
+  let seenMethod;
+  let seenTraceId;
+  let seenBody;
+  const server = await withServer((req, res) => {
+    seenMethod = req.method;
+    seenTraceId = req.headers['x-trace-id'];
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      seenBody = Buffer.concat(chunks).toString('utf-8');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, values: { supervisor_token_budget: 11000 } }));
+    });
+  });
+  setBaseUrl(server.baseUrl);
+  try {
+    const payload = { supervisor_token_budget: 11000 };
+    const result = await putJson('/settings', payload, 2000, { 'X-Trace-Id': 'trace-put-1' });
+    assert.equal(result.ok, true);
+    assert.equal(result.source, 'live');
+    assert.equal(result.data.values.supervisor_token_budget, 11000);
+    assert.equal(seenMethod, 'PUT');
+    assert.equal(seenTraceId, 'trace-put-1');
+    assert.deepEqual(JSON.parse(seenBody), payload);
+  } finally {
+    await server.close();
+    delete process.env.PYTHON_SERVICE_URL;
+  }
+});
+
+test('putJson preserves upstream 4xx body (validation errors reach the UI)', async () => {
+  const server = await withServer((_req, res) => {
+    res.writeHead(422, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, errors: ['supervisor_token_budget: di luar rentang'] }));
+  });
+  setBaseUrl(server.baseUrl);
+  try {
+    const result = await putJson('/settings', { supervisor_token_budget: 5 });
+    assert.equal(result.ok, false);
+    assert.equal(result.upstreamStatus, 422);
+    assert.equal(result.upstreamBody.errors.length, 1);
+  } finally {
+    await server.close();
     delete process.env.PYTHON_SERVICE_URL;
   }
 });

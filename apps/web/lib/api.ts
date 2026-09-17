@@ -1,9 +1,9 @@
 // Shared client-side API helper (PRD_V2 §28).
 //
 // All API routes except the public allowlist (/health, /metrics, /auth/token)
-// require a Bearer token. The dashboard has no login UI yet, so the token is
-// read from localStorage under the `ea-bot-token` key (the established
-// convention used by the control-plane page).
+// require a Bearer token. The token is stored in localStorage under the
+// `ea-bot-token` key; the /login page is the supported way to fill it
+// (POST /auth/token in dev), replacing the old manual DevTools paste.
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 

@@ -110,13 +110,34 @@ export function postJson<T = unknown>(
 }
 
 /**
+ * Perform a PUT request against the Python service with a JSON body.
+ *
+ * Used by the settings endpoint (UI/UX ide #7) where the operation is an
+ * idempotent update of a small allowlisted resource. Never throws: failures
+ * resolve to a `PythonProxyFailure` with `source: "unavailable"`.
+ *
+ * @param path Target path (e.g. `/settings`).
+ * @param body JSON-serialisable request body.
+ * @param timeoutMs Optional override request timeout.
+ * @param headers Optional extra headers (e.g. `{ 'X-Trace-Id': id }`).
+ */
+export function putJson<T = unknown>(
+  path: string,
+  body: unknown = {},
+  timeoutMs: number = resolveTimeoutMs(),
+  headers: RequestHeaders = {},
+): Promise<PythonProxyResult<T>> {
+  return request('PUT', path, body, timeoutMs, headers);
+}
+
+/**
  * Shared transport for GET/POST proxying to the Python service.
  *
  * Centralising this keeps timeout, error and JSON-parsing semantics identical
  * across verbs so callers can rely on the same `source` labelling.
  */
 function request<T>(
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PUT',
   path: string,
   body: unknown,
   timeoutMs: number,
@@ -148,7 +169,7 @@ function request<T>(
 
     const requestHeaders: RequestHeaders = { accept: 'application/json', ...headers };
     let payload: string | undefined;
-    if (method === 'POST') {
+    if (method === 'POST' || method === 'PUT') {
       payload = JSON.stringify(body ?? {});
       requestHeaders['content-type'] = 'application/json';
       requestHeaders['content-length'] = Buffer.byteLength(payload).toString();

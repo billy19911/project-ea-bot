@@ -19,11 +19,13 @@ import os
 from typing import Any
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from ..llm.registry import ModelRegistry
 from ..observability.metrics import MetricsRegistry
 from ..orchestration.runtime import get_runtime
 from ..security.audit_log import ProtectedAuditLog
+from ..system.settings_store import get_settings_store
 from ..telegram.gateway import TelegramGateway
 
 logger = logging.getLogger(__name__)
@@ -200,6 +202,121 @@ async def tasks() -> dict[str, Any]:
         "tasks": [],
         "counts": {"running": 0, "queued": 0, "completed": 0, "failed": 0},
         "source": "live",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Runtime settings (UI/UX ide #7)
+# ---------------------------------------------------------------------------
+#
+# Only knobs that are *actually consumed* by the running system are writable.
+# Risk limits are shown read-only with the real values the live RiskGate was
+# constructed with — the dashboard never edits safety logic.
+
+
+class SettingsPatch(BaseModel):
+    """Partial update; validated per-knob by the store."""
+
+    supervisor_token_budget: int | None = None
+    scheduler_poll_interval: float | None = None
+
+
+def _apply_to_runtime(values: dict[str, float]) -> dict[str, Any]:
+    """Push stored values into the live objects. Returns what was applied.
+
+    Both targets are plain mutable attributes on already-constructed objects:
+      * ``runtime.pipeline.supervisor.token_budget``
+      * ``runtime.scheduler.poll_interval``
+    A failure here is reported, never silently swallowed.
+    """
+    applied: dict[str, Any] = {}
+    runtime = get_runtime()
+    if "supervisor_token_budget" in values:
+        supervisor = getattr(runtime.pipeline, "supervisor", None)
+        if supervisor is not None and hasattr(supervisor, "token_budget"):
+            supervisor.token_budget = int(values["supervisor_token_budget"])
+            applied["supervisor_token_budget"] = supervisor.token_budget
+    if "scheduler_poll_interval" in values:
+        scheduler = getattr(runtime, "scheduler", None)
+        if scheduler is not None and hasattr(scheduler, "poll_interval"):
+            scheduler.poll_interval = max(0.001, float(values["scheduler_poll_interval"]))
+            applied["scheduler_poll_interval"] = scheduler.poll_interval
+    return applied
+
+
+def _risk_limits_snapshot() -> dict[str, Any]:
+    """Read the REAL limits from the live risk stack (read-only, never edited).
+
+    The live gate is ``risk.gate.RiskGate`` wrapping a ``RiskEngine`` whose
+    ``_thresholds`` dict holds the authoritative numbers (keyed by
+    ``RiskThreshold``), plus spread/RR limits on the gate itself. These values
+    are safety logic: the dashboard renders them read-only.
+    """
+    runtime = get_runtime()
+    gate = getattr(runtime.pipeline, "risk_gate", None)
+    if gate is None:
+        return {"available": False, "limits": {}}
+
+    limits: dict[str, Any] = {
+        "max_spread_pips": getattr(gate, "_max_spread_pips", None),
+        "min_rr": getattr(gate, "_min_rr", None),
+    }
+
+    engine = getattr(gate, "_engine", None)
+    thresholds = getattr(engine, "_thresholds", None)
+    if isinstance(thresholds, dict):
+        for key, value in thresholds.items():
+            # RiskThreshold.MAX_DRAWDOWN -> "max_drawdown"
+            name = getattr(key, "name", None)
+            if name is None:
+                name = getattr(key, "value", None)
+            if isinstance(name, str):
+                limits[name.lower()] = value
+
+    return {"available": True, "limits": limits}
+
+
+@router.get("/settings", summary="Runtime settings (writable allowlist + read-only risk limits)")
+async def get_settings() -> dict[str, Any]:
+    """Return writable knobs plus the real, read-only risk limits.
+
+    ``writable`` lists exactly what the UI may change and what each knob is
+    wired to. ``risk_limits`` is informational: the dashboard renders it
+    read-only because those values are safety logic.
+
+    Read-only by contract: values are persisted at startup (see ``main``
+    lifespan) and pushed on PUT — a GET never mutates the runtime.
+    """
+    store = get_settings_store()
+    snapshot = store.snapshot()
+    return {
+        "source": "live",
+        "writable": store.describe(),
+        "values": snapshot.to_dict(),
+        "risk_limits": _risk_limits_snapshot(),
+    }
+
+
+@router.put("/settings", summary="Update writable runtime settings")
+async def put_settings(patch: SettingsPatch) -> dict[str, Any]:
+    """Validate, persist, and apply settings. Rejects unknown/invalid input.
+
+    The response reports the applied values and pushes them into the live
+    runtime immediately (no restart required). Validation errors return the
+    API's own messages so the UI can show them verbatim.
+    """
+    store = get_settings_store()
+    raw = {k: v for k, v in patch.model_dump().items() if v is not None}
+    applied, errors = store.update(raw)
+    if errors:
+        return {"ok": False, "errors": errors, "values": store.snapshot().to_dict()}
+    pushed = _apply_to_runtime(applied)
+    logger.info("Runtime settings updated: %s (pushed=%s)", applied, pushed)
+    return {
+        "ok": True,
+        "errors": [],
+        "values": store.snapshot().to_dict(),
+        "applied": pushed,
     }
 
 

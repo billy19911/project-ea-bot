@@ -2,6 +2,37 @@
 Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
+### Changed — UI/UX Ide #7: Pengaturan Tersambung ke Backend (anti-slop)
+
+Halaman Pengaturan sebelumnya adalah teater: seluruh form disimpan ke
+localStorage dan tidak dibaca siapa pun — termasuk toggle "Kill switch" dan
+"Emergency stop" yang mengklaim memblokir order padahal tidak tersambung ke
+apa pun. Pada akun LIVE itu berbahaya, jadi halaman ini dirombak.
+
+**Backend**
+- `src/system/settings_store.py` (baru): store JSON dengan allowlist ketat —
+  hanya dua knob yang benar-benar dikonsumsi sistem: `supervisor_token_budget`
+  (dibaca `SupervisorAgent.token_budget`) dan `scheduler_poll_interval` (dibaca
+  `Scheduler.poll_interval`). Kunci asing ditolak, nilai di luar rentang ditolak.
+- `GET /settings` mengembalikan knob yang bisa ditulis + limit risiko NYATA
+  (read-only) dari `RiskEngine`/`RiskGate` yang sedang dipakai.
+- `PUT /settings` memvalidasi lalu MENERAPKAN ke objek runtime tanpa restart.
+- `src/main.py`: nilai tersimpan diterapkan saat startup dan menang atas default
+  environment.
+- Node: `PUT` didukung di `pythonClient` (`putJson`) + route `GET/PUT /settings`.
+
+**UI**
+- Tab "Runtime": hanya knob tersambung; tiap baris mencantumkan objek pembacanya
+  ("dipakai oleh …") supaya klaimnya bisa diaudit.
+- Tab "Batas risiko": nilai nyata, sengaja read-only (logika safety).
+- Field yang tidak tersambung DIHAPUS, bukan dipalsukan.
+- 401 (belum masuk) dibedakan dari "layanan tidak menjawab".
+
+**Verifikasi:** 18 test Python baru + 2 test Node baru; full suite 1212 passed;
+tsc 0 error; ESLint 0 warning; build sukses. Uji end-to-end dari UI: ubah nilai
+-> "Tersimpan & diterapkan" -> file persist berubah; nilai invalid & kunci
+asing ditolak. `runtime_settings.json` masuk .gitignore (state, bukan kode).
+
 ### Added — UI/UX Ide #3, #4, #5: Masuk, Tab Bergrup, Filter Terminal
 
 Tiga perbaikan UI yang dikerjakan bertahap dari daftar ide yang dipilih user
