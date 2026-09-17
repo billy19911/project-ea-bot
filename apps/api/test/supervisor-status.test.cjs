@@ -21,7 +21,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { buildSupervisorStatus } = require('../dist/supervisorStatus.js');
+const { buildSupervisorStatus, buildUsageRows } = require('../dist/supervisorStatus.js');
 
 test('uptime comes from health.uptime_seconds when it is a finite number', () => {
   const out = buildSupervisorStatus({
@@ -118,4 +118,46 @@ test('models map to usage rows with zeros and isFree only when is_free === true'
 test('models defaults to an empty array when the source is absent', () => {
   assert.deepEqual(buildSupervisorStatus({}).models, []);
   assert.deepEqual(buildSupervisorStatus({ models: null }).models, []);
+});
+
+// -- buildUsageRows: usage table from REAL counters, never padded zeros ------
+
+test('buildUsageRows returns only models actually called', () => {
+  const rows = buildUsageRows(
+    [
+      { model: 'codebuddy-deepseekv4.1flashfree', calls: 2, prompt_tokens: 300, completion_tokens: 150, cost_usd: 0 },
+    ],
+    [
+      { id: 'codebuddy-deepseekv4.1flashfree', provider: 'combo', is_free: true },
+      { id: 'paid-model', provider: 'combo', is_free: false },
+      { id: 'never-called', provider: 'combo', is_free: true },
+    ],
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].model, 'codebuddy-deepseekv4.1flashfree');
+  assert.equal(rows[0].calls, 2);
+  assert.equal(rows[0].promptTokens, 300);
+  assert.equal(rows[0].completionTokens, 150);
+  assert.equal(rows[0].isFree, true);
+});
+
+test('buildUsageRows returns an empty array when nothing was called (no zero-padding)', () => {
+  assert.deepEqual(buildUsageRows([], [{ id: 'm1', is_free: true }]), []);
+  assert.deepEqual(buildUsageRows(undefined, [{ id: 'm1' }]), []);
+  assert.deepEqual(buildUsageRows(null, null), []);
+});
+
+test('buildUsageRows keeps the model row even when the registry does not know it', () => {
+  const rows = buildUsageRows([{ model: 'ghost-model', calls: 1, prompt_tokens: 10, completion_tokens: 5, cost_usd: 0 }], []);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].provider, '9router');
+  assert.equal(rows[0].isFree, false);
+});
+
+test('buildUsageRows never invents numbers for malformed counters', () => {
+  const rows = buildUsageRows([{ model: 'm', calls: 'x', prompt_tokens: NaN, completion_tokens: Infinity, cost_usd: 'y' }], []);
+  assert.equal(rows[0].calls, 0);
+  assert.equal(rows[0].promptTokens, 0);
+  assert.equal(rows[0].completionTokens, 0);
+  assert.equal(rows[0].cost, 0);
 });

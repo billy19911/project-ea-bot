@@ -415,7 +415,7 @@ export default function AIControlPage() {
 
           {/* Model Usage */}
           <section className={styles.card}>
-            <h2>Penggunaan model LLM</h2>
+            <h2>Penggunaan model LLM (panggilan nyata)</h2>
             <div className={styles.modelSummary}>
               <div><small>Total token</small><strong>{totalCalls > 0 ? totalTokens.toLocaleString() : '—'}</strong></div>
               <div><small>Total cost</small><strong>{totalCalls > 0 ? `$${totalCost.toFixed(3)}` : '—'}</strong></div>
@@ -456,7 +456,9 @@ export default function AIControlPage() {
               </table>
               {models.length === 0 && (
                 <div className={styles.empty}>
-                  {source === 'live' ? 'Tidak ada model tersedia.' : 'Data model tidak tersedia — API belum mengembalikan data. Cek token lalu muat ulang.'}
+                  {source === 'live'
+                    ? 'Belum ada panggilan LLM — tabel ini hanya menampilkan model yang benar-benar dipanggil (bukan daftar model).'
+                    : 'Data penggunaan tidak tersedia — API belum mengembalikan data. Cek token lalu muat ulang.'}
                 </div>
               )}
             </div>

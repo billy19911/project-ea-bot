@@ -276,3 +276,37 @@ def test_live_model_fetch_failure_degrades_to_registry(monkeypatch):
 
     monkeypatch.setattr("src.llm.registry.ModelRegistry", FakeRegistry)
     assert advisor._pick_free_model() == "cached-free"
+
+
+# -- per-model usage tracking (real counters for the UI table) ---------------
+
+
+def test_status_reports_per_model_usage_after_calls(monkeypatch):
+    """The UI usage table reads these counters; they must be real."""
+    client = FakeClient(content="BULLISH 0.7")
+    advisor = _advisor(monkeypatch, enabled=True, client=client)
+
+    advisor.advise("market", MARKET)
+    advisor.advise("market", MARKET)
+
+    rows = advisor.status()["model_usage"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["model"] == "fake-model"
+    assert row["calls"] == 2
+    assert row["prompt_tokens"] == 40 * 2
+    assert row["completion_tokens"] == 20 * 2
+
+
+def test_status_model_usage_is_empty_before_any_call(monkeypatch):
+    advisor = _advisor(monkeypatch, enabled=True)
+    assert advisor.status()["model_usage"] == []
+
+
+def test_refused_calls_never_appear_in_model_usage(monkeypatch):
+    """A refusal spends nothing, so it must not create a usage row."""
+    client = FakeClient()
+    advisor = _advisor(monkeypatch, enabled=False, client=client)
+
+    advisor.advise("market", MARKET)  # refused: disabled
+    assert advisor.status()["model_usage"] == []

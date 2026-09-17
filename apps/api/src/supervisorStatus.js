@@ -83,4 +83,44 @@ function buildSupervisorStatus(input) {
   };
 }
 
-module.exports = { buildSupervisorStatus, mapModels, isFiniteNumber };
+/**
+ * Build per-model usage rows for the AI Control page from REAL advisor
+ * counters, cross-referenced with the registry for the free/paid flag.
+ *
+ * Only models the advisor actually called appear — an empty array means
+ * "no calls yet", which the UI renders as an honest empty state instead of
+ * a table of zeros pretending to be usage data.
+ *
+ * @param {unknown} advisorUsage - `model_usage` array from `/ai/advisor/status`
+ * @param {unknown} registryModels - `models` array from `/ai/models`
+ * @returns {Array<{model: string, provider: string, calls: number, promptTokens: number, completionTokens: number, cost: number, isFree: boolean}>}
+ */
+function buildUsageRows(advisorUsage, registryModels) {
+  if (!Array.isArray(advisorUsage) || advisorUsage.length === 0) return [];
+
+  const registryById = new Map();
+  if (Array.isArray(registryModels)) {
+    for (const m of registryModels) {
+      const id = m?.id ?? m?.name;
+      if (id) registryById.set(String(id), m);
+    }
+  }
+
+  return advisorUsage.map((u) => {
+    const model = String(u?.model ?? 'unknown');
+    const reg = registryById.get(model);
+    return {
+      model,
+      provider: reg?.provider ?? '9router',
+      calls: isFiniteNumber(u?.calls) ? u.calls : 0,
+      promptTokens: isFiniteNumber(u?.prompt_tokens) ? u.prompt_tokens : 0,
+      completionTokens: isFiniteNumber(u?.completion_tokens) ? u.completion_tokens : 0,
+      cost: isFiniteNumber(u?.cost_usd) ? u.cost_usd : 0,
+      // Only an explicit is_free === true marks a model free. Unknown → paid
+      // label is avoided by the UI (cost column shows "—" when calls === 0).
+      isFree: reg?.is_free === true,
+    };
+  });
+}
+
+module.exports = { buildSupervisorStatus, buildUsageRows, mapModels, isFiniteNumber };

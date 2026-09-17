@@ -102,6 +102,10 @@ class LLMAdvisor:
         self._lock = threading.Lock()
         self._calls = 0
         self._refusals = 0
+        # Real per-model usage, recorded from gateway responses only. The UI
+        # usage table is built from this — never from registry rows padded
+        # with zeros (that was fabricated data: a "usage" table showing none).
+        self._model_usage: dict[str, dict[str, Any]] = {}
 
     # -- wiring helpers -----------------------------------------------------
 
@@ -307,19 +311,41 @@ class LLMAdvisor:
                 guardrails=guardrails,
             )
 
+        usage = getattr(response, "usage", None)
+        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+        completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+        total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+        cost_usd = float(getattr(usage, "cost_usd", 0.0) or 0.0)
+        model_name = str(getattr(response, "model", "") or "unknown")
+
         with self._lock:
             self._calls += 1
+            bucket = self._model_usage.setdefault(
+                model_name,
+                {
+                    "model": model_name,
+                    "calls": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "cost_usd": 0.0,
+                },
+            )
+            bucket["calls"] += 1
+            bucket["prompt_tokens"] += prompt_tokens
+            bucket["completion_tokens"] += completion_tokens
+            bucket["total_tokens"] += total_tokens
+            bucket["cost_usd"] += cost_usd
 
-        usage = getattr(response, "usage", None)
         return AdvisorResult(
             ok=True,
             content=str(getattr(response, "content", "")),
-            model=str(getattr(response, "model", "")),
+            model=model_name,
             is_fallback=bool(getattr(response, "is_fallback", False)),
-            prompt_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
-            completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
-            total_tokens=int(getattr(usage, "total_tokens", 0) or 0),
-            cost_usd=float(getattr(usage, "cost_usd", 0.0) or 0.0),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            cost_usd=cost_usd,
             latency_s=float(getattr(response, "latency_s", 0.0) or 0.0),
             guardrails=guardrails,
         )
@@ -342,12 +368,15 @@ class LLMAdvisor:
                     "token_used": int(getattr(supervisor, "token_used", 0) or 0),
                 }
             )
+        with self._lock:
+            model_usage = [dict(v) for v in self._model_usage.values()]
         return {
             "enabled": self._enabled(),
             "calls": self._calls,
             "refusals": self._refusals,
             "limits": {"max_tokens": MAX_TOKENS, "timeout_s": REQUEST_TIMEOUT_S},
             "usage": usage,
+            "model_usage": model_usage,
             "budget": budget,
             "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
