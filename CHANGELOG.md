@@ -3,6 +3,21 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Real-time News & Economic Calendar Feed Provider (News Agent Realtime)
+- **`NewsFeedProvider` (`services/python/src/market/news_feed.py`)**: Adapter berita live tanpa API key berbayar.
+  - Kalender ekonomi live dari ForexFactory JSON (`https://nfs.faireconomy.media/ff_calendar_thisweek.json`) dengan deteksi event High-impact (NFP, CPI, FOMC, Suku Bunga).
+  - Headline finansial live dari Yahoo Finance RSS (`GC=F,DX-Y.NYB`) dan CNBC RSS (Forex & Economy).
+  - Sentimen deterministik berbasis leksikon keuangan: scoring float -1.0 s/d +1.0 dan impact level LOW/MEDIUM/HIGH.
+  - In-memory TTL caching (15 menit untuk kalender, 5 menit untuk headline) dengan fail-closed fallback agar operasi trading tetap aman saat jaringan eksternal offline.
+- **REST API Endpoints (`services/python/src/market/endpoints.py`)**:
+  - `GET /market/news`: daftar berita live terbaru beserta score sentimen dan impact.
+  - `GET /market/calendar`: event kalender ekonomi minggu berjalan dengan filter mata uang dan impact.
+  - `GET /market/sentiment`: ringkasan sentimen gabungan pasar untuk instrumen tertentu (default: XAUUSD).
+  - `POST /market/refresh`: paksa pembaruan cache berita dan kalender seketika.
+- **Integrasi Otonom**:
+  - Disambungkan ke `AutonomousScheduler` via `OrchestrationRuntime` (`runtime.py`) sebagai default `context_provider`, sehingga `NewsSentimentAgent` kini otomatis menganalisa berita pasar realtime di setiap cycle.
+- **Verifikasi**: 22 unit test baru di `tests/test_news_feed.py` (total 1331 passed di test suite Python), Flake8 0 warning, Black & isort lulus, CI GitHub Actions 8/8 hijau (commit `198b3ea`). Live server Python :8000 mengembalikan 80 headline berita dan 105 event kalender ekonomi nyata.
+
 ### Changed — Pembersihan Dead CSS & Migrasi Design Token (Fase 1-3 Hardening)
 - **Dead CSS dihapus via PostCSS AST parser**: 872 baris sisa migrasi AppShell (Tahap A) yang menduplikasi sidebar di 5 modul (`page.module.css`, `ai-control`, `control-plane`, `observability`, `strategy`) dibersihkan tuntas tanpa menyentuh class yang aktif dipakai TSX.
 - **233 deklarasi warna mentah dimigrasikan ke CSS design tokens**: hex mentah (`#1f6feb`, `#f5f7fb`, `#ffffff`, `#172033`, `#e5e7eb`, `#d0d5dd`, `#067647`, `#b42318`, `#d92d20`) diganti dengan `var(--primary)`, `var(--bg)`, `var(--surface)`, `var(--text)`, `var(--border)`, `var(--success-*)`, `var(--danger-*)`.
