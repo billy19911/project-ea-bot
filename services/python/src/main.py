@@ -18,6 +18,7 @@ from agents.registry import agent_registry
 
 from .charting.endpoints import router as charting_router
 from .config import settings
+from .market.endpoints import router as market_router
 from .mt5 import connector
 from .mt5.endpoints import router as mt5_router
 from .observability.sampler import get_trend_sampler
@@ -173,6 +174,7 @@ app.include_router(system_router)
 app.include_router(strategy_router)
 app.include_router(reports_router)
 app.include_router(research_router)
+app.include_router(market_router)
 
 
 @app.get("/health")

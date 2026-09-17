@@ -23,6 +23,7 @@ from execution.engine import ExecutionEngine
 from execution.order_builder import OrderBuilder
 from execution.reconciliation import ReconciliationReport
 from execution.reconciliation_runner import DEFAULT_RECONCILIATION_INTERVAL, ReconciliationRunner
+from market.news_feed import get_news_feed_provider
 from observability.traces import TraceCollector
 from risk.engine import RiskEngine
 from risk.gate import RiskGate
@@ -79,6 +80,9 @@ class OrchestrationRuntime:
                 queue=self.queue,
                 pipeline=self.pipeline,
                 reconciliation_runner=self.reconciliation,
+                context_provider=lambda evt: get_news_feed_provider().get_news_context(
+                    symbol=str(getattr(evt, "symbol", "XAUUSD") or "XAUUSD")
+                ),
             )
         )
         # Bounded in-memory history of PipelineResult dicts (oldest first).

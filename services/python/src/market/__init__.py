@@ -13,6 +13,7 @@ from .intelligence import (
     TechnicalAnalyst,
     VolatilityAnalyst,
 )
+from .news_feed import NewsFeedProvider, get_news_feed_provider, score_headline_sentiment
 
 __all__ = [
     "MarketLead",
@@ -23,4 +24,7 @@ __all__ = [
     "NewsSentimentAnalyst",
     "AnalystReport",
     "CommitteeDecision",
+    "NewsFeedProvider",
+    "get_news_feed_provider",
+    "score_headline_sentiment",
 ]
