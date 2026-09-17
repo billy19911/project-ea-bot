@@ -136,3 +136,75 @@ td {
  * karena CSS module menghasilkan nama ter-hash (mis. page_formTitle__FHCXW).
  * Aturan `strong { display: block }` juga dihapus: itu memecah teks inline
  * (mis. "decision <strong>…</strong> · status") menjadi baris terpisah. */
+
+/* ── TrendChart (UI/UX ide #8) ───────────────────────────────────────────────
+ * SVG inline, nol dependency. Titik null digambar sebagai celah — bukan nol. */
+.trendChart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.trendChartHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.trendChartLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.trendChartMeta {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.trendUp { color: var(--success); }
+.trendDown { color: var(--danger); }
+
+.trendChart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.trendGrid {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.trendGapDot {
+  fill: var(--warning);
+}
+
+.trendChartAxis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.trendChartEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 90px;
+  padding: var(--sp-3);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-md);
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}

@@ -19,6 +19,7 @@ from agents.registry import agent_registry
 from .config import settings
 from .mt5 import connector
 from .mt5.endpoints import router as mt5_router
+from .observability.sampler import get_trend_sampler
 from .orchestration.endpoints import router as orchestration_router
 from .orchestration.runtime import get_runtime
 from .strategy.endpoints import register_live_strategy
@@ -101,6 +102,12 @@ async def lifespan(app: FastAPI):
             runtime.scheduler.poll_interval,
         )
 
+    # Trend sampler (UI/UX ide #8) — ring buffer of REAL samples for the
+    # dashboard charts. Started regardless of the scheduler: account equity
+    # moves whether or not an event is queued. Read-only against MT5.
+    trend_sampler = get_trend_sampler()
+    await trend_sampler.start()
+
     if settings.mt5_live_data:
         live_data_started = connector.use_live_data_mode()
         if live_data_started:
@@ -115,6 +122,11 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    try:
+        await trend_sampler.stop()
+    except Exception:  # pragma: no cover - defensive
+        logger.exception("Error stopping trend sampler")
+
     if scheduler_task is not None:
         try:
             await get_runtime().scheduler.stop()

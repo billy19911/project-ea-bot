@@ -13,6 +13,8 @@ Wired knobs
   budget (``check_token_budget``). Lowering it is strictly *more* restrictive.
 * ``scheduler_poll_interval`` — seconds between scheduler polls
   (``orchestration.scheduler``). Must stay >= 0.1s so the loop cannot spin.
+* ``trend_sample_interval`` — seconds between trend-chart samples
+  (``observability.sampler.TrendSampler``). Clamped to 2–300s.
 
 Deliberately NOT here
 ---------------------
@@ -95,6 +97,15 @@ KNOBS: tuple[Knob, ...] = (
         default=1.0,
         description="Jeda antar-poll scheduler (detik).",
         applied_to="Scheduler.poll_interval",
+    ),
+    Knob(
+        key="trend_sample_interval",
+        kind="float",
+        minimum=2.0,
+        maximum=300.0,
+        default=15.0,
+        description="Jeda antar-sampel grafik tren (detik). Lebih besar = riwayat lebih panjang.",
+        applied_to="TrendSampler.interval",
     ),
 )
 

@@ -502,3 +502,23 @@
   .supervisorInfo { grid-template-columns: 1fr; }
   .tokenSummary { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ── Tren nyata (#8) ──────────────────────────────────────────────────────── */
+.trendGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--sp-3);
+}
+
+.trendCaption {
+  margin-left: var(--sp-3);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.mutedText {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}

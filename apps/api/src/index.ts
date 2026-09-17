@@ -282,6 +282,16 @@ app.get('/observability/metrics', async (req, res) => {
   }
 });
 
+// UI/UX ide #8: trend history of REAL samples (ring buffer in the Python
+// service). Read-only proxy — the sampler itself lives in Python so the
+// browser never talks to MT5 directly.
+app.get('/observability/trend', async (req, res) => {
+  const log = (req as any).log;
+  const limit = parseInt(String(req.query.limit)) || 0;
+  log.info({ limit }, 'observability.trend');
+  await sendProxy(res, `/observability/trend?limit=${limit}`, undefined, req);
+});
+
 app.get('/observability/errors', (req, res) => {
   const log = (req as any).log;
   const limit = parseInt(String(req.query.limit)) || 50;
@@ -768,7 +778,7 @@ app.get('/', (req, res) => {
       health: 'GET /health',
       signals: 'GET /signals, POST /signals',
       metrics: 'GET /metrics',
-      observability: 'GET /observability/metrics, GET /observability/errors',
+      observability: 'GET /observability/metrics, GET /observability/errors, GET /observability/trend',
     },
   });
 });

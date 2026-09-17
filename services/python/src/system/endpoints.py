@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from ..llm.registry import ModelRegistry
 from ..observability.metrics import MetricsRegistry
+from ..observability.sampler import get_trend_sampler
 from ..orchestration.runtime import get_runtime
 from ..security.audit_log import ProtectedAuditLog
 from ..system.settings_store import get_settings_store
@@ -219,6 +220,7 @@ class SettingsPatch(BaseModel):
 
     supervisor_token_budget: int | None = None
     scheduler_poll_interval: float | None = None
+    trend_sample_interval: float | None = None
 
 
 def _apply_to_runtime(values: dict[str, float]) -> dict[str, Any]:
@@ -241,6 +243,10 @@ def _apply_to_runtime(values: dict[str, float]) -> dict[str, Any]:
         if scheduler is not None and hasattr(scheduler, "poll_interval"):
             scheduler.poll_interval = max(0.001, float(values["scheduler_poll_interval"]))
             applied["scheduler_poll_interval"] = scheduler.poll_interval
+    if "trend_sample_interval" in values:
+        sampler = get_trend_sampler()
+        sampler.interval = float(values["trend_sample_interval"])
+        applied["trend_sample_interval"] = sampler.interval
     return applied
 
 
@@ -358,3 +364,28 @@ async def observability_metrics() -> dict[str, Any]:
     """
     registry = get_metrics_registry()
     return {"metrics": registry.snapshot(), "source": "live"}
+
+
+# ---------------------------------------------------------------------------
+# Trend history (UI/UX ide #8)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/observability/trend", summary="Trend history of real samples")
+async def observability_trend(limit: int = 0) -> dict[str, Any]:
+    """Return the sampler's ring buffer of REAL samples (oldest first).
+
+    Sections that could not be read are ``null`` for that sample — the UI is
+    expected to draw a gap, never a fabricated zero. ``capacity``/``interval``
+    are included so the chart can label its own window honestly.
+    """
+    sampler = get_trend_sampler()
+    samples = sampler.history(limit=limit)
+    return {
+        "samples": samples,
+        "count": len(samples),
+        "capacity": sampler.capacity,
+        "interval_s": sampler.interval,
+        "sampling": sampler.running,
+        "source": "live",
+    }

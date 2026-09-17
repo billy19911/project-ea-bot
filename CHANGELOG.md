@@ -2,6 +2,20 @@
 Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
+
+### Added — UI/UX Ide #8: Grafik Tren Nyata (sampler + SVG inline)
+- **Sampler ring-buffer nyata** (`services/python/src/observability/sampler.py`): menyampel
+  equity/balance akun MT5 (read-only) + stats scheduler tiap 15 dtk (240 sampel ≈ 1 jam).
+  Sampel yang gagal dibaca disimpan `null` — grafik memutus garis, bukan mengarang nol.
+- **Endpoint** `GET /observability/trend` (Python) + proxy Node `/observability/trend`.
+- **Komponen `TrendChart`** — SVG inline, nol dependency baru; sumbu Y + garis + label.
+  Menampilkan akun yang dibaca (`login` + server) supaya tidak menyesatkan.
+- **Knob ke-3 `trend_sample_interval`** (2–300 dtk) di Pengaturan → benar-benar mengubah
+  interval sampler secara live (terbukti 15→5→15 tanpa restart).
+- Halaman Observability: kartu "Tren Nyata" dengan 4 grafik (Equity, Balance, Event,
+  Trade diblokir) + ringkasan awal→akhir→delta.
+- Test baru 12 (sampler: ring-buffer, null honesty, settings hook) → total 1224 passed.
+
 ### Changed — UI/UX Ide #7: Pengaturan Tersambung ke Backend (anti-slop)
 
 Halaman Pengaturan sebelumnya adalah teater: seluruh form disimpan ke

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
 import AppShell from '../../components/AppShell';
+import TrendChart from '../../components/TrendChart';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 interface ErrorRecord {
@@ -32,6 +33,31 @@ interface SupervisorStatus {
   agents: { name: string; type: string; status: string; priority: number; errorCount: number }[];
   models: { model: string; provider: string; calls: number; promptTokens: number; completionTokens: number; cost: number; isFree?: boolean }[];
   errors: { id: string; timestamp: string; agent: string; message: string; severity: string }[];
+}
+
+interface TrendSample {
+  ts: number;
+  t: string;
+  account: {
+    login: number;
+    server: string;
+    equity: number;
+    balance: number;
+    margin: number;
+    free_margin: number;
+    margin_level: number;
+    currency: string;
+  } | null;
+  stats: Record<string, number | boolean> | null;
+}
+
+interface TrendPayload {
+  samples: TrendSample[];
+  count: number;
+  capacity: number;
+  interval_s: number;
+  sampling: boolean;
+  source: string;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -71,6 +97,7 @@ export default function ObservabilityPage() {
   const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
   const [supervisor, setSupervisor] = useState<SupervisorStatus | null>(null);
   const [errors, setErrors] = useState<ErrorRecord[]>([]);
+  const [trend, setTrend] = useState<TrendPayload | null>(null);
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [allFailed, setAllFailed] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<string>('');
@@ -93,10 +120,11 @@ export default function ObservabilityPage() {
       }
     };
 
-    const [metricsRes, supervisorRes, errorsRes] = await Promise.all([
+    const [metricsRes, supervisorRes, errorsRes, trendRes] = await Promise.all([
       fetchEndpoint('/observability/metrics'),
       fetchEndpoint('/ai-control/status'),
       fetchEndpoint('/observability/errors?limit=50'),
+      fetchEndpoint('/observability/trend'),
     ]);
 
     const failedStatuses: number[] = [];
@@ -145,9 +173,23 @@ export default function ObservabilityPage() {
       failedStatuses.push(0);
     }
 
+    // Trend (#8): only accept an OK payload carrying an array `samples`.
+    if (
+      trendRes.ok &&
+      trendRes.data &&
+      typeof trendRes.data === 'object' &&
+      Array.isArray((trendRes.data as { samples?: unknown }).samples)
+    ) {
+      setTrend(trendRes.data as TrendPayload);
+    } else if (!trendRes.ok) {
+      failedStatuses.push(trendRes.status);
+    } else {
+      failedStatuses.push(0);
+    }
+
     // Honest error state: only when every endpoint failed. Prefer a real HTTP
     // status (non-zero) over the 0 "unknown/network" sentinel.
-    if (failedStatuses.length === 3) {
+    if (failedStatuses.length === 4) {
       const real = failedStatuses.find((s) => s > 0) ?? null;
       setAllFailed(true);
       setErrorStatus(real);
@@ -184,6 +226,21 @@ export default function ObservabilityPage() {
           .filter(([code]) => parseInt(code) >= 400)
           .reduce((s, [, v]) => s + v, 0), 0)
     : 0;
+
+  // Seri tren (#8). Akun & scheduler diambil terpisah agar celah tetap celah.
+  const trendSamples = trend?.samples ?? [];
+  const equitySeries = trendSamples.map((s) => s.account?.equity ?? null);
+  const balanceSeries = trendSamples.map((s) => s.account?.balance ?? null);
+  const eventsSeries = trendSamples.map((s) =>
+    typeof s.stats?.events_processed === 'number' ? (s.stats.events_processed as number) : null,
+  );
+  const blockedSeries = trendSamples.map((s) =>
+    typeof s.stats?.trades_blocked === 'number' ? (s.stats.trades_blocked as number) : null,
+  );
+  const activeAccount = trendSamples
+    .map((s) => s.account)
+    .filter((a): a is NonNullable<TrendSample['account']> => a !== null)
+    .slice(-1)[0];
 
   const totalTokens = models
     ? models.reduce((sum, m) => sum + (m.promptTokens ?? 0) + (m.completionTokens ?? 0), 0)
@@ -286,6 +343,65 @@ export default function ObservabilityPage() {
           {/* Tab Content */}
           {tab === 'overview' && (
             <>
+              {/* Tren nyata (#8) — dari sampler ring-buffer Python */}
+              <section className={styles.card}>
+                <h2>
+                  Tren Nyata
+                  {trend && (
+                    <small className={styles.trendCaption}>
+                      {trend.count}/{trend.capacity} sampel · tiap {trend.interval_s}s ·{' '}
+                      {trend.sampling ? 'sampler aktif' : 'sampler nonaktif'}
+                      {activeAccount
+                        ? ` · akun ${activeAccount.login} (${activeAccount.server})`
+                        : ' · akun tidak tersambung'}
+                    </small>
+                  )}
+                </h2>
+                {trend && trend.count > 0 ? (
+                  <div className={styles.trendGrid}>
+                    {activeAccount ? (
+                      <>
+                        <TrendChart
+                          values={equitySeries}
+                          label={`Equity (${activeAccount.currency})`}
+                          format={(v) => v.toLocaleString()}
+                        />
+                        <TrendChart
+                          values={balanceSeries}
+                          label={`Balance (${activeAccount.currency})`}
+                          format={(v) => v.toLocaleString()}
+                          color="var(--text-secondary)"
+                        />
+                      </>
+                    ) : (
+                      <p className={styles.mutedText}>
+                        Tidak ada sampel akun. Grafik equity hanya digambar saat terminal MT5
+                        tersambung dalam mode data live — angka simulasi tidak pernah diplot.
+                      </p>
+                    )}
+                    <TrendChart
+                      values={eventsSeries}
+                      label="Event diproses (kumulatif)"
+                      format={(v) => v.toLocaleString()}
+                      color="var(--success)"
+                      height={90}
+                    />
+                    <TrendChart
+                      values={blockedSeries}
+                      label="Trade diblokir Risk Gate (kumulatif)"
+                      format={(v) => v.toLocaleString()}
+                      color="var(--warning)"
+                      height={90}
+                    />
+                  </div>
+                ) : (
+                  <p className={styles.mutedText}>
+                    Sampler belum mengumpulkan sampel. Grafik muncul setelah sampel pertama
+                    (beberapa detik setelah layanan Python hidup).
+                  </p>
+                )}
+              </section>
+
               {/* Request Distribution */}
               <section className={styles.card}>
                 <h2>Distribusi Request</h2>
