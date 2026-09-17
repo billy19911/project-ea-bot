@@ -7,7 +7,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .agents.registry import agent_registry
+from agents.analysts import (
+    MomentumAnalystAgent,
+    NewsSentimentAgent,
+    StructureAnalystAgent,
+    VolatilityAnalystAgent,
+)
+from agents.base import TechnicalAnalystAgent
+from agents.registry import agent_registry
+
 from .config import settings
 from .mt5 import connector
 from .mt5.endpoints import router as mt5_router
@@ -26,13 +34,35 @@ logger = logging.getLogger(__name__)
 _STARTED_AT = time.time()
 
 
+def register_default_agents() -> list[str]:
+    """Register the default analyst agents; returns newly added names.
+
+    Idempotent: agents already present in the registry are skipped, so a warm
+    reload (or a second call) never raises "already registered". Every agent
+    here is deterministic and analysis-only — none of them can reach MT5, the
+    Risk Gate, or the Execution Engine.
+    """
+    default_agents = [
+        TechnicalAnalystAgent(),
+        MomentumAnalystAgent(),
+        StructureAnalystAgent(),
+        VolatilityAnalystAgent(),
+        NewsSentimentAgent(),
+    ]
+    added: list[str] = []
+    for agent in default_agents:
+        if agent_registry.get(agent.name) is None:
+            agent_registry.register(agent)
+            added.append(agent.name)
+    return added
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan — startup and shutdown hooks."""
-    # Startup
-    from .agents.base import TechnicalAnalystAgent
-
-    agent_registry.register(TechnicalAnalystAgent())
+    # Startup — register every default analyst (idempotent).
+    added = register_default_agents()
+    logger.info("Registered default agents: %s", added or "none (already present)")
 
     # Register the real live engine configuration with the strategy registry
     # (EPIC 13) — idempotent, so a warm reload does not duplicate it.

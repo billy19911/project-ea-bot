@@ -2,6 +2,21 @@
 Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
+### Fixed — Agent Wiring: Supervisor Now Delegates to Real Specialists
+
+Tiga bug wiring yang membuat seluruh agent analyst tidak pernah terpanggil di
+jalur produksi (ditemukan lewat audit otonomi AI):
+
+- **Split-brain registry**: `src/main.py` mendaftarkan agent ke `src.agents.registry`, sedangkan `src/orchestration/runtime.py` meng-inject `agents.registry` ke Supervisor — dua modul berbeda dengan dua singleton berbeda, sehingga setiap delegasi menjawab `Agent '<nama>' not registered`. Kini keduanya memakai singleton yang sama.
+- **Registry ter-clobber**: `SupervisorAgent.analyze()` menimpa `_registry_cache` dengan `None` setiap kali context pipeline tidak menyertakan key `registry` — wiring produksi hilang pada siklus pertama. Kini context hanya menimpa bila key `registry` benar-benar ada.
+- **Routing salah sasaran**: `MOMENTUM_`/`RSI_`/`STOCH_` diarahkan ke `technical_analyst` (bukan `momentum_analyst`), `VOLATILITY_` ke `technical_analyst` (bukan `volatility_analyst`), dan `NEWS_`/`SOCIAL_` ke `sentiment_analyst` yang berstatus UNSUPPORTED (bukan `news_sentiment` yang nyata).
+
+### Added — Default Analyst Registration at Startup
+
+- **`src/main.py`**: `register_default_agents()` (idempotent) mendaftarkan 5 agent saat startup — `technical_analyst`, `momentum_analyst`, `structure_analyst`, `volatility_analyst`, `news_sentiment`. Semua deterministik dan analysis-only (tidak bisa menyentuh MT5, Risk Gate, atau Execution Engine).
+- **Bukti live**: `GET /health` kini melaporkan `agents_registered: 5` (sebelumnya 1); `POST /pipeline/run` untuk event `MOMENTUM_BULLISH` benar-benar didelegasikan ke `momentum_analyst`.
+- **Test**: `tests/test_agent_wiring.py` (7 test) mengunci ketiga perbaikan + idempotensi registrasi; suite Python **1187 passed**.
+
 ### Added — Multi-Terminal MT5: Auto-Detect, Select, Arm/Disarm (Run 24)
 
 Mendukung beberapa terminal MT5 berjalan bersamaan: sistem auto-detect terminal

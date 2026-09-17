@@ -30,21 +30,26 @@ logger = logging.getLogger(__name__)
 DEFAULT_ROUTING_TABLE: dict[str, list[str]] = {
     # Trend events → technical analyst
     "TREND_": ["technical_analyst"],
-    "MOMENTUM_": ["technical_analyst"],
+    "MOMENTUM_": ["momentum_analyst"],
     "EMA_CROSSOVER": ["technical_analyst"],
     "MACD_CROSSOVER": ["technical_analyst"],
     "BREAKOUT": ["technical_analyst"],
     "BREAKDOWN": ["technical_analyst"],
     "REVERSAL": ["technical_analyst"],
-    # RSI / Stochastic extremes
-    "RSI_": ["technical_analyst"],
-    "STOCH_": ["technical_analyst"],
+    # RSI / Stochastic extremes → momentum specialist
+    "RSI_": ["momentum_analyst"],
+    "STOCH_": ["momentum_analyst"],
+    # Structure events → structure specialist
+    "STRUCTURE_": ["structure_analyst"],
+    "PRICE_ACTION": ["structure_analyst"],
+    "LEVEL_SCAN": ["structure_analyst"],
+    "MARKET_": ["structure_analyst"],
     # Fundamental events (Phase 4)
     "EARNINGS_": ["fundamental_analyst"],
     "ECONOMIC_": ["fundamental_analyst"],
-    # Sentiment events (Phase 4)
-    "NEWS_": ["sentiment_analyst"],
-    "SOCIAL_": ["sentiment_analyst"],
+    # News / sentiment events → deterministic news sentiment specialist
+    "NEWS_": ["news_sentiment"],
+    "SOCIAL_": ["news_sentiment"],
     # Risk events — handled by risk gate + supervisor
     "DRAWDOWN_": ["technical_analyst"],
     "EXPOSURE_": ["technical_analyst"],
@@ -52,7 +57,8 @@ DEFAULT_ROUTING_TABLE: dict[str, list[str]] = {
     # Gap / Doji — technical
     "GAP_": ["technical_analyst"],
     "DOJI": ["technical_analyst"],
-    "VOLATILITY_": ["technical_analyst"],
+    # Volatility events → volatility specialist
+    "VOLATILITY_": ["volatility_analyst"],
 }
 
 # Default per-agent token estimate used when the caller does not supply one.
@@ -106,8 +112,9 @@ class SupervisorAgent(BaseAgent):
         self.token_budget: int = token_budget
         self.routing_policy: str = routing_policy
         self.token_used: int = 0
-        # Registry reference for priority lookups; populated per-call from
-        # context so the registry stays the source of truth.
+        # Registry reference for priority lookups and delegation. Production
+        # injects it at construction (see orchestration.runtime); a per-call
+        # "registry" in the context overrides it.
         self._registry_cache: Optional[Any] = None
 
     # ------------------------------------------------------------------
@@ -290,9 +297,12 @@ class SupervisorAgent(BaseAgent):
         if context.get("reset_budget", True):
             self.reset_token_budget()
 
-        # Cache the registry (if provided) for priority lookups and filtering.
-        registry = context.get("registry")
-        self._registry_cache = registry
+        # Registry resolution: an explicit context value wins; otherwise keep
+        # the registry injected at construction time (production wiring), so a
+        # context without "registry" never clears it.
+        if "registry" in context:
+            self._registry_cache = context.get("registry")
+        registry = self._registry_cache
 
         if agent_list:
             # Use provided agents if available

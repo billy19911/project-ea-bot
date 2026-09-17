@@ -40,6 +40,7 @@
 | EPIC 17 | Security (tool permissions, tamper-evident audit) | `src/security/` | **Complete** |
 | EPIC 18 | Testing & Failure Simulation (13 skenario) | `tests/test_failure_simulation.py` | **Complete** |
 | EPIC 19 | Live Readiness (14 gate + explicit LIVE activation) | `src/readiness/` | **Complete** |
+| — | Agent wiring produksi (5 analyst terdaftar + delegasi Supervisor) | `src/main.py`, `src/agents/supervisor.py`, `src/orchestration/runtime.py` | **Complete** |
 
 ---
 
