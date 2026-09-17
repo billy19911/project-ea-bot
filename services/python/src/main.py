@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from agents.analysts import (
+    FundamentalAnalystAgent,
     MomentumAnalystAgent,
     NewsSentimentAgent,
     StructureAnalystAgent,
@@ -53,6 +54,7 @@ def register_default_agents() -> list[str]:
         StructureAnalystAgent(),
         VolatilityAnalystAgent(),
         NewsSentimentAgent(),
+        FundamentalAnalystAgent(),
     ]
     added: list[str] = []
     for agent in default_agents:

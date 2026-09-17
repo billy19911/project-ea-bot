@@ -1,9 +1,18 @@
 # -*- coding: utf-8 -*-
 """Market Analyst Agents.
 
-Provides specialized structural and momentum market analysis agents.
+Provides specialized structural, momentum, fundamental, and news analysis
+agents.
 """
 
+from .fundamental_analyst import (
+    EconomicEvent,
+    FundamentalAnalyst,
+    FundamentalAnalystAgent,
+    FundamentalInput,
+    FundamentalOutput,
+    FundamentalSignal,
+)
 from .momentum_analyst import (
     DivergenceResult,
     MomentumAnalystAgent,
@@ -48,4 +57,10 @@ __all__ = [
     "NewsItem",
     "SentimentDirection",
     "ImpactLevel",
+    "FundamentalAnalystAgent",
+    "FundamentalAnalyst",
+    "FundamentalInput",
+    "FundamentalOutput",
+    "FundamentalSignal",
+    "EconomicEvent",
 ]
