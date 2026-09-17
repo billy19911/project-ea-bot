@@ -83,7 +83,7 @@
 }
 
 .navLabel {
-  padding: 0 10px;
+  padding: 0 12px;
   margin-bottom: var(--sp-1);
   color: var(--sidebar-muted);
   font-size: var(--fs-xs);
@@ -93,10 +93,11 @@
 }
 
 .navItem {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 10px;
+  gap: 11px;
+  padding: 9px 12px;
   border-radius: var(--r-md);
   color: var(--sidebar-text);
   font-size: var(--fs-md);
@@ -109,22 +110,50 @@
   color: #fff;
 }
 
+.navItem:focus-visible {
+  outline: 2px solid var(--sidebar-accent);
+  outline-offset: 2px;
+}
+
+/* Item aktif: tint biru lembut + pill aksen di tepi kiri — blok biru penuh
+   terlalu berat dan membuat sidebar terlihat seperti deretan tombol besar. */
 .navActive,
 .navActive:hover {
-  background: var(--primary);
+  background: rgba(31, 111, 235, 0.18);
   color: #fff;
   font-weight: 600;
+}
+
+.navActive::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  border-radius: var(--r-full);
+  background: var(--sidebar-accent);
 }
 
 .icon {
   flex-shrink: 0;
   opacity: 0.9;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+
+.navActive .icon {
+  color: var(--sidebar-accent);
+  opacity: 1;
 }
 
 /* Footer: status terminal + akun (read-only) ------------------------------- */
 
 .footer {
   margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
   padding-top: var(--sp-4);
   border-top: 1px solid var(--sidebar-border);
 }
@@ -231,6 +260,34 @@
   font-size: 10px;
 }
 
+.logoutBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 10px;
+  border: 1px solid var(--sidebar-border);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--sidebar-muted);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.logoutBtn:hover {
+  background: var(--sidebar-hover);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.logoutBtn:focus-visible {
+  outline: 2px solid var(--sidebar-accent);
+  outline-offset: 2px;
+}
+
 /* Konten ------------------------------------------------------------------- */
 
 .main {
@@ -319,7 +376,7 @@
   }
 
   .navItem {
-    padding: 7px 10px;
+    padding: 7px 12px;
   }
 
   .footer {

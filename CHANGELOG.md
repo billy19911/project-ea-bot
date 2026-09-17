@@ -3,6 +3,14 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Changed — Fase 3 "Menu Profesional": Navigasi Sidebar Dirapikan
+- **Item aktif kini tint lembut + pill aksen** di tepi kiri (3px) — blok biru penuh sebelumnya membuat sidebar terlihat seperti deretan tombol besar; ikon item aktif diberi warna aksen agar mata langsung menangkap posisi halaman.
+- **"Masuk" dihapus dari navigasi** — selalu tampil walau sudah login dan membingungkan; alur masuk tetap lewat footer ("Masuk untuk melihat akun MT5 →") dan halaman `/login`.
+- **Tombol "Keluar" di blok sesi footer** — hanya menghapus token browser (tidak menyentuh state eksekusi/arming MT5 sama sekali); info terminal/akun ikut di-reset supaya footer tidak menampilkan data stale.
+- **Aksesibilitas keyboard**: `focus-visible` ring di semua item nav + tombol Keluar; label grup sejajar dengan teks item.
+- **Konsolidasi**: ikon `key` dihapus (dead code setelah item Masuk dihapus).
+- **Terverifikasi** (browser, geometri DOM): 4 grup · 7 item konsisten di 3 halaman, item aktif benar per halaman, pill aksen 3px ter-render, nol overflow; alur Keluar → footer reset jujur → masuk lagi → info akun kembali. Lint + build web hijau.
+
 ### Added — Fase 2 "Realistis": SL/TP ATR di Backtest, Posisi Live, dan Chart
 - **Backtest kini memakai SL/TP nyata** (2×ATR stop, 4×ATR target — default engine yang sama dipakai live): `_simulate` menerima high/low bar asli dan mengisi `stop_loss`/`take_profit`/`atr_at_entry` per trade + `exit_reason` eksplisit (`stop_loss`/`take_profit`/`signal_reversal`/`end_of_data`). Konvensi konservatif: 1 bar menyentuh SL **dan** TP → SL menang. Tanpa high/low → SL/TP tetap `null`, bukan angka karangan.
 - **`atr_series` baru** di `indicators.py` — seri None-aware yang konsisten persis dengan `atr()` (nilai terakhir seri = nilai fungsi latest, dikunci test).

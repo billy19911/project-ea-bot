@@ -22,8 +22,8 @@ import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, getAuthToken } from '../lib/api';
 import styles from './AppShell.module.css';
 
-type NavKey = 'control-plane' | 'observability' | 'ai-control' | 'strategy' | 'research' | 'market' | 'settings' | 'login';
-type IconName = 'grid' | 'activity' | 'cpu' | 'trend' | 'flask' | 'candles' | 'sliders' | 'key';
+type NavKey = 'control-plane' | 'observability' | 'ai-control' | 'strategy' | 'research' | 'market' | 'settings';
+type IconName = 'grid' | 'activity' | 'cpu' | 'trend' | 'flask' | 'candles' | 'sliders';
 type AccountMode = 'LIVE' | 'DEMO' | 'CONTEST';
 
 type TerminalState = { label: string; running: boolean; armed: boolean };
@@ -51,10 +51,7 @@ const NAV_GROUPS: { label: string; items: { key: NavKey; label: string; href: st
   },
   {
     label: 'Sistem',
-    items: [
-      { key: 'settings', label: 'Pengaturan', href: '/settings', icon: 'sliders' },
-      { key: 'login', label: 'Masuk', href: '/login', icon: 'key' },
-    ],
+    items: [{ key: 'settings', label: 'Pengaturan', href: '/settings', icon: 'sliders' }],
   },
 ];
 
@@ -106,12 +103,6 @@ function Icon({ name }: { name: IconName }) {
           <rect x="14.5" y="9" width="5" height="6" rx="0.8" />
         </>
       )}
-      {name === 'key' && (
-        <>
-          <circle cx="7.5" cy="15.5" r="4.5" />
-          <path d="M10.7 12.3L21 2M15 7l3 3M18 4l3 3" />
-        </>
-      )}
     </svg>
   );
 }
@@ -144,8 +135,26 @@ export default function AppShell({
   const [terminalKnown, setTerminalKnown] = useState(false);
   const [account, setAccount] = useState<AccountState | null>(null);
   const [needsToken, setNeedsToken] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+
+  // Sesi browser = ada token di localStorage. Aksi "Keluar" hanya menghapus
+  // token browser ini — tidak menyentuh state eksekusi/arming MT5 sama sekali.
+  // Info terminal/akun ikut di-reset supaya footer tidak menampilkan data
+  // stale dari sesi yang sudah berakhir.
+  const signOut = () => {
+    try {
+      localStorage.removeItem('ea-bot-token');
+    } catch {
+      // localStorage bisa diblokir; anggap saja sudah keluar.
+    }
+    setSignedIn(false);
+    setTerminal(null);
+    setAccount(null);
+    setNeedsToken(true);
+  };
 
   useEffect(() => {
+    setSignedIn(Boolean(getAuthToken()));
     let cancelled = false;
     (async () => {
       // Read-only: daftar terminal + info akun. Keduanya di belakang auth
@@ -268,6 +277,12 @@ export default function AppShell({
             <div className={styles.accountHint}>MT5 tidak terdeteksi.</div>
           ) : (
             <div className={styles.accountHint}>Status MT5 tidak tersedia.</div>
+          )}
+
+          {signedIn && (
+            <button type="button" className={styles.logoutBtn} onClick={signOut}>
+              Keluar
+            </button>
           )}
         </div>
       </aside>

@@ -74,6 +74,7 @@
   --sidebar-muted: #98a2b3;
   --sidebar-hover: rgba(255, 255, 255, 0.06);
   --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-accent: #6ea8fe;
 }
 
 /* Reset minimal ----------------------------------------------------------- */
