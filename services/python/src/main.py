@@ -54,6 +54,13 @@ async def lifespan(app: FastAPI):
 
     if settings.mt5_live_data:
         live_data_started = connector.use_live_data_mode()
+        if live_data_started:
+            # Run 24: reflect the attached terminal as the initial selection so
+            # the dashboard immediately shows which terminal is active. The
+            # arm switch itself always starts OFF.
+            from .mt5 import terminals as terminal_manager
+
+            terminal_manager.sync_selection_from_attached()
         logger.info("MT5 live data mode startup: %s", live_data_started)
 
     yield

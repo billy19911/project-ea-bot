@@ -125,14 +125,19 @@ class TestModeEndpoint:
         from mt5.endpoints import get_mode
 
         result = _run(get_mode())
-        assert result == {"live_data": False, "execution": "paper"}
+        assert result["live_data"] is False
+        assert result["execution"] == "paper"
+        # Run 24: the response carries the execution arm switch state.
+        assert result["execution_armed"] is False
 
     def test_live_mode_report(self):
         from mt5.endpoints import get_mode
 
         connector._live_mode = True
         result = _run(get_mode())
-        assert result == {"live_data": True, "execution": "disabled (read-only)"}
+        assert result["live_data"] is True
+        assert result["execution"] == "disabled (read-only)"
+        assert result["execution_armed"] is False
 
 
 def _run(coro):

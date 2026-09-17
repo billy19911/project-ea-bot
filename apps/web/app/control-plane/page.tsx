@@ -152,7 +152,7 @@ export default function ControlPlanePage() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
-    const [overview, trading, positions, market, aiControl, tasks, decisions, execution, audit, health, committee, telegram, providers, models, learning, reconciliation, mt5Mode] = await Promise.all([
+    const [overview, trading, positions, market, aiControl, tasks, decisions, execution, audit, health, committee, telegram, providers, models, learning, reconciliation, mt5Mode, mt5Terminals] = await Promise.all([
       fetchJson('/system/overview'),
       fetchJson('/trading/overview'),
       fetchJson('/positions'),
@@ -170,8 +170,9 @@ export default function ControlPlanePage() {
       fetchJson('/learning/analytics'),
       fetchJson('/reconciliation/status'),
       fetchJson('/mt5/mode'),
+      fetchJson('/mt5/terminals'),
     ]);
-    setData({ overview, trading, positions, market, aiControl, tasks, decisions, execution, audit, health, committee, telegram, providers, models, learning, reconciliation, mt5Mode });
+    setData({ overview, trading, positions, market, aiControl, tasks, decisions, execution, audit, health, committee, telegram, providers, models, learning, reconciliation, mt5Mode, mt5Terminals });
     setLoading(false);
   }, [fetchJson]);
 
@@ -287,14 +288,14 @@ export default function ControlPlanePage() {
         {loading ? (
           <div className={styles.loading}>Memuat data control plane…</div>
         ) : (
-          <TabContent tab={tab} data={data} showNotice={showNotice} />
+          <TabContent tab={tab} data={data} showNotice={showNotice} hasToken={hasToken} onRefresh={fetchAll} />
         )}
       </main>
     </div>
   );
 }
 
-function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, unknown>; showNotice: (m: string) => void }) {
+function TabContent({ tab, data, showNotice, hasToken, onRefresh }: { tab: Tab; data: Record<string, unknown>; showNotice: (m: string) => void; hasToken: boolean; onRefresh: () => void }) {
   const s = styles;
   const overview = data.overview as any;
   const trading = data.trading as any;
@@ -362,6 +363,7 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
     if (!trading) return <div className={s.empty}>Tidak ada data trading.</div>;
     return (
       <div className={s.grid}>
+        <TerminalPanel terminals={data.mt5Terminals as any} hasToken={hasToken} showNotice={showNotice} onRefresh={onRefresh} />
         {trading.account && (
           <section className={s.card}>
             <h2>Akun MT5 (Live)</h2>
@@ -863,4 +865,167 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
   }
 
   return <div className={s.empty}>Section belum tersedia.</div>;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-terminal MT5 panel (Run 24)
+// ---------------------------------------------------------------------------
+// Lists configured + auto-detected terminals, lets the operator select the
+// active one and arm/disarm real execution for it. Honesty rules: statuses
+// come straight from the API (running/attached/eligible), arming is disabled
+// without a token, and the arm button never claims success when the API
+// rejected the request. Accounts may be LIVE — arming stays a manual step.
+
+type TerminalEntry = {
+  id: string;
+  label?: string;
+  folder?: string;
+  execution_allowed?: boolean;
+  source?: string;
+  running?: boolean;
+  pid?: number | null;
+  attached?: boolean;
+  selected?: boolean;
+};
+
+function TerminalPanel({
+  terminals,
+  hasToken,
+  showNotice,
+  onRefresh,
+}: {
+  terminals: { terminals?: TerminalEntry[]; selected_id?: string | null; execution_armed?: boolean; attached_path?: string | null } | undefined;
+  hasToken: boolean;
+  showNotice: (m: string) => void;
+  onRefresh: () => void;
+}) {
+  const s = styles;
+  const [busy, setBusy] = useState(false);
+  const list = terminals?.terminals ?? [];
+  const armed = terminals?.execution_armed === true;
+  const selected = list.find((t) => t.selected);
+
+  const post = async (path: string, body: Record<string, unknown>, okMsg: string) => {
+    if (!hasToken) return;
+    setBusy(true);
+    try {
+      const res = await apiFetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      // Never claim success on a rejection — show the API's own message.
+      if (!res.ok) {
+        showNotice(data?.message || `Gagal (HTTP ${res.status})`);
+      } else {
+        showNotice(data?.message || okMsg);
+      }
+      onRefresh();
+    } catch {
+      showNotice('Tidak dapat menghubungi API.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className={s.card} style={{ gridColumn: '1 / -1' }}>
+      <h2>
+        MT5 Terminals{' '}
+        {armed ? (
+          <span className={`${s.badge} ${s.danger}`}>EXECUTION ARMED</span>
+        ) : (
+          <span className={`${s.badge} ${s.muted}`}>execution disarmed</span>
+        )}
+      </h2>
+      {list.length === 0 ? (
+        <div className={s.empty}>Tidak ada terminal terdeteksi. Jalankan terminal64.exe lalu Refresh.</div>
+      ) : (
+        <div className={s.tableWrapper}>
+          <table className={s.table}>
+            <thead>
+              <tr>
+                <th>Terminal</th>
+                <th>Status</th>
+                <th>PID</th>
+                <th>Attached</th>
+                <th>Execution</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((t) => (
+                <tr key={t.id}>
+                  <td>
+                    <strong>{t.label || t.id}</strong>
+                    <small>{t.id}{t.source === 'auto' ? ' · auto-detected' : ''}</small>
+                  </td>
+                  <td>
+                    <span className={`${s.badge} ${t.running ? s.success : s.muted}`}>
+                      {t.running ? 'RUNNING' : 'STOPPED'}
+                    </span>{' '}
+                    {t.selected && <span className={`${s.badge} ${s.info}`}>SELECTED</span>}
+                  </td>
+                  <td className={s.mono}>{t.pid ?? '—'}</td>
+                  <td>{t.attached ? <span className={`${s.badge} ${s.success}`}>YES</span> : <span className={`${s.badge} ${s.muted}`}>no</span>}</td>
+                  <td>
+                    {t.execution_allowed ? (
+                      <span className={`${s.badge} ${s.warning}`}>eligible</span>
+                    ) : (
+                      <span className={`${s.badge} ${s.muted}`}>data-only</span>
+                    )}
+                  </td>
+                  <td>
+                    <button
+                      className={s.tab}
+                      disabled={busy || !hasToken || !t.running || t.selected}
+                      title={!hasToken ? 'Membutuhkan token di localStorage (ea-bot-token)' : t.selected ? 'Terminal sudah terpilih' : t.running ? 'Pilih terminal ini (binding di-attach ulang, arm di-reset)' : 'Terminal tidak berjalan'}
+                      onClick={() => post('/mt5/terminals/select', { terminal_id: t.id }, `Terminal ${t.id} dipilih.`)}
+                    >
+                      Pilih
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div style={{ marginTop: 14, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button
+          className={s.tab}
+          disabled={busy || !hasToken || !selected || !selected.execution_allowed || armed}
+          title={
+            !hasToken
+              ? 'Membutuhkan token di localStorage (ea-bot-token)'
+              : !selected
+                ? 'Pilih terminal dulu'
+                : !selected.execution_allowed
+                  ? 'Terminal ini data-only (set "execution": true di mt5_terminals.json)'
+                  : armed
+                    ? 'Sudah armed'
+                    : 'Izinkan eksekusi order nyata untuk terminal terpilih'
+          }
+          onClick={() => post('/mt5/terminals/arm', { armed: true }, 'Execution ARMED.')}
+        >
+          🔓 Arm Execution
+        </button>
+        <button
+          className={s.tab}
+          disabled={busy || !hasToken || !armed}
+          title={armed ? 'Matikan izin eksekusi sekarang' : 'Tidak sedang armed'}
+          onClick={() => post('/mt5/terminals/arm', { armed: false }, 'Execution disarmed.')}
+        >
+          🔒 Disarm
+        </button>
+        <span className={s.mono}>
+          {selected ? `Selected: ${selected.label || selected.id}` : 'Belum ada terminal terpilih'} · attached: {terminals?.attached_path ?? '—'}
+        </span>
+      </div>
+      <div className={s.mono} style={{ marginTop: 8, color: '#667085' }}>
+        Akun bisa LIVE. Arm hanya mengizinkan eksekusi lewat jalur yang sudah di-guard; semua order nyata tetap butuh aksi manual di sini. Switch terminal selalu me-reset arm ke OFF.
+      </div>
+    </section>
+  );
 }

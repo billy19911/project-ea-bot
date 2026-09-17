@@ -275,6 +275,43 @@ Yang terjadi saat `MT5_LIVE_DATA=true`:
 - **Order eksekusi DIBLOKIR** di connector dan execution engine — mode ini hanya untuk membaca.
 - Tanpa variabel ini (default), semua tetap paper mode dan aman di CI Linux (paket MT5 di-skip).
 
+### Multi-terminal MT5 (auto-detect + arm/disarm)
+
+Satu proses Python hanya bisa attach ke **satu** terminal MT5 (batasan paket
+`MetaTrader5`). Untuk mengontrol beberapa terminal (mis. A/B/C) sekaligus memilih
+**satu** yang boleh mengeksekusi order:
+
+1. Daftarkan terminal di `services/python/mt5_terminals.json` (atau file yang
+   ditunjuk `MT5_TERMINALS_FILE`). Path wajib menunjuk ke **`terminal64.exe`**,
+   bukan folder:
+
+   ```json
+   {
+     "terminals": [
+       { "id": "vito2", "label": "VITO 2", "path": "E:\\MT5 XYNN EA\\MetaTrader 5 VITO 2\\terminal64.exe", "execution": false }
+     ]
+   }
+   ```
+
+   `"execution": true` hanya menandai terminal sebagai **kandidat** penerima order
+   nyata — eksekusi tetap harus di-arm eksplisit dan selalu mulai OFF.
+
+2. Endpoint multi-terminal:
+
+   | Endpoint | Fungsi |
+   |---|---|
+   | `GET /mt5/terminals` | Daftar terminal + status `running`/`attached`/`selected` (auto-detect lewat `psutil`) |
+   | `POST /mt5/terminals/select` | Pilih terminal aktif (`{"terminal_id": "vito2"}`) — re-attach fail-closed: arm dimatikan lebih dulu |
+   | `POST /mt5/terminals/arm` | Arm/disarm eksekusi (`{"armed": true}`) — hanya untuk terminal dengan `execution: true` |
+
+   Dashboard (tab **Trading** → panel **MT5 Terminals**) menyediakan pemilihan
+   terminal, tombol arm/disarm, dan menampilkan mana yang sedang ter-attach.
+
+3. **Saklar arm default OFF** dan bisa dimatikan kapan saja. Arm hanya membuka
+   jalur eksekusi engine; selama tidak ada sinyal yang lolos validation + Risk
+   Gate, tidak ada order yang dikirim. Konfigurasi dibaca ulang setiap request —
+   tidak perlu restart server.
+
 ---
 
 ## Dokumentasi

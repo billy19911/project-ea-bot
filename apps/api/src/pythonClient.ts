@@ -42,6 +42,16 @@ export interface PythonProxyFailure {
   status: number;
   error: string;
   detail?: string;
+  /**
+   * When the upstream Python service answered with a non-2xx status, the real
+   * status code is recorded here (the top-level `status` stays 502 for
+   * backwards compatibility with existing callers/tests). Proxies that want to
+   * preserve an upstream 4xx (e.g. a validation rejection carrying a `message`)
+   * can pass it through instead of masking it as 503.
+   */
+  upstreamStatus?: number;
+  /** Parsed upstream JSON body for non-2xx responses, when parseable. */
+  upstreamBody?: unknown;
 }
 
 export type PythonProxyResult<T = unknown> = PythonProxySuccess<T> | PythonProxyFailure;
@@ -161,12 +171,25 @@ function request<T>(
           const status = response.statusCode ?? 502;
 
           if (status < 200 || status >= 300) {
+            // Record the real upstream status/body so callers can choose to
+            // preserve it (see `sendPostProxy`) while `status`/`error` keep the
+            // historical "unavailable" semantics other callers rely on.
+            let upstreamBody: unknown;
+            if (bodyText) {
+              try {
+                upstreamBody = JSON.parse(bodyText);
+              } catch {
+                upstreamBody = bodyText;
+              }
+            }
             finish({
               ok: false,
               source: 'unavailable',
               status: 502,
               error: 'python_service_error',
               detail: `upstream ${status}`,
+              upstreamStatus: status,
+              upstreamBody,
             });
             return;
           }

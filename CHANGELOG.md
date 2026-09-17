@@ -2,6 +2,21 @@
 Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
+### Added — Multi-Terminal MT5: Auto-Detect, Select, Arm/Disarm (Run 24)
+
+Mendukung beberapa terminal MT5 berjalan bersamaan: sistem auto-detect terminal
+yang aktif, operator memilih satu dari dashboard, dan saklar arm/disarm mengontrol
+apakah terminal terpilih boleh mengeksekusi order nyata.
+
+- **Registry terminal `services/python/mt5_terminals.json`** (atau `MT5_TERMINALS_FILE`): `{id, label, path, execution}` — path wajib ke `terminal64.exe`; `execution: true` hanya menandai kandidat, arm tetap wajib dan selalu mulai OFF.
+- **`src/mt5/terminals.py`**: auto-detect terminal berjalan via `psutil` (`scan_running_terminals`), pilih terminal (`select_terminal`, re-attach `shutdown()`+`initialize(path=...)`), saklar `arm_execution`/`is_execution_armed`/`execution_permitted`. Config dibaca ulang tiap request — tanpa restart.
+- **Fail-closed**: switch/reattach mematikan arm **sebelum** menyentuh binding — jika re-attach gagal, state tetap tidak ter-arm (bug ini ditemukan oleh test baru dan diperbaiki).
+- **Endpoint baru**: `GET /mt5/terminals`, `POST /mt5/terminals/select`, `POST /mt5/terminals/arm` (Python + proxy Node); `/mt5/mode` kini menyertakan `execution_armed`.
+- **Guard eksekusi**: jalur native `mt5.order_send()` di `execution/engine.py` hanya diizinkan bila mode live **dan** terminal terpilih sudah di-arm; `connector.execute_order()` tetap read-only.
+- **Dashboard**: panel **MT5 Terminals** di tab Trading (daftar terminal, status running/attached/selected, tombol select + arm/disarm, pesan penolakan jujur dari server).
+- **Proxy Node jujur**: `sendPostProxy` mempertahankan status & pesan upstream 4xx (mis. `400 "Terminal is not execution-enabled"`) alih-alih menutupinya sebagai `503 python_service_unavailable`; `pythonClient` merekam `upstreamStatus`/`upstreamBody`.
+- **Dependency**: `psutil==7.2.2`; **test**: `tests/test_mt5_terminals.py` (23 test, mock tanpa MT5 nyata); suite Python **1178 passed**, Node **39/39**.
+
 ### Added — MT5 Live Read-Only Data Mode (Run 23)
 
 Connector dapat attach ke terminal MT5 yang **sedang berjalan** untuk membaca data pasar & akun **nyata** — tanpa kredensial dan **tanpa kemampuan eksekusi order**.

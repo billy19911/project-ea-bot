@@ -93,8 +93,14 @@ def use_live_mode(
     return True
 
 
-def use_live_data_mode() -> bool:
-    """Connect to running MT5 terminal for read-only data without credentials."""
+def use_live_data_mode(path: Optional[str] = None) -> bool:
+    """Connect to running MT5 terminal for read-only data without credentials.
+
+    When ``path`` is given it must point at a ``terminal64.exe`` (a folder
+    path fails — verified on a real machine). Without ``path`` the binding
+    attaches to the most recently used terminal, which keeps the original
+    single-terminal behaviour.
+    """
     global _live_mode, _mt5_available
     try:
         import MetaTrader5 as mt5
@@ -103,7 +109,7 @@ def use_live_data_mode() -> bool:
         return False
 
     try:
-        ok = mt5.initialize()
+        ok = mt5.initialize(path=path) if path else mt5.initialize()
     except Exception:
         # A missing/dead terminal must never break service startup.
         _mt5_available = False

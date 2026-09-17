@@ -100,6 +100,27 @@ test('non-2xx upstream resolves to unavailable', async () => {
   }
 });
 
+test('non-2xx upstream records the real status and parsed body (Run 24)', async () => {
+  // Proxies that preserve upstream 4xx rejections (e.g. /mt5/terminals/arm
+  // returning 400 with a human-readable message) rely on these fields; the
+  // top-level status/error keep the historical "unavailable" semantics.
+  const server = await withServer((_req, res) => {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, message: 'Terminal is not execution-enabled.' }));
+  });
+  setBaseUrl(server.baseUrl);
+  try {
+    const result = await postJson('/mt5/terminals/arm', { armed: true });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'python_service_error');
+    assert.equal(result.upstreamStatus, 400);
+    assert.equal(result.upstreamBody.message, 'Terminal is not execution-enabled.');
+  } finally {
+    await server.close();
+    delete process.env.PYTHON_SERVICE_URL;
+  }
+});
+
 test('malformed upstream JSON resolves to unavailable', async () => {
   const server = await withServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });

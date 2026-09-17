@@ -1,0 +1,59 @@
+{
+  "_comment": "Registry terminal MT5 untuk mode multi-terminal (Run 24). 'execution: true' hanya menandai terminal sebagai KANDIDAT penerima order nyata \u2014 eksekusi tetap harus di-arm eksplisit dari dashboard dan selalu mulai OFF. Semua default false (aman).",
+  "terminals": [
+    {
+      "id": "vito1",
+      "label": "VITO 1",
+      "path": "E:\\MT5 XYNN EA\\MetaTrader 5 VITO 1\\terminal64.exe",
+      "execution": false
+    },
+    {
+      "id": "vito2",
+      "label": "VITO 2",
+      "path": "E:\\MT5 XYNN EA\\MetaTrader 5 VITO 2\\terminal64.exe",
+      "execution": false
+    },
+    {
+      "id": "bil1",
+      "label": "BIL 1",
+      "path": "E:\\MT5 XYNN EA\\MetaTrader 5 BIL 1\\terminal64.exe",
+      "execution": false
+    },
+    {
+      "id": "bil2",
+      "label": "BIL 2",
+      "path": "E:\\MT5 XYNN EA\\MetaTrader 5 BIL 2\\terminal64.exe",
+      "execution": false
+    },
+    {
+      "id": "dapit",
+      "label": "DAPIT",
+      "path": "E:\\MT5 XYNN EA\\MetaTrader 5 DAPIT\\terminal64.exe",
+      "execution": false
+    },
+    {
+      "id": "dapit2",
+      "label": "DAPIT2",
+      "path": "E:\\MT5 XYNN EA\\MetaTrader 5 DAPIT2\\terminal64.exe",
+      "execution": false
+    },
+    {
+      "id": "andreas1",
+      "label": "ANDREAS 1",
+      "path": "E:\\MT5 XYNN EA\\MetaTrader 5 ANDREAS 1\\terminal64.exe",
+      "execution": false
+    },
+    {
+      "id": "gimbil",
+      "label": "GIMBIL",
+      "path": "E:\\MT5 XYNN EA\\MetaTrader 5 GIMBIL\\terminal64.exe",
+      "execution": false
+    },
+    {
+      "id": "mt5",
+      "label": "MetaTrader 5",
+      "path": "E:\\MT5 XYNN EA\\MetaTrader 5\\terminal64.exe",
+      "execution": false
+    }
+  ]
+}

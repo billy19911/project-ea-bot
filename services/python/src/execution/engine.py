@@ -592,17 +592,34 @@ class ExecutionEngine:
                 continue
 
         if _live_data_block:
-            logger.warning(
-                "Execution blocked: MT5 live-data (read-only) mode is active — "
-                "native order_send is disabled."
-            )
-            return {
-                "success": False,
-                "ticket": None,
-                "error_code": 1,
-                "message": "LIVE DATA MODE (read-only) — order execution disabled.",
-                "price": None,
-            }
+            # Run 24: live mode is read-only UNLESS the operator explicitly
+            # armed a valid execution terminal via the dashboard. Fail-closed:
+            # any doubt (no selection, not running, not attached, not
+            # execution-enabled) keeps real orders blocked.
+            _armed = False
+            for _mod_name in ("mt5.terminals", "src.mt5.terminals"):
+                try:
+                    import importlib
+
+                    _terms = importlib.import_module(_mod_name)
+                    if _terms.execution_permitted():
+                        _armed = True
+                        break
+                except ImportError:
+                    continue
+
+            if not _armed:
+                logger.warning(
+                    "Execution blocked: MT5 live-data (read-only) mode is active — "
+                    "native order_send is disabled."
+                )
+                return {
+                    "success": False,
+                    "ticket": None,
+                    "error_code": 1,
+                    "message": "LIVE DATA MODE (read-only) — order execution disabled.",
+                    "price": None,
+                }
 
         try:
             import MetaTrader5 as mt5

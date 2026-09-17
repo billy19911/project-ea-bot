@@ -5,8 +5,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from . import connector
+from . import terminals as terminal_manager
 from .schemas import (
     AccountBalanceResponse,
     AccountInfo,
@@ -33,7 +35,65 @@ async def get_mode() -> dict:
     return {
         "live_data": connector.is_live_mode(),
         "execution": "disabled (read-only)" if connector.is_live_mode() else "paper",
+        "execution_armed": terminal_manager.is_execution_armed(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Multi-terminal registry (Run 24) — auto-detect running terminals, select the
+# active one, arm/disarm real execution for it. Read-only by default.
+# ---------------------------------------------------------------------------
+
+
+class SelectTerminalRequest(BaseModel):
+    """Body for POST /mt5/terminals/select."""
+
+    terminal_id: str
+
+
+class ArmRequest(BaseModel):
+    """Body for POST /mt5/terminals/arm."""
+
+    armed: bool
+
+
+@router.get("/terminals")
+async def list_terminals() -> dict:
+    """List configured + auto-detected terminals with live status.
+
+    Read-only. ``execution_allowed`` reflects the per-terminal config flag;
+    ``execution_armed`` reflects the operator's explicit arm switch (off by
+    default, always off after switching terminals).
+    """
+    return terminal_manager.list_terminals()
+
+
+@router.post("/terminals/select")
+async def select_terminal(request: SelectTerminalRequest):
+    """Select the active terminal and re-attach the binding to it.
+
+    Switching always disarms execution. Returns 400 when the terminal is
+    unknown or not running.
+    """
+    result = terminal_manager.select_terminal(request.terminal_id)
+    if not result.get("ok"):
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=result)
+    result["terminals"] = terminal_manager.list_terminals()["terminals"]
+    return result
+
+
+@router.post("/terminals/arm")
+async def arm_terminal(request: ArmRequest):
+    """Arm or disarm real order execution for the selected terminal.
+
+    Arming requires: a running selected terminal, ``"execution": true`` in
+    mt5_terminals.json, and an active attachment. Returns 400 otherwise.
+    """
+    result = terminal_manager.arm_execution(request.armed)
+    if not result.get("ok"):
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=result)
+    result["execution_armed"] = terminal_manager.is_execution_armed()
+    return result
 
 
 # ---------------------------------------------------------------------------

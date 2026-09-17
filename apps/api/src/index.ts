@@ -181,6 +181,19 @@ async function sendPostProxy(
   const headers = traceId ? { 'X-Trace-Id': traceId } : undefined;
   const result = await postJson<any>(path, body ?? {}, undefined, headers);
   if (!result.ok) {
+    // The Python service answered with a non-2xx: preserve its status and
+    // message (e.g. a 400 validation rejection like "terminal not running")
+    // instead of masking it as a generic 503. Only genuinely unreachable
+    // upstreams (no response at all) fall through to the 503 below.
+    const upstreamStatus = result.upstreamStatus;
+    if (typeof upstreamStatus === 'number' && upstreamStatus >= 400 && upstreamStatus < 500) {
+      const payload =
+        result.upstreamBody && typeof result.upstreamBody === 'object'
+          ? (result.upstreamBody as Record<string, unknown>)
+          : { error: result.error };
+      res.status(upstreamStatus).json({ ...payload, source: 'live' });
+      return;
+    }
     res.status(503).json({ error: 'python_service_unavailable', source: 'unavailable' });
     return;
   }
@@ -543,6 +556,27 @@ app.get('/mt5/mode', async (req, res) => {
   const log = (req as any).log;
   log.info('mt5.mode');
   await sendProxy(res, '/mt5/mode', undefined, req);
+});
+
+// Run 24: multi-terminal registry. GET is read-only (auto-detected terminals
+// merged with the config file); POST select/arm are mutations and go through
+// the global auth middleware plus the general rate limiter.
+app.get('/mt5/terminals', async (req, res) => {
+  const log = (req as any).log;
+  log.info('mt5.terminals.list');
+  await sendProxy(res, '/mt5/terminals', undefined, req);
+});
+
+app.post('/mt5/terminals/select', authenticate, async (req, res) => {
+  const log = (req as any).log;
+  log.info('mt5.terminals.select');
+  await sendPostProxy(res, '/mt5/terminals/select', req, req.body ?? {});
+});
+
+app.post('/mt5/terminals/arm', authenticate, async (req, res) => {
+  const log = (req as any).log;
+  log.info('mt5.terminals.arm');
+  await sendPostProxy(res, '/mt5/terminals/arm', req, req.body ?? {});
 });
 
 app.get('/market/overview', async (req, res) => {
