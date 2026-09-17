@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import ntpath
 import os
 from pathlib import Path
 from typing import Any, Optional
@@ -102,8 +103,13 @@ def load_config() -> list[dict[str, Any]]:
 
 
 def _norm(path: str) -> str:
-    """Normalize a path for case-insensitive comparison on Windows."""
-    return os.path.normcase(os.path.normpath(path))
+    """Normalize a path for case-insensitive comparison on Windows.
+
+    Uses ``ntpath`` explicitly: MT5 terminal paths are always Windows paths,
+    and on non-Windows CI runners ``os.path`` (posixpath) does not treat
+    backslashes as separators — that silently broke folder matching.
+    """
+    return ntpath.normcase(ntpath.normpath(path))
 
 
 def scan_running_terminals() -> list[dict[str, Any]]:
@@ -125,7 +131,7 @@ def scan_running_terminals() -> list[dict[str, Any]]:
                         {
                             "pid": info.get("pid"),
                             "exe": exe,
-                            "folder": os.path.dirname(exe),
+                            "folder": ntpath.dirname(exe),
                         }
                     )
             except Exception:
@@ -169,7 +175,7 @@ def list_terminals() -> dict[str, Any]:
     entries: list[dict[str, Any]] = []
     matched_running: set[str] = set()
     for t in config:
-        folder = os.path.dirname(t["path"])
+        folder = ntpath.dirname(t["path"])
         key = _norm(folder)
         proc = running_by_folder.get(key)
         if proc:
@@ -198,7 +204,7 @@ def list_terminals() -> dict[str, Any]:
         entries.append(
             {
                 "id": auto_id,
-                "label": os.path.basename(r["folder"]) or r["exe"],
+                "label": ntpath.basename(r["folder"]) or r["exe"],
                 "path": r["exe"],
                 "folder": r["folder"],
                 "execution_allowed": False,
@@ -232,7 +238,7 @@ def sync_selection_from_attached() -> Optional[str]:
     key = _norm(attached)
 
     for t in load_config():
-        if _norm(os.path.dirname(t["path"])) == key:
+        if _norm(ntpath.dirname(t["path"])) == key:
             _selected_id = t["id"]
             return _selected_id
 

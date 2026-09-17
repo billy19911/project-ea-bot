@@ -159,6 +159,40 @@ class TestListTerminals:
         assert terminals.scan_running_terminals() == []
 
 
+class TestWindowsPathHandling:
+    """Regression: CI runs on Linux where os.path is posixpath.
+
+    posixpath does not treat backslashes as separators, so
+    ``os.path.dirname(r"C:\\mt\\A\\terminal64.exe")`` returns ``""`` and all
+    folder matching silently fails. The module must derive folders from
+    Windows paths via ``ntpath`` so the registry works on any host OS.
+    """
+
+    def test_folder_matching_survives_posixpath(self, monkeypatch, tmp_path):
+        import posixpath
+        import types
+
+        _use_config(monkeypatch, tmp_path, CONFIG_TWO)
+        monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\A"))
+        monkeypatch.setattr(terminals, "_detect_attached_path", lambda: r"C:\mt\A")
+
+        real_os = terminals.os
+        monkeypatch.setattr(
+            terminals,
+            "os",
+            types.SimpleNamespace(path=posixpath, environ=real_os.environ),
+        )
+
+        view = terminals.list_terminals()
+        by_id = {t["id"]: t for t in view["terminals"]}
+        assert by_id["a"]["folder"] == r"C:\mt\A"
+        assert by_id["a"]["running"] is True
+        assert by_id["a"]["attached"] is True
+
+    def test_norm_handles_windows_paths_on_any_os(self):
+        assert terminals._norm(r"C:\MT\A\\") == terminals._norm(r"c:\mt\a")
+
+
 # ---------------------------------------------------------------------------
 # F3 — selection re-attaches and ALWAYS disarms
 # ---------------------------------------------------------------------------
