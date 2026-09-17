@@ -17,6 +17,15 @@ apakah terminal terpilih boleh mengeksekusi order nyata.
 - **Proxy Node jujur**: `sendPostProxy` mempertahankan status & pesan upstream 4xx (mis. `400 "Terminal is not execution-enabled"`) alih-alih menutupinya sebagai `503 python_service_unavailable`; `pythonClient` merekam `upstreamStatus`/`upstreamBody`.
 - **Dependency**: `psutil==7.2.2`; **test**: `tests/test_mt5_terminals.py` (23 test, mock tanpa MT5 nyata); suite Python **1178 passed**, Node **39/39**.
 
+### Fixed — CI Linux Path Handling (Run 24b)
+
+CI untuk `383b9b9` gagal di job `test` (step "Run backend tests", exit 1) — hijau di Windows lokal.
+
+- **Akar masalah**: path terminal MT5 selalu path Windows, tapi `terminals.py` menurunkan folder dengan `os.path`. Di runner Linux `os.path` = `posixpath` yang tidak menganggap `\` sebagai separator → `dirname(r"C:\mt\A\terminal64.exe") == ""` → pencocokan folder selalu gagal (`running`/`attached` = `False`).
+- **Perbaikan**: semua operasi path Windows (`normcase`/`normpath`/`dirname`/`basename`) kini memakai `ntpath` eksplisit — semantik Windows di OS apa pun.
+- **Regression test**: test baru menyimulasikan `posixpath` (kondisi CI) dan memverifikasi folder matching tetap benar; suite Python **1180 passed**.
+- **Verifikasi**: reproduksi versi lama di bawah simulasi `posixpath` → gagal; versi fix → lolos; **CI 8/8 hijau untuk `ca83368`** (test, lint, build, security, type-check, validate-config, deploy, notify).
+
 ### Added — MT5 Live Read-Only Data Mode (Run 23)
 
 Connector dapat attach ke terminal MT5 yang **sedang berjalan** untuk membaca data pasar & akun **nyata** — tanpa kredensial dan **tanpa kemampuan eksekusi order**.
