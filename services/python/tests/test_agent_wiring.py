@@ -127,7 +127,13 @@ def test_register_default_agents_is_idempotent() -> None:
 
 
 def test_registered_specialists_are_reachable_from_built_pipeline() -> None:
-    """End-to-end: a momentum event reaches the registered momentum agent."""
+    """End-to-end: a momentum event reaches the real momentum specialist.
+
+    With the MarketLead department registered (EPIC 01), the Supervisor
+    delegates market events to the lead, which runs the production specialists
+    internally. The momentum agent must therefore be reachable through the
+    ``market_lead`` committee result — never through the \"not registered\" stub.
+    """
     from src.main import agent_registry, register_default_agents
     from src.orchestration.runtime import OrchestrationRuntime
 
@@ -140,8 +146,10 @@ def test_registered_specialists_are_reachable_from_built_pipeline() -> None:
             {"event_type": "MOMENTUM_BULLISH", "prices": prices, "symbol": "EURUSD"}
         )
 
-        momentum = result["agent_results"].get("momentum_analyst")
-        assert momentum is not None, result["agent_results"]
+        lead = result["agent_results"].get("market_lead")
+        assert lead is not None, result["agent_results"]
+        momentum = lead["specialist_results"].get("momentum_analyst")
+        assert momentum is not None, lead["specialist_results"]
         assert momentum["agent"] == "momentum_analyst"
         # The "not registered" stub uses a "reasons" list; real momentum
         # output uses "reasoning" plus metrics.

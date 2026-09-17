@@ -20,6 +20,7 @@ from agents.registry import agent_registry
 from .charting.endpoints import router as charting_router
 from .config import settings
 from .market.endpoints import router as market_router
+from .market.intelligence import MarketLead
 from .mt5 import connector
 from .mt5.endpoints import router as mt5_router
 from .observability.sampler import get_trend_sampler
@@ -47,6 +48,10 @@ def register_default_agents() -> list[str]:
     reload (or a second call) never raises "already registered". Every agent
     here is deterministic and analysis-only — none of them can reach MT5, the
     Risk Gate, or the Execution Engine.
+
+    The ``MarketLead`` department lead is registered last: the Supervisor
+    delegates market events to registered department leads first (EPIC 01),
+    so the market department answers through its regime-weighted committee.
     """
     default_agents = [
         TechnicalAnalystAgent(),
@@ -55,6 +60,7 @@ def register_default_agents() -> list[str]:
         VolatilityAnalystAgent(),
         NewsSentimentAgent(),
         FundamentalAnalystAgent(),
+        MarketLead(),
     ]
     added: list[str] = []
     for agent in default_agents:
