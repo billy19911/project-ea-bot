@@ -127,6 +127,11 @@
   margin: 0;
 }
 
+.sectionHead h2,
+.formTitle h2 {
+  font-size: 18px;
+}
+
 .topbar h1 {
   font-size: 28px;
 }

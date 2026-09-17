@@ -1,7 +1,7 @@
 'use client';
 
 import Head from 'next/head';
-import { FormEvent, Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../lib/api';
 import AppShell from '../components/AppShell';
@@ -11,36 +11,16 @@ type AiModel = { id: string; provider: string; context: number; is_free: boolean
 type ModelsState = { models: AiModel[]; source: SourceState };
 
 type Experiment = { id: string; name: string; strategy: string; period: string; status: 'Selesai' | 'Berjalan' | 'Menunggu'; pnl: number; sharpe: number; drawdown: number; trades: number };
-type Settings = { account: { name: string; email: string; broker: string; mode: string }; risk: { maxDrawdown: string; dailyLoss: string; exposure: string; maxPositions: string }; ai: { model: string; budget: string; temperature: string }; execution: { venue: string; slippage: string; timeout: string; paper: boolean }; notifications: { email: boolean; telegram: boolean; risk: boolean; research: boolean }; safety: { killSwitch: boolean; emergencyStop: boolean } };
-
-const defaultSettings: Settings = {
-  account: { name: '', email: '', broker: 'MetaTrader 5', mode: 'paper' },
-  risk: { maxDrawdown: '15', dailyLoss: '5', exposure: '30', maxPositions: '5' },
-  ai: { model: '', budget: '12000', temperature: '0.2' },
-  execution: { venue: 'MT5', slippage: '2', timeout: '10', paper: true },
-  notifications: { email: true, telegram: true, risk: true, research: false },
-  safety: { killSwitch: false, emergencyStop: false },
-};
-
-function loadSettings(): Settings {
-  if (typeof window === 'undefined') return defaultSettings;
-  try { return { ...defaultSettings, ...JSON.parse(localStorage.getItem('ea-bot-settings') || '{}') }; } catch { return defaultSettings; }
-}
 
 export default function Home() {
-  const [section, setSection] = useState<'research' | 'settings'>('research');
   const [researchTab, setResearchTab] = useState('Eksperimen');
-  const [settingsTab, setSettingsTab] = useState('Akun');
   // No experiments API exists yet. Keep this as real (empty) state rather than
   // fabricating rows; it is populated once ResearchEngine produces runs.
   const [experiments] = useState<Experiment[]>([]);
-  const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [notice, setNotice] = useState('');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [modelsState, setModelsState] = useState<ModelsState>({ models: [], source: 'unavailable' });
-
-  useEffect(() => setSettings(loadSettings()), []);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -63,31 +43,24 @@ export default function Home() {
     return () => { cancelled = true; };
   }, []);
   const filtered = useMemo(() => experiments.filter((item) => item.name.toLowerCase().includes(query.toLowerCase()) || item.strategy.toLowerCase().includes(query.toLowerCase())), [experiments, query]);
-  const updateGroup = <K extends keyof Settings>(group: K, field: keyof Settings[K], value: string | boolean) => setSettings((current) => ({ ...current, [group]: { ...current[group], [field]: value } }));
-  const saveSettings = (event: FormEvent) => { event.preventDefault(); localStorage.setItem('ea-bot-settings', JSON.stringify(settings)); setNotice('Pengaturan tersimpan di perangkat ini.'); setTimeout(() => setNotice(''), 2500); };
   const runBacktest = () => { setNotice('Permintaan backtest dicatat. Jalankan pipeline di Control Plane untuk hasil nyata.'); setTimeout(() => setNotice(''), 4000); setResearchTab('Backtest'); };
 
   return <>
-    <Head><title>EA Bot — Research & Settings</title><meta name="description" content="EA Bot control center" /></Head>
+    <Head><title>EA Bot — Pusat Riset</title><meta name="description" content="EA Bot research center" /></Head>
     <AppShell
       activeKey="research"
-      eyebrow={`EA BOT / ${section === 'research' ? 'RESEARCH CENTER' : 'SYSTEM SETTINGS'}`}
-      title={section === 'research' ? 'Research Center' : 'System Settings'}
+      eyebrow="EA BOT / PUSAT RISET"
+      title="Pusat Riset"
       actions={
         <>
           <span className={`${styles.badge} ${modelsState.source === 'live' ? styles.success : styles.muted}`}>{modelsState.source === 'live' ? 'MODELS LIVE' : 'MODELS N/A'}</span>
-          <span className={styles.envBadge}>PAPER</span>
         </>
       }
     >
-      {/* Pemilih section pindah dari sidebar ke tab strip in-page; sidebar
-          sekarang milik AppShell (navigasi antar-halaman). */}
-      <div className={styles.tabs} role="tablist" aria-label="Research sections">
-        <button className={section === 'research' ? styles.tabActive : ''} onClick={() => setSection('research')} aria-pressed={section === 'research'}>Research Center</button>
-        <button className={section === 'settings' ? styles.tabActive : ''} onClick={() => setSection('settings')} aria-pressed={section === 'settings'}>System Settings</button>
-      </div>
+      {/* Hanya SATU strip tab di halaman ini (sub-tab Research). Pengaturan
+          pindah ke halaman /settings — sebelumnya dua baris tab bertumpuk. */}
       {notice && <div className={styles.notice}>{notice}</div>}
-      {section === 'research' ? <ResearchView tab={researchTab} setTab={setResearchTab} experiments={experiments} filtered={filtered} query={query} setQuery={setQuery} selected={selected} setSelected={setSelected} runBacktest={runBacktest} /> : <SettingsView tab={settingsTab} setTab={setSettingsTab} settings={settings} updateGroup={updateGroup} saveSettings={saveSettings} modelsState={modelsState} />}
+      <ResearchView tab={researchTab} setTab={setResearchTab} experiments={experiments} filtered={filtered} query={query} setQuery={setQuery} selected={selected} setSelected={setSelected} runBacktest={runBacktest} />
     </AppShell>
   </>;
 }
@@ -123,9 +96,3 @@ function Comparison({ experiments, selected, setSelected }: { experiments: Exper
   ] : [];
   return <><div className={styles.sectionHead}><div><h2>Perbandingan hasil</h2><p>Pilih dua eksperimen selesai untuk melihat delta metrik.</p></div>{names.length >= 2 && <div className={styles.compareSelect}>{names.map((item) => <label key={item.id}><input type="checkbox" checked={selected.includes(item.id)} disabled={!selected.includes(item.id) && selected.length >= 2} onChange={() => setSelected(selected.includes(item.id) ? selected.filter((id) => id !== item.id) : [...selected, item.id])} /> {item.id}</label>)}</div>}</div>{ready ? <div className={styles.tableCard}><table><thead><tr><th>Metrik</th><th>Eksperimen A</th><th>Eksperimen B</th><th>Delta B − A</th></tr></thead><tbody>{rows.map(([label, aVal, bVal, delta, good]) => <tr key={label}><td><strong>{label}</strong></td><td>{aVal}</td><td>{bVal}</td><td className={good ? styles.positive : styles.negative}>{delta}</td></tr>)}</tbody></table></div> : <div className={styles.empty}>Pilih dua eksperimen selesai untuk membandingkan.</div>}</>; }
 function Results() { return <><div className={styles.sectionHead}><div><h2>Hasil riset</h2><p>Kesimpulan yang siap dipakai untuk review strategi.</p></div></div><div className={styles.empty}>Belum ada hasil riset. Temuan akan muncul setelah eksperimen dijalankan di Control Plane.</div></>; }
-
-function SettingsView({ tab, setTab, settings, updateGroup, saveSettings, modelsState }: { tab: string; setTab: (tab: string) => void; settings: Settings; updateGroup: <K extends keyof Settings>(group: K, field: keyof Settings[K], value: string | boolean) => void; saveSettings: (event: FormEvent) => void; modelsState: ModelsState }) { const tabs = ['Akun', 'Risiko', 'AI', 'Model registry', 'Eksekusi', 'Notifikasi', 'Safety']; return <div className={styles.pageBody}><nav className={styles.tabs}>{tabs.map((item) => <button key={item} className={tab === item ? styles.tabActive : ''} onClick={() => setTab(item)}>{item}</button>)}</nav><form onSubmit={saveSettings}>{tab === 'Akun' && <FormSection title="Akun & koneksi" description="Identitas workspace dan koneksi broker."><Field label="Nama pengguna"><input placeholder="Nama pengguna" value={settings.account.name} onChange={(e) => updateGroup('account', 'name', e.target.value)} /></Field><Field label="Email"><input type="email" placeholder="nama@domain" value={settings.account.email} onChange={(e) => updateGroup('account', 'email', e.target.value)} /></Field><Field label="Broker"><select value={settings.account.broker} onChange={(e) => updateGroup('account', 'broker', e.target.value)}><option>MetaTrader 5</option><option>Paper broker</option></select></Field><Field label="Mode"><select value={settings.account.mode} onChange={(e) => updateGroup('account', 'mode', e.target.value)}><option value="paper">Paper trading</option><option value="live">Live trading</option></select></Field></FormSection>}{tab === 'Risiko' && <FormSection title="Batas risiko" description="Nilai persentase diteruskan ke RiskEngine sebagai pecahan desimal."><Field label="Max drawdown (%)"><input type="number" min="0" max="100" value={settings.risk.maxDrawdown} onChange={(e) => updateGroup('risk', 'maxDrawdown', e.target.value)} /></Field><Field label="Daily loss limit (%)"><input type="number" min="0" max="100" value={settings.risk.dailyLoss} onChange={(e) => updateGroup('risk', 'dailyLoss', e.target.value)} /></Field><Field label="Max exposure (%)"><input type="number" min="0" max="100" value={settings.risk.exposure} onChange={(e) => updateGroup('risk', 'exposure', e.target.value)} /></Field><Field label="Max posisi terbuka"><input type="number" min="1" value={settings.risk.maxPositions} onChange={(e) => updateGroup('risk', 'maxPositions', e.target.value)} /></Field></FormSection>}{tab === 'AI' && <FormSection title="AI runtime" description="Kontrol model dan penggunaan token Supervisor."><Field label="Model utama"><select value={settings.ai.model} onChange={(e) => updateGroup('ai', 'model', e.target.value)}><option value="">{modelsState.models.length ? 'Pilih model…' : 'No models available — gateway disconnected'}</option>{modelsState.models.map((m) => <option key={m.id} value={m.id}>{m.id}{m.is_free ? ' · free' : ''}</option>)}</select></Field><Field label="Token budget / request"><input type="number" value={settings.ai.budget} onChange={(e) => updateGroup('ai', 'budget', e.target.value)} /></Field><Field label="Temperature"><input type="number" min="0" max="1" step="0.1" value={settings.ai.temperature} onChange={(e) => updateGroup('ai', 'temperature', e.target.value)} /></Field></FormSection>}{tab === 'Model registry' && <FormSection title="Model registry" description="Model terdaftar dan status kesehatan gateway."><div className={styles.registry}>{modelsState.models.length === 0 ? <div><strong>{modelsState.source === 'live' ? 'Tidak ada model' : 'Gateway tidak tersedia'}</strong><span>{modelsState.source === 'live' ? 'Registry kosong' : 'Python service tidak terjangkau'}</span></div> : modelsState.models.map((m) => <Fragment key={m.id}><div><strong>{m.id}</strong><span>{m.provider}{m.is_free ? ' · free' : ' · premium'}</span></div><span className={`${styles.badge} ${m.is_free ? styles.success : styles.muted}`}>{m.is_free ? 'Gratis' : 'Berbayar'}</span></Fragment>)}</div></FormSection>}{tab === 'Eksekusi' && <FormSection title="Eksekusi order" description="Parameter deterministik sebelum order dikirim ke MT5."><Field label="Venue"><select value={settings.execution.venue} onChange={(e) => updateGroup('execution', 'venue', e.target.value)}><option>MT5</option><option>Paper broker</option></select></Field><Field label="Max slippage (poin)"><input type="number" value={settings.execution.slippage} onChange={(e) => updateGroup('execution', 'slippage', e.target.value)} /></Field><Field label="Timeout order (detik)"><input type="number" value={settings.execution.timeout} onChange={(e) => updateGroup('execution', 'timeout', e.target.value)} /></Field><Toggle label="Paper execution" checked={settings.execution.paper} onChange={(value) => updateGroup('execution', 'paper', value)} /></FormSection>}{tab === 'Notifikasi' && <FormSection title="Notifikasi" description="Pilih event yang dikirim ke kanal terhubung."><Toggle label="Email ringkasan harian" checked={settings.notifications.email} onChange={(value) => updateGroup('notifications', 'email', value)} /><Toggle label="Telegram trade alert" checked={settings.notifications.telegram} onChange={(value) => updateGroup('notifications', 'telegram', value)} /><Toggle label="Risk breach" checked={settings.notifications.risk} onChange={(value) => updateGroup('notifications', 'risk', value)} /><Toggle label="Research selesai" checked={settings.notifications.research} onChange={(value) => updateGroup('notifications', 'research', value)} /></FormSection>}{tab === 'Safety' && <FormSection title="Safety controls" description="Kontrol ini menghentikan jalur eksekusi. Perubahan dicatat pada audit log."><div className={styles.dangerBox}><strong>Zona keselamatan</strong><p>Aktifkan kill switch untuk memblokir order baru. Emergency stop membatalkan proses eksekusi aktif.</p><Toggle label="Kill switch — blokir order baru" checked={settings.safety.killSwitch} onChange={(value) => updateGroup('safety', 'killSwitch', value)} danger /><Toggle label="Emergency stop" checked={settings.safety.emergencyStop} onChange={(value) => updateGroup('safety', 'emergencyStop', value)} danger /></div></FormSection>}<div className={styles.formFooter}><span>Perubahan lokal tersinkron saat disimpan.</span><button className={styles.primary} type="submit">Simpan pengaturan</button></div></form></div>; }
-
-function FormSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) { return <section className={styles.formCard}><div className={styles.formTitle}><h2>{title}</h2><p>{description}</p></div><div className={styles.formGrid}>{children}</div></section>; }
-function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className={styles.field}><span>{label}</span>{children}</label>; }
-function Toggle({ label, checked, onChange, danger = false }: { label: string; checked: boolean; onChange: (value: boolean) => void; danger?: boolean }) { return <label className={`${styles.toggle} ${danger ? styles.toggleDanger : ''}`}><span>{label}</span><input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /><i /></label>; }

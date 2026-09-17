@@ -109,9 +109,9 @@ export default function StrategyCenterPage() {
   return (
     <AppShell
       activeKey="strategy"
-      eyebrow="EA BOT / STRATEGY CENTER"
-      title="Strategy Center"
-      actions={<span className={styles.envBadge}>LIVE</span>}
+      eyebrow="EA BOT / PUSAT STRATEGI"
+      title="Pusat Strategi"
+
     >
 
         {notice && <div className={styles.notice}>{notice}</div>}
@@ -129,7 +129,7 @@ export default function StrategyCenterPage() {
             {loading ? (
               <div className={styles.empty}>Memuat…</div>
             ) : error && strategies.length === 0 ? (
-              <div className={styles.empty}>Data strategi tidak tersedia.</div>
+              <div className={styles.empty}>Data strategi tidak tersedia — cek token lalu muat ulang.</div>
             ) : strategies.length === 0 ? (
               <div className={styles.empty}>Belum ada strategi terdaftar.</div>
             ) : (
@@ -138,13 +138,13 @@ export default function StrategyCenterPage() {
                 <thead>
                   <tr>
                     <th>Strategi</th>
-                    <th>Version</th>
+                    <th>Versi</th>
                     <th>Win rate</th>
                     <th>Profit factor</th>
                     <th>Sharpe</th>
                     <th>Max DD</th>
                     <th>Status</th>
-                    <th>Action</th>
+                    <th>Aksi</th>
                   </tr>
                 </thead>
                 <tbody>

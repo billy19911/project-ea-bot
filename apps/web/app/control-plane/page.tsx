@@ -34,22 +34,22 @@ type Tab =
   | 'learning';
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'overview', label: 'System Overview' },
+  { id: 'overview', label: 'Ringkasan Sistem' },
   { id: 'trading', label: 'Trading' },
-  { id: 'positions', label: 'Positions' },
-  { id: 'market', label: 'Market' },
-  { id: 'organization', label: 'AI Organization' },
-  { id: 'tasks', label: 'Task Explorer' },
-  { id: 'decisions', label: 'Decision Explorer' },
-  { id: 'risk', label: 'Risk Center' },
-  { id: 'execution', label: 'Execution Center' },
-  { id: 'audit', label: 'Audit Viewer' },
-  { id: 'health', label: 'System Health' },
-  { id: 'committee', label: 'Committee Trace' },
+  { id: 'positions', label: 'Posisi' },
+  { id: 'market', label: 'Pasar' },
+  { id: 'organization', label: 'Organisasi AI' },
+  { id: 'tasks', label: 'Penjelajah Task' },
+  { id: 'decisions', label: 'Penjelajah Keputusan' },
+  { id: 'risk', label: 'Pusat Risiko' },
+  { id: 'execution', label: 'Pusat Eksekusi' },
+  { id: 'audit', label: 'Audit' },
+  { id: 'health', label: 'Kesehatan Sistem' },
+  { id: 'committee', label: 'Jejak Komite' },
   { id: 'telegram', label: 'Telegram' },
-  { id: 'providers', label: 'AI Providers' },
-  { id: 'models', label: 'Model Registry' },
-  { id: 'learning', label: 'Learning Analytics' },
+  { id: 'providers', label: 'Provider AI' },
+  { id: 'models', label: 'Registry Model' },
+  { id: 'learning', label: 'Analitik Learning' },
 ];
 
 function badgeClass(status: string, s: Record<string, string>): string {
@@ -244,13 +244,13 @@ export default function ControlPlanePage() {
             disabled={!hasToken || runningCycle}
             title={hasToken ? 'Jalankan satu siklus pipeline' : 'Membutuhkan token di localStorage (ea-bot-token)'}
           >
-            {runningCycle ? '⏳ Running…' : '▶ Run Cycle'}
+            {runningCycle ? '⏳ Menjalankan…' : '▶ Jalankan Siklus'}
           </button>
           <button
             className={styles.tab}
             onClick={() => { fetchAll(); showNotice('Data refreshed dari API.'); }}
           >
-            ↻ Refresh
+            ↻ Muat ulang
           </button>
         </>
       }
@@ -271,6 +271,12 @@ export default function ControlPlanePage() {
       </div>
 
       {notice && <div className={styles.notice}>{notice}</div>}
+        {!hasToken && (
+          <div className={styles.notice} style={{ background: '#fffaeb', borderColor: '#fedf89', color: '#b54708' }}>
+            Belum ada token — data di bawah akan kosong. Jalankan <code>token.bat</code>, lalu set{' '}
+            <code>ea-bot-token</code> di console browser dan muat ulang.
+          </div>
+        )}
         {cycle && (
           cycle.kind === 'ok' ? (
             <div className={styles.notice}>
@@ -289,14 +295,14 @@ export default function ControlPlanePage() {
             {/* Panel terminal dipromosikan ke atas (F3): aksi terminal & akun
                 adalah kontrol utama, bukan detail yang terkubur di tab. */}
             <TerminalPanel terminals={data.mt5Terminals as TerminalsPayload | undefined} hasToken={hasToken} showNotice={showNotice} onRefresh={fetchAll} />
-            <TabContent tab={tab} data={data} showNotice={showNotice} />
+            <TabContent tab={tab} data={data} />
           </>
         )}
     </AppShell>
   );
 }
 
-function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, unknown>; showNotice: (m: string) => void }) {
+function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) {
   const s = styles;
   const overview = data.overview as any;
   const trading = data.trading as any;
@@ -316,7 +322,7 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
   const reconciliation = data.reconciliation as any;
 
   if (tab === 'overview') {
-    if (!overview) return <div className={s.empty}>Tidak ada data overview.</div>;
+    if (!overview) return <div className={s.empty}>Belum ada data ringkasan. Pastikan token aktif lalu klik Muat ulang.</div>;
     return (
       <div className={s.grid}>
         <section className={s.card}>
@@ -622,7 +628,6 @@ function TabContent({ tab, data, showNotice }: { tab: Tab; data: Record<string, 
             ))}
           </tbody>
         </table>
-        <button className={s.tab} style={{ marginTop: 14 }} onClick={() => showNotice('Flush queue: 0 order pending (aman).')}>Flush order queue</button>
       </section>
     );
   }
@@ -991,7 +996,7 @@ function TerminalPanel({
       </h2>
       {list.length === 0 ? (
         <div className={s.empty}>
-          Tidak ada terminal terdeteksi. Jalankan terminal64.exe lalu klik Refresh.
+          Tidak ada terminal terdeteksi. Jalankan terminal64.exe lalu klik Muat ulang.
         </div>
       ) : (
         <div className={s.tableWrapper}>

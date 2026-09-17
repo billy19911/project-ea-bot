@@ -2,6 +2,20 @@
 Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
+### Changed — UI/UX Fase 4: 5 Halaman Dirapikan (anti-slop)
+
+Rapikan semua halaman agar konsisten: bahasa Indonesia untuk label/aksi
+(istilah teknis baku tetap Inggris), empty state jujur, dan penghapusan
+klaim fabrikasi. Tanpa dependency baru, tanpa menyentuh logika safety.
+
+- **Halaman Pengaturan baru (`apps/web/app/settings/page.tsx`)**: `SettingsView` dipindah keluar dari home → home kini hanya **satu strip tab** (sebelumnya dua baris tab bertumpuk: level-1 + sub-tab). Sidebar AppShell dapat grup "Sistem" + ikon `sliders` (SVG inline). CSS dipakai bersama `app/page.module.css` (tanpa duplikasi 545 baris).
+- **Hapus klaim fabrikasi**: tombol "Flush order queue" dihapus — mengklaim "0 order pending (aman)" padahal **tidak ada endpoint flush** di backend.
+- **Hapus badge mode bohong**: badge `PAPER` statis (home) dan `LIVE` statis (strategy) dihapus — status mode nyata hanya dari footer AppShell (read-only, sumber API).
+- **Pesan error jujur**: `Reasoning unavailable — Python service unreachable` → membedakan **401 butuh token**, HTTP non-OK, dan API tidak terjangkau. Banner kuning di Control Plane menjelaskan saat token belum ada (data kosong bukan "tidak ada data").
+- **Bahasa konsisten**: label tab control-plane (16), observability, judul halaman (Pusat Riset / Pusat Kontrol AI / Pusat Strategi / Observability Sistem / Pengaturan), header tabel, tombol (`Muat ulang`, `Jalankan Siklus`), dan eyebrow — semua Indonesia; istilah teknis (Trading, Sharpe, Drawdown, Backtest, Pipeline, Token) tetap Inggris.
+- **Tipografi (masalah #11)**: H2 seragam **18px** (control-plane sebelumnya 15px — tenggelam di bawah H1 24px).
+- **Dead code**: `showNotice` di `TabContent`, `FormEvent`/`Fragment` import, dan handler settings lama di home dihapus.
+
 ### Added — UI/UX Fase 3: Panel Terminal & Akun MT5 di Atas Control Plane
 
 Panel terminal dipromosikan dari tab "Trading" ke posisi teratas Control Plane

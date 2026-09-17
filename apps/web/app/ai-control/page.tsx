@@ -105,12 +105,14 @@ export default function AIControlPage() {
         if (res.ok) {
           const data = await res.json();
           setReasoning(data.reasoning ?? '');
+        } else if (res.status === 401) {
+          setReasoning('Reasoning tidak tersedia — butuh token (jalankan token.bat).');
         } else {
-          setReasoning('Reasoning unavailable — Python service unreachable.');
+          setReasoning(`Reasoning tidak tersedia — API merespons HTTP ${res.status}.`);
         }
       } catch (err) {
         console.error('Failed to fetch reasoning:', err);
-        setReasoning('Reasoning unavailable — Python service unreachable.');
+        setReasoning('Reasoning tidak tersedia — API tidak terjangkau.');
       } finally {
         setLoading(false);
       }
@@ -128,8 +130,8 @@ export default function AIControlPage() {
   return (
     <AppShell
       activeKey="ai-control"
-      eyebrow="EA BOT / AI CONTROL CENTER"
-      title="AI Control Center"
+      eyebrow="EA BOT / PUSAT KONTROL AI"
+      title="Pusat Kontrol AI"
       actions={<SourceBadge source={source} />}
     >
 
@@ -153,7 +155,7 @@ export default function AIControlPage() {
               <div className={styles.empty}>
                 {loading
                   ? 'Memuat status supervisor…'
-                  : 'Status supervisor tidak tersedia — Python service tidak terjangkau.'}
+                  : 'Status supervisor tidak tersedia — API belum mengembalikan data. Cek token lalu muat ulang.'}
               </div>
             </section>
           )}
@@ -201,7 +203,7 @@ export default function AIControlPage() {
                   <tr>
                     <th>Waktu</th>
                     <th>Agent</th>
-                    <th>Action</th>
+                    <th>Aksi</th>
                     <th>Status</th>
                     <th>Durasi (ms)</th>
                   </tr>
@@ -229,7 +231,7 @@ export default function AIControlPage() {
                 <div className={styles.empty}>
                   {source === 'live'
                     ? 'Belum ada aktivitas agent tercatat.'
-                    : 'Activity log tidak tersedia — Python service tidak terjangkau.'}
+                    : 'Log aktivitas tidak tersedia — API belum mengembalikan data. Cek token lalu muat ulang.'}
                 </div>
               )}
             </div>
@@ -276,10 +278,10 @@ export default function AIControlPage() {
                   <tr>
                     <th>Model</th>
                     <th>Provider</th>
-                    <th>Calls</th>
+                    <th>Panggilan</th>
                     <th>Prompt tokens</th>
                     <th>Completion tokens</th>
-                    <th>Cost (USD)</th>
+                    <th>Biaya (USD)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -305,7 +307,7 @@ export default function AIControlPage() {
               </table>
               {models.length === 0 && (
                 <div className={styles.empty}>
-                  {source === 'live' ? 'Tidak ada model tersedia.' : 'Data model tidak tersedia — Python service tidak terjangkau.'}
+                  {source === 'live' ? 'Tidak ada model tersedia.' : 'Data model tidak tersedia — API belum mengembalikan data. Cek token lalu muat ulang.'}
                 </div>
               )}
             </div>

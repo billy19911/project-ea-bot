@@ -22,8 +22,8 @@ import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, getAuthToken } from '../lib/api';
 import styles from './AppShell.module.css';
 
-type NavKey = 'control-plane' | 'observability' | 'ai-control' | 'strategy' | 'research';
-type IconName = 'grid' | 'activity' | 'cpu' | 'trend' | 'flask';
+type NavKey = 'control-plane' | 'observability' | 'ai-control' | 'strategy' | 'research' | 'settings';
+type IconName = 'grid' | 'activity' | 'cpu' | 'trend' | 'flask' | 'sliders';
 type AccountMode = 'LIVE' | 'DEMO' | 'CONTEST';
 
 type TerminalState = { label: string; running: boolean; armed: boolean };
@@ -40,13 +40,17 @@ const NAV_GROUPS: { label: string; items: { key: NavKey; label: string; href: st
   {
     label: 'AI',
     items: [
-      { key: 'ai-control', label: 'AI Control', href: '/ai-control', icon: 'cpu' },
-      { key: 'strategy', label: 'Strategy', href: '/strategy', icon: 'trend' },
+      { key: 'ai-control', label: 'Kontrol AI', href: '/ai-control', icon: 'cpu' },
+      { key: 'strategy', label: 'Strategi', href: '/strategy', icon: 'trend' },
     ],
   },
   {
     label: 'Riset',
-    items: [{ key: 'research', label: 'Research Center', href: '/', icon: 'flask' }],
+    items: [{ key: 'research', label: 'Pusat Riset', href: '/', icon: 'flask' }],
+  },
+  {
+    label: 'Sistem',
+    items: [{ key: 'settings', label: 'Pengaturan', href: '/settings', icon: 'sliders' }],
   },
 ];
 
@@ -83,6 +87,12 @@ function Icon({ name }: { name: IconName }) {
         <>
           <path d="M10 2v7.5a2 2 0 0 1-.2.9L4.7 20.6a1 1 0 0 0 .9 1.4h12.8a1 1 0 0 0 .9-1.4L14.2 10.4a2 2 0 0 1-.2-.9V2" />
           <path d="M8.5 2h7M7 16h10" />
+        </>
+      )}
+      {name === 'sliders' && (
+        <>
+          <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3" />
+          <path d="M1 14h6M9 8h6M17 16h6" />
         </>
       )}
     </svg>

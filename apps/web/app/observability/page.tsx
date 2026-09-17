@@ -204,17 +204,17 @@ export default function ObservabilityPage() {
     : 0;
 
   const tabs = [
-    { key: 'overview', label: 'Overview' },
-    { key: 'errors', label: `Errors (${errors.length})` },
-    { key: 'agents', label: 'Agent Metrics' },
-    { key: 'tokens', label: 'Token Usage' },
+    { key: 'overview', label: 'Ringkasan' },
+    { key: 'errors', label: `Error (${errors.length})` },
+    { key: 'agents', label: 'Metrik Agent' },
+    { key: 'tokens', label: 'Penggunaan Token' },
   ] as const;
 
   return (
     <AppShell
       activeKey="observability"
       eyebrow="EA BOT / OBSERVABILITY"
-      title="System Observability"
+      title="Observability Sistem"
       actions={
         <>
           <label className={styles.autoRefreshLabel}>
@@ -223,9 +223,9 @@ export default function ObservabilityPage() {
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
             />
-            Auto-refresh
+            Muat ulang otomatis
           </label>
-          <button className={styles.refreshBtn} onClick={fetchData}>↻ Refresh</button>
+          <button className={styles.refreshBtn} onClick={fetchData}>↻ Muat ulang</button>
           {lastRefresh && <code className={styles.lastRefresh}>{lastRefresh}</code>}
         </>
       }
@@ -288,7 +288,7 @@ export default function ObservabilityPage() {
             <>
               {/* Request Distribution */}
               <section className={styles.card}>
-                <h2>Request Distribution</h2>
+                <h2>Distribusi Request</h2>
                 <div className={styles.tableWrapper}>
                   <table className={styles.table}>
                     <thead>
@@ -328,7 +328,7 @@ export default function ObservabilityPage() {
               {/* Agent Status */}
               {agents && (
                 <section className={styles.card}>
-                  <h2>Agent Status</h2>
+                  <h2>Status Agent</h2>
                   <div className={styles.agentGrid}>
                     {agents.length === 0 ? (
                       <div className={styles.emptyState}><p>Belum ada agent</p></div>
@@ -358,7 +358,7 @@ export default function ObservabilityPage() {
           {tab === 'errors' && (
             <section className={styles.card}>
               <div className={styles.cardHeader}>
-                <h2>Recent Errors</h2>
+                <h2>Error Terbaru</h2>
                 <span className={styles.badge}>{errors.length} total</span>
               </div>
               {errors.length === 0 ? (
@@ -372,9 +372,9 @@ export default function ObservabilityPage() {
                     <thead>
                       <tr>
                         <th>Waktu</th>
-                        <th>Source</th>
-                        <th>Message</th>
-                        <th>Severity</th>
+                        <th>Sumber</th>
+                        <th>Pesan</th>
+                        <th>Tingkat</th>
                         <th>Path</th>
                         <th>Status</th>
                       </tr>
@@ -427,7 +427,7 @@ export default function ObservabilityPage() {
 
           {tab === 'agents' && supervisor && (
             <section className={styles.card}>
-              <h2>Agent Execution Metrics</h2>
+              <h2>Metrik Eksekusi Agent</h2>
               <div className={styles.supervisorInfo}>
                 <div><small>Routing Policy</small><strong>{supervisor.supervisor?.routing_policy ?? '—'}</strong></div>
                 <div><small>Max Concurrency</small><strong>{formatNumber(supervisor.supervisor?.max_concurrency)}</strong></div>
@@ -445,16 +445,16 @@ export default function ObservabilityPage() {
                 <div><small>Supervisor Uptime</small><strong>{formatUptime(supervisor.supervisor?.uptime)}</strong></div>
               </div>
 
-              <h3>Agent Details</h3>
+              <h3>Detail Agent</h3>
               <div className={styles.tableWrapper}>
                 <table className={styles.table}>
                   <thead>
                     <tr>
                       <th>Agent</th>
-                      <th>Type</th>
+                      <th>Tipe</th>
                       <th>Status</th>
-                      <th>Priority</th>
-                      <th>Errors</th>
+                      <th>Prioritas</th>
+                      <th>Error</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -483,7 +483,7 @@ export default function ObservabilityPage() {
 
           {tab === 'tokens' && supervisor && (
             <section className={styles.card}>
-              <h2>LLM Token Usage</h2>
+              <h2>Penggunaan Token LLM</h2>
               <div className={styles.tokenSummary}>
                 <div><small>Total Tokens</small><strong>{models ? totalTokens.toLocaleString() : '—'}</strong></div>
                 <div><small>Total Cost</small><strong>{models ? `$${totalCost.toFixed(3)}` : '—'}</strong></div>
