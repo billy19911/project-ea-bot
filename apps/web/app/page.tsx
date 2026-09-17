@@ -4,6 +4,7 @@ import Head from 'next/head';
 import { FormEvent, Fragment, useEffect, useMemo, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../lib/api';
+import AppShell from '../components/AppShell';
 
 type SourceState = 'live' | 'unavailable';
 type AiModel = { id: string; provider: string; context: number; is_free: boolean; capabilities?: string[] };
@@ -68,38 +69,40 @@ export default function Home() {
 
   return <>
     <Head><title>EA Bot — Research & Settings</title><meta name="description" content="EA Bot control center" /></Head>
-    <div className={styles.shell}>
-      <aside className={styles.sidebar}>
-        <div className={styles.brand}><span className={styles.brandMark}>EA</span><div><strong>EA BOT</strong><small>TRADING CONTROL</small></div></div>
-        <div className={styles.workspaceLabel}>WORKSPACE</div>
-        <button className={`${styles.navItem} ${section === 'research' ? styles.active : ''}`} onClick={() => setSection('research')}><span>▦</span> Research Center</button>
-        <button className={`${styles.navItem} ${section === 'settings' ? styles.active : ''}`} onClick={() => setSection('settings')}><span>⚙</span> System Settings</button>
-        <a href="/control-plane" className={styles.navItem}><span>▦</span> Control Plane</a>
-        <a href="/ai-control" className={styles.navItem}><span>🧠</span> AI Control Center</a>
-        <a href="/strategy" className={styles.navItem}><span>📡</span> Strategy Center</a>
-        <a href="/observability" className={styles.navItem}><span>📊</span> Observability</a>
-        <div className={styles.sidebarBottom}><span className={styles.greenDot} /> Sistem aktif<div className={styles.version}>v1.0.0 · Paper mode</div></div>
-      </aside>
-      <main className={styles.main}>
-        <header className={styles.topbar}><div><div className={styles.eyebrow}>EA BOT / {section === 'research' ? 'RESEARCH CENTER' : 'SYSTEM SETTINGS'}</div><h1>{section === 'research' ? 'Research Center' : 'System Settings'}</h1></div><div className={styles.topActions}><span className={`${styles.badge} ${modelsState.source === 'live' ? styles.success : styles.muted}`}>{modelsState.source === 'live' ? 'MODELS LIVE' : 'MODELS N/A'}</span><span className={styles.envBadge}>PAPER</span><span className={styles.avatar}>A</span></div></header>
-        {notice && <div className={styles.notice}>{notice}</div>}
-        {section === 'research' ? <ResearchView tab={researchTab} setTab={setResearchTab} experiments={experiments} filtered={filtered} query={query} setQuery={setQuery} selected={selected} setSelected={setSelected} runBacktest={runBacktest} /> : <SettingsView tab={settingsTab} setTab={setSettingsTab} settings={settings} updateGroup={updateGroup} saveSettings={saveSettings} modelsState={modelsState} />}
-      </main>
-    </div>
+    <AppShell
+      activeKey="research"
+      eyebrow={`EA BOT / ${section === 'research' ? 'RESEARCH CENTER' : 'SYSTEM SETTINGS'}`}
+      title={section === 'research' ? 'Research Center' : 'System Settings'}
+      actions={
+        <>
+          <span className={`${styles.badge} ${modelsState.source === 'live' ? styles.success : styles.muted}`}>{modelsState.source === 'live' ? 'MODELS LIVE' : 'MODELS N/A'}</span>
+          <span className={styles.envBadge}>PAPER</span>
+        </>
+      }
+    >
+      {/* Pemilih section pindah dari sidebar ke tab strip in-page; sidebar
+          sekarang milik AppShell (navigasi antar-halaman). */}
+      <div className={styles.tabs} role="tablist" aria-label="Research sections">
+        <button className={section === 'research' ? styles.tabActive : ''} onClick={() => setSection('research')} aria-pressed={section === 'research'}>Research Center</button>
+        <button className={section === 'settings' ? styles.tabActive : ''} onClick={() => setSection('settings')} aria-pressed={section === 'settings'}>System Settings</button>
+      </div>
+      {notice && <div className={styles.notice}>{notice}</div>}
+      {section === 'research' ? <ResearchView tab={researchTab} setTab={setResearchTab} experiments={experiments} filtered={filtered} query={query} setQuery={setQuery} selected={selected} setSelected={setSelected} runBacktest={runBacktest} /> : <SettingsView tab={settingsTab} setTab={setSettingsTab} settings={settings} updateGroup={updateGroup} saveSettings={saveSettings} modelsState={modelsState} />}
+    </AppShell>
   </>;
 }
 
 function ResearchView({ tab, setTab, experiments, filtered, query, setQuery, selected, setSelected, runBacktest }: { tab: string; setTab: (tab: string) => void; experiments: Experiment[]; filtered: Experiment[]; query: string; setQuery: (value: string) => void; selected: string[]; setSelected: (ids: string[]) => void; runBacktest: () => void }) {
   const tabs = ['Eksperimen', 'Backtest', 'Perbandingan', 'Hasil Riset'];
   return <div className={styles.pageBody}><nav className={styles.tabs}>{tabs.map((item) => <button key={item} className={tab === item ? styles.tabActive : ''} onClick={() => setTab(item)}>{item}</button>)}</nav>
-    {tab === 'Eksperimen' && <><div className={styles.sectionHead}><div><h2>Eksperimen strategi</h2><p>Hipotesis, parameter, dan hasil validasi terpusat.</p></div><button className={styles.primary} onClick={runBacktest}>＋ Jalankan backtest</button></div><div className={styles.toolbar}><input aria-label="Cari eksperimen" placeholder="Cari nama atau strategi..." value={query} onChange={(event) => setQuery(event.target.value)} /><select defaultValue="all" aria-label="Filter status"><option value="all">Semua status</option><option>Selesai</option><option>Berjalan</option><option>Menunggu</option></select><span className={styles.resultCount}>{filtered.length} eksperimen</span></div><ExperimentTable items={filtered} compact /></>}
+    {tab === 'Eksperimen' && <><div className={styles.sectionHead}><div><h2>Eksperimen strategi</h2><p>Hipotesis, parameter, dan hasil validasi terpusat.</p></div><button className={styles.primary} onClick={runBacktest}>＋ Jalankan backtest</button></div><div className={styles.toolbar}><input aria-label="Cari eksperimen" placeholder="Cari nama atau strategi..." value={query} onChange={(event) => setQuery(event.target.value)} /><select defaultValue="all" aria-label="Filter status"><option value="all">Semua status</option><option>Selesai</option><option>Berjalan</option><option>Menunggu</option></select><span className={styles.resultCount}>{filtered.length} eksperimen</span></div><ExperimentTable items={filtered} /></>}
     {tab === 'Backtest' && <BacktestPanel runBacktest={runBacktest} />}
     {tab === 'Perbandingan' && <Comparison experiments={experiments} selected={selected} setSelected={setSelected} />}
     {tab === 'Hasil Riset' && <Results />}
   </div>;
 }
 
-function ExperimentTable({ items, compact = false }: { items: Experiment[]; compact?: boolean }) { return <div className={styles.tableCard}><table><thead><tr><th>Eksperimen</th><th>Strategi</th><th>Periode</th><th>Status</th><th>PnL</th><th>Sharpe</th><th>Max DD</th><th>Trades</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id}</small></td><td>{item.strategy}</td><td>{item.period}</td><td><span className={`${styles.badge} ${item.status === 'Selesai' ? styles.success : item.status === 'Berjalan' ? styles.warning : styles.muted}`}>{item.status}</span></td><td className={item.pnl > 0 ? styles.positive : ''}>{item.pnl ? `+${item.pnl.toFixed(1)}%` : '—'}</td><td>{item.sharpe || '—'}</td><td>{item.drawdown ? `${item.drawdown}%` : '—'}</td><td>{item.trades || '—'}</td></tr>)}</tbody></table>{!items.length && <div className={styles.empty}>Belum ada eksperimen. Data akan muncul setelah ResearchEngine dijalankan. <a href="/control-plane">Buka Control Plane</a></div>}</div>; }
+function ExperimentTable({ items }: { items: Experiment[] }) { return <div className={styles.tableCard}><table><thead><tr><th>Eksperimen</th><th>Strategi</th><th>Periode</th><th>Status</th><th>PnL</th><th>Sharpe</th><th>Max DD</th><th>Trades</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id}</small></td><td>{item.strategy}</td><td>{item.period}</td><td><span className={`${styles.badge} ${item.status === 'Selesai' ? styles.success : item.status === 'Berjalan' ? styles.warning : styles.muted}`}>{item.status}</span></td><td className={item.pnl > 0 ? styles.positive : ''}>{item.pnl ? `+${item.pnl.toFixed(1)}%` : '—'}</td><td>{item.sharpe || '—'}</td><td>{item.drawdown ? `${item.drawdown}%` : '—'}</td><td>{item.trades || '—'}</td></tr>)}</tbody></table>{!items.length && <div className={styles.empty}>Belum ada eksperimen. Data akan muncul setelah ResearchEngine dijalankan. <a href="/control-plane">Buka Control Plane</a></div>}</div>; }
 
 function BacktestPanel({ runBacktest }: { runBacktest: () => void }) { return <><div className={styles.sectionHead}><div><h2>Backtest</h2><p>Jalankan simulasi historis dengan ResearchEngine.</p></div><button className={styles.primary} onClick={runBacktest}>Jalankan simulasi</button></div><div className={styles.backtestGrid}><div className={styles.card}><h3>Konfigurasi</h3><label>Data historis<select defaultValue="gold"><option>XAUUSD · H1 · 2022—2024</option><option>XAUUSD · M15 · 2024</option></select></label><label>Modal awal<input defaultValue="10000" type="number" /></label><div className={styles.inline}><label>Komisi<input defaultValue="0.0" /></label><label>Slippage<input defaultValue="2" /></label></div></div><div className={styles.card}><h3>Hasil terakhir</h3><div className={styles.empty}>Belum ada hasil backtest.</div><div className={styles.resultNote}>Jalankan pipeline di Control Plane untuk menghasilkan metrik nyata.</div></div></div></>; }
 function Comparison({ experiments, selected, setSelected }: { experiments: Experiment[]; selected: string[]; setSelected: (ids: string[]) => void }) {

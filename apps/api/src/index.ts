@@ -558,6 +558,15 @@ app.get('/mt5/mode', async (req, res) => {
   await sendProxy(res, '/mt5/mode', undefined, req);
 });
 
+// Read-only account info for the ACTIVE terminal (UI/UX F2): the dashboard
+// shell shows login/server/trade_mode in its sidebar footer. Behind the global
+// auth middleware — no mutation, no order path.
+app.get('/mt5/accounts/info', async (req, res) => {
+  const log = (req as any).log;
+  log.info('mt5.accounts.info');
+  await sendProxy(res, '/mt5/accounts/info', undefined, req);
+});
+
 // Run 24: multi-terminal registry. GET is read-only (auto-detected terminals
 // merged with the config file); POST select/arm are mutations and go through
 // the global auth middleware plus the general rate limiter.

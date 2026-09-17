@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
+import AppShell from '../../components/AppShell';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 interface ErrorRecord {
@@ -70,7 +71,6 @@ export default function ObservabilityPage() {
   const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
   const [supervisor, setSupervisor] = useState<SupervisorStatus | null>(null);
   const [errors, setErrors] = useState<ErrorRecord[]>([]);
-  const [loading, setLoading] = useState(true);
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [allFailed, setAllFailed] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<string>('');
@@ -157,7 +157,6 @@ export default function ObservabilityPage() {
     }
 
     setLastRefresh(new Date().toLocaleTimeString());
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -212,44 +211,25 @@ export default function ObservabilityPage() {
   ] as const;
 
   return (
-    <div className={styles.shell}>
-      <aside className={styles.sidebar}>
-        <div className={styles.brand}>
-          <span className={styles.brandMark}>EA</span>
-          <div><strong>EA BOT</strong><small>OBSERVABILITY</small></div>
-        </div>
-        <div className={styles.workspaceLabel}>MONITORING</div>
-        <a href="/" className={styles.navItem}><span>←</span> Dashboard</a>
-        <a href="/ai-control" className={styles.navItem}><span>🧠</span> AI Control</a>
-        <a href="/control-plane" className={styles.navItem}><span>▦</span> Control Plane</a>
-        <a href="/strategy" className={styles.navItem}><span>📡</span> Strategy</a>
-        <a href="/observability" className={`${styles.navItem} ${styles.active}`}><span>📊</span> Observability</a>
-        <div className={styles.sidebarBottom}>
-          <span className={styles.greenDot} /> API terhubung
-          <div className={styles.version}>Live</div>
-        </div>
-      </aside>
-
-      <main className={styles.main}>
-        <header className={styles.topbar}>
-          <div>
-            <div className={styles.eyebrow}>EA BOT / OBSERVABILITY</div>
-            <h1>System Observability</h1>
-          </div>
-          <div className={styles.topActions}>
-            <label className={styles.autoRefreshLabel}>
-              <input
-                type="checkbox"
-                checked={autoRefresh}
-                onChange={(e) => setAutoRefresh(e.target.checked)}
-              />
-              Auto-refresh
-            </label>
-            <button className={styles.refreshBtn} onClick={fetchData}>↻ Refresh</button>
-            {lastRefresh && <code className={styles.lastRefresh}>{lastRefresh}</code>}
-          </div>
-        </header>
-
+    <AppShell
+      activeKey="observability"
+      eyebrow="EA BOT / OBSERVABILITY"
+      title="System Observability"
+      actions={
+        <>
+          <label className={styles.autoRefreshLabel}>
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+            />
+            Auto-refresh
+          </label>
+          <button className={styles.refreshBtn} onClick={fetchData}>↻ Refresh</button>
+          {lastRefresh && <code className={styles.lastRefresh}>{lastRefresh}</code>}
+        </>
+      }
+    >
         <div className={styles.pageBody}>
           {allFailed && (
             <div className={styles.errorCard}>
@@ -559,7 +539,6 @@ export default function ObservabilityPage() {
             </section>
           )}
         </div>
-      </main>
-    </div>
+    </AppShell>
   );
 }

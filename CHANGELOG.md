@@ -2,6 +2,18 @@
 Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
+### Added — UI/UX Fase 1+2: Design Tokens & Single AppShell
+
+Redesign dashboard web (rencana: `docs/UI_UX_REDESIGN_PLAN.md`) dengan prinsip
+konsolidasi, bukan akumulasi — tanpa dependency baru, tanpa rewrite, tanpa
+menyentuh logika safety.
+
+- **F1 — design tokens (`apps/web/app/globals.css`)**: 55 CSS custom property (palet semantic, spacing scale, type scale, radius) menggantikan 120+ hex tersebar; selector bocor (`formTitle-p`, `registry-span`) dihapus.
+- **F2 — `apps/web/components/AppShell.tsx` + `AppShell.module.css`**: satu kerangka (sidebar tergrup, ikon SVG inline, topbar, footer) menggantikan 5 shell/sidebar duplikat di `app/page.tsx`, `control-plane`, `ai-control`, `strategy`, `observability`; badge PAPER ganda dihilangkan; pemilih section pindah dari sidebar ke tab strip in-page.
+- **Footer akun MT5 (read-only)**: menampilkan terminal terpilih + login/server/trade_mode (badge DEMO/LIVE/CONTEST) dari `GET /mt5/accounts/info`; membedakan 401 (butuh token) dari "tidak terdeteksi" agar tidak menyesatkan.
+- **`apps/api/src/index.ts`**: proxy read-only `GET /mt5/accounts/info` (di belakang auth middleware; tanpa jalur order).
+- **Perbaikan verifikasi (temuan sampingan)**: `apps/web/tsconfig.json` `include` menunjuk `src/**` yang tidak ada sehingga `tsc` tidak memeriksa apa pun (false green) — kini `app/`, `lib/`, `components/`; ESLint diperluas ke `components/`+`lib/`; 2 dead code dihapus.
+
 ### Fixed — Agent Wiring: Supervisor Now Delegates to Real Specialists
 
 Tiga bug wiring yang membuat seluruh agent analyst tidak pernah terpanggil di

@@ -1,0 +1,324 @@
+/* AppShell — kerangka tunggal dashboard (UI/UX F2).
+ *
+ * Semua ukuran/warna mengacu ke design token di globals.css; tidak ada hex
+ * baru di sini kecuali varian di atas latar gelap sidebar yang memang tidak
+ * punya padanan terang (mis. teks hijau muda untuk badge DEMO).
+ */
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  background: var(--bg);
+}
+
+/* Sidebar ------------------------------------------------------------------ */
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  padding: var(--sp-6) var(--sp-4);
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  overflow-y: auto;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-bottom: var(--sp-5);
+  border-bottom: 1px solid var(--sidebar-border);
+}
+
+.brandMark {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 10px;
+  font-size: var(--fs-md);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.brand div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.brand strong {
+  color: #fff;
+  font-size: var(--fs-lg);
+  letter-spacing: 0.01em;
+}
+
+.brand small {
+  color: var(--sidebar-muted);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+}
+
+/* Navigasi ----------------------------------------------------------------- */
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.navGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.navLabel {
+  padding: 0 10px;
+  margin-bottom: var(--sp-1);
+  color: var(--sidebar-muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--r-md);
+  color: var(--sidebar-text);
+  font-size: var(--fs-md);
+  text-decoration: none;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.navItem:hover {
+  background: var(--sidebar-hover);
+  color: #fff;
+}
+
+.navActive,
+.navActive:hover {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+}
+
+.icon {
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+/* Footer: status terminal + akun (read-only) ------------------------------- */
+
+.footer {
+  margin-top: auto;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--sidebar-border);
+}
+
+.account {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.accountTop {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: var(--r-full);
+}
+
+.dotOn {
+  background: #32d583;
+}
+
+.dotOff {
+  background: var(--sidebar-muted);
+}
+
+.accountName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--sidebar-text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.armed {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: var(--r-full);
+  background: rgba(217, 45, 32, 0.18);
+  color: #fda29b;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.accountMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  color: var(--sidebar-muted);
+  font-size: var(--fs-xs);
+}
+
+/* Nama server bisa panjang (mis. HFMarketsGlobal-Live15) — potong dengan
+   ellipsis alih-alih wrap ke dua baris yang terlihat berantakan. */
+.accountMeta > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modeBadge {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: var(--r-full);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.modeLive {
+  background: rgba(217, 45, 32, 0.16);
+  border: 1px solid rgba(217, 45, 32, 0.4);
+  color: #fda29b;
+}
+
+.modeDemo {
+  background: rgba(6, 118, 71, 0.2);
+  border: 1px solid rgba(6, 118, 71, 0.45);
+  color: #75e0a7;
+}
+
+.accountHint {
+  color: var(--sidebar-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.accountHint code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--sidebar-text);
+  font-size: 10px;
+}
+
+/* Konten ------------------------------------------------------------------- */
+
+.main {
+  min-width: 0;
+  padding: 28px 32px 40px;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-5);
+}
+
+.eyebrow {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.topbar h1 {
+  margin: var(--sp-1) 0 0;
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* Responsif ----------------------------------------------------------------- */
+
+@media (max-width: 920px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-4);
+    padding: var(--sp-4);
+  }
+
+  .brand {
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+
+  .nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+  }
+
+  .navGroup {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-1);
+  }
+
+  .navLabel {
+    display: none;
+  }
+
+  .navItem {
+    padding: 7px 10px;
+  }
+
+  .footer {
+    width: 100%;
+    margin-top: 0;
+    padding-top: var(--sp-3);
+  }
+
+  .main {
+    padding: 18px;
+  }
+}

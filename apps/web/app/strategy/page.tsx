@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
+import AppShell from '../../components/AppShell';
 
 // View model: camelCase performance fields for rendering. Mapped from the
 // Node API's StrategyRecord (snake_case) in `mapStrategy`.
@@ -106,38 +107,12 @@ export default function StrategyCenterPage() {
   };
 
   return (
-    <div className={styles.shell}>
-      <aside className={styles.sidebar}>
-        <div className={styles.brand}>
-          <span className={styles.brandMark}>EA</span>
-          <div>
-            <strong>EA BOT</strong>
-            <small>STRATEGY CENTER</small>
-          </div>
-        </div>
-        <div className={styles.workspaceLabel}>MANAJEMEN</div>
-        <a href="/" className={styles.navItem}>
-          <span>←</span> Kembali
-        </a>
-        <a href="/control-plane" className={styles.navItem}>
-          <span>▦</span> Control Plane
-        </a>
-        <div className={styles.sidebarBottom}>
-          <span className={styles.greenDot} /> {strategies.filter((s) => s.active).length} strategi aktif
-          <div className={styles.version}>Live</div>
-        </div>
-      </aside>
-
-      <main className={styles.main}>
-        <header className={styles.topbar}>
-          <div>
-            <div className={styles.eyebrow}>EA BOT / STRATEGY CENTER</div>
-            <h1>Strategy Center</h1>
-          </div>
-          <div className={styles.topActions}>
-            <span className={styles.envBadge}>LIVE</span>
-          </div>
-        </header>
+    <AppShell
+      activeKey="strategy"
+      eyebrow="EA BOT / STRATEGY CENTER"
+      title="Strategy Center"
+      actions={<span className={styles.envBadge}>LIVE</span>}
+    >
 
         {notice && <div className={styles.notice}>{notice}</div>}
         {error && (
@@ -282,7 +257,6 @@ export default function StrategyCenterPage() {
             </>
           )}
         </div>
-      </main>
-    </div>
+    </AppShell>
   );
 }

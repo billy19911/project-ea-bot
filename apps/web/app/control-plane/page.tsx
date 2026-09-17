@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
+import AppShell from '../../components/AppShell';
 
 // API routes require a Bearer token (PRD_V2 §28). The app has no login UI yet,
 // so the "Run Cycle" action stays disabled until a token is present in
@@ -32,23 +33,23 @@ type Tab =
   | 'models'
   | 'learning';
 
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'overview', label: 'System Overview', icon: '▦' },
-  { id: 'trading', label: 'Trading', icon: '📈' },
-  { id: 'positions', label: 'Positions', icon: '📌' },
-  { id: 'market', label: 'Market', icon: '🌍' },
-  { id: 'organization', label: 'AI Organization', icon: '🧠' },
-  { id: 'tasks', label: 'Task Explorer', icon: '🧾' },
-  { id: 'decisions', label: 'Decision Explorer', icon: '⚖️' },
-  { id: 'risk', label: 'Risk Center', icon: '🛡' },
-  { id: 'execution', label: 'Execution Center', icon: '⚡' },
-  { id: 'audit', label: 'Audit Viewer', icon: '📜' },
-  { id: 'health', label: 'System Health', icon: '💚' },
-  { id: 'committee', label: 'Committee Trace', icon: '🗣' },
-  { id: 'telegram', label: 'Telegram', icon: '✈️' },
-  { id: 'providers', label: 'AI Providers', icon: '🔌' },
-  { id: 'models', label: 'Model Registry', icon: '🗂' },
-  { id: 'learning', label: 'Learning Analytics', icon: '🎓' },
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'overview', label: 'System Overview' },
+  { id: 'trading', label: 'Trading' },
+  { id: 'positions', label: 'Positions' },
+  { id: 'market', label: 'Market' },
+  { id: 'organization', label: 'AI Organization' },
+  { id: 'tasks', label: 'Task Explorer' },
+  { id: 'decisions', label: 'Decision Explorer' },
+  { id: 'risk', label: 'Risk Center' },
+  { id: 'execution', label: 'Execution Center' },
+  { id: 'audit', label: 'Audit Viewer' },
+  { id: 'health', label: 'System Health' },
+  { id: 'committee', label: 'Committee Trace' },
+  { id: 'telegram', label: 'Telegram' },
+  { id: 'providers', label: 'AI Providers' },
+  { id: 'models', label: 'Model Registry' },
+  { id: 'learning', label: 'Learning Analytics' },
 ];
 
 function badgeClass(status: string, s: Record<string, string>): string {
@@ -221,59 +222,46 @@ export default function ControlPlanePage() {
   const mt5Mode = data.mt5Mode as { live_data?: boolean; execution?: string } | undefined;
 
   return (
-    <div className={styles.shell}>
-      <aside className={styles.sidebar}>
-        <div className={styles.brand}>
-          <span className={styles.brandMark}>EA</span>
-          <div>
-            <strong>EA BOT</strong>
-            <small>CONTROL PLANE</small>
-          </div>
-        </div>
-        <div className={styles.workspaceLabel}>DASHBOARD SECTIONS</div>
+    <AppShell
+      activeKey="control-plane"
+      eyebrow="EA BOT / CONTROL PLANE"
+      title={TABS.find((t) => t.id === tab)?.label ?? 'Control Plane'}
+      actions={
+        <>
+          <span className={styles.envBadge}>{mt5Mode?.live_data ? 'LIVE DATA · READ-ONLY' : 'PAPER'}</span>
+          <button
+            className={styles.tab}
+            onClick={runCycle}
+            disabled={!hasToken || runningCycle}
+            title={hasToken ? 'Jalankan satu siklus pipeline' : 'Membutuhkan token di localStorage (ea-bot-token)'}
+          >
+            {runningCycle ? '⏳ Running…' : '▶ Run Cycle'}
+          </button>
+          <button
+            className={styles.tab}
+            onClick={() => { fetchAll(); showNotice('Data refreshed dari API.'); }}
+          >
+            ↻ Refresh
+          </button>
+        </>
+      }
+    >
+      {/* Section navigasi pindah dari sidebar ke tab strip in-page: sidebar
+          sekarang milik AppShell (navigasi antar-halaman), bukan per-section. */}
+      <div className={styles.tabs} role="tablist" aria-label="Control Plane sections">
         {TABS.map((t) => (
           <button
             key={t.id}
-            className={`${styles.navItem} ${tab === t.id ? styles.active : ''}`}
+            className={`${styles.tab} ${tab === t.id ? styles.tabActive : ''}`}
             onClick={() => setTab(t.id)}
+            aria-pressed={tab === t.id}
           >
-            <span>{t.icon}</span> {t.label}
+            {t.label}
           </button>
         ))}
-        <div className={styles.sidebarBottom}>
-          <span className={styles.greenDot} /> {mt5Mode?.live_data ? 'Live data · read-only' : 'Paper mode'}
-          <div className={styles.version}>v1.0.0</div>
-        </div>
-      </aside>
+      </div>
 
-      <main className={styles.main}>
-        <header className={styles.topbar}>
-          <div>
-            <div className={styles.eyebrow}>EA BOT / CONTROL PLANE</div>
-            <h1>{TABS.find((t) => t.id === tab)?.label}</h1>
-          </div>
-          <div>
-            <span className={styles.envBadge}>{mt5Mode?.live_data ? 'LIVE DATA · READ-ONLY' : 'PAPER'}</span>
-            <button
-              className={styles.tab}
-              style={{ marginLeft: 10 }}
-              onClick={runCycle}
-              disabled={!hasToken || runningCycle}
-              title={hasToken ? 'Jalankan satu siklus pipeline' : 'Membutuhkan token di localStorage (ea-bot-token)'}
-            >
-              {runningCycle ? '⏳ Running…' : '▶ Run Cycle'}
-            </button>
-            <button
-              className={styles.tab}
-              style={{ marginLeft: 10 }}
-              onClick={() => { fetchAll(); showNotice('Data refreshed dari API.'); }}
-            >
-              ↻ Refresh
-            </button>
-          </div>
-        </header>
-
-        {notice && <div className={styles.notice}>{notice}</div>}
+      {notice && <div className={styles.notice}>{notice}</div>}
         {cycle && (
           cycle.kind === 'ok' ? (
             <div className={styles.notice}>
@@ -290,8 +278,7 @@ export default function ControlPlanePage() {
         ) : (
           <TabContent tab={tab} data={data} showNotice={showNotice} hasToken={hasToken} onRefresh={fetchAll} />
         )}
-      </main>
-    </div>
+    </AppShell>
   );
 }
 

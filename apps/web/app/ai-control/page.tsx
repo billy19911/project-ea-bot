@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
+import AppShell from '../../components/AppShell';
 
 type AgentStatus = 'active' | 'idle' | 'error';
 type AgentNode = { 
@@ -125,32 +126,12 @@ export default function AIControlPage() {
   const totalCalls = models.reduce((sum, m) => sum + m.calls, 0);
 
   return (
-    <div className={styles.shell}>
-      <aside className={styles.sidebar}>
-        <div className={styles.brand}>
-          <span className={styles.brandMark}>EA</span>
-          <div><strong>EA BOT</strong><small>AI CONTROL</small></div>
-        </div>
-        <div className={styles.workspaceLabel}>KONTROL</div>
-        <a href="/" className={styles.navItem}><span>←</span> Kembali</a>
-        <a href="/control-plane" className={styles.navItem}><span>▦</span> Control Plane</a>
-        <a href="/observability" className={styles.navItem}><span>📊</span> Observability</a>
-        <div className={styles.sidebarBottom}>
-          <span className={styles.greenDot} /> {source === 'live' ? 'Supervisor aktif' : 'Data tidak tersedia'}
-          <div className={styles.version}>{source === 'live' ? 'Live' : 'Offline'}</div>
-        </div>
-      </aside>
-
-      <main className={styles.main}>
-        <header className={styles.topbar}>
-          <div>
-            <div className={styles.eyebrow}>EA BOT / AI CONTROL CENTER</div>
-            <h1>AI Control Center</h1>
-          </div>
-          <div className={styles.topActions}>
-            <SourceBadge source={source} />
-          </div>
-        </header>
+    <AppShell
+      activeKey="ai-control"
+      eyebrow="EA BOT / AI CONTROL CENTER"
+      title="AI Control Center"
+      actions={<SourceBadge source={source} />}
+    >
 
         <div className={styles.pageBody}>
           {/* Supervisor Status */}
@@ -330,7 +311,6 @@ export default function AIControlPage() {
             </div>
           </section>
         </div>
-      </main>
-    </div>
+    </AppShell>
   );
 }
