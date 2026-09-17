@@ -716,6 +716,18 @@ app.get('/chart/candles', async (req, res) => {
   await sendProxy(res, `/chart/candles?${qs.toString()}`, undefined, req);
 });
 
+// Fase 2 — real engine analysis (entry/SL/TP) + open position levels.
+app.get('/chart/analysis', async (req, res) => {
+  const log = (req as any).log;
+  log.info('chart.analysis');
+  const qs = new URLSearchParams();
+  for (const key of ['symbol', 'timeframe', 'bars']) {
+    const v = (req.query as any)[key];
+    if (v !== undefined) qs.set(key, String(v));
+  }
+  await sendProxy(res, `/chart/analysis?${qs.toString()}`, undefined, req);
+});
+
 app.get('/market/overview', async (req, res) => {
   const log = (req as any).log;
   log.info('market.overview');

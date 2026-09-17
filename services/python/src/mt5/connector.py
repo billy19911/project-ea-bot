@@ -413,6 +413,10 @@ def get_positions() -> list[Position]:
                     profit=p.profit,
                     unrealized_pnl=p.profit,
                     margin=0.0,
+                    # MT5 reports 0.0 when no level is placed — that is "none",
+                    # not a real price of zero.
+                    sl=float(p.sl) if float(getattr(p, "sl", 0.0) or 0.0) > 0 else None,
+                    tp=float(p.tp) if float(getattr(p, "tp", 0.0) or 0.0) > 0 else None,
                     entry=(
                         "POSITION_ENTRY_IN"
                         if p.reason == mt5.POSITION_REASON_CLIENT

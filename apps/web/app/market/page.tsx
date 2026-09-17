@@ -10,7 +10,47 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
 import AppShell from '../../components/AppShell';
-import PriceChart, { ChartData } from '../../components/PriceChart';
+import PriceChart, { ChartData, ChartLevel } from '../../components/PriceChart';
+
+// Bentuk respons /chart/analysis (analisa engine nyata, read-only).
+type AnalysisData = {
+  ok: boolean;
+  reason?: string;
+  symbol?: string;
+  timeframe?: string;
+  bar_count?: number;
+  analysis?: {
+    signal: 'BUY' | 'SELL' | 'HOLD';
+    confidence: number;
+    entry: number;
+    stop_loss: number | null;
+    take_profit: number | null;
+    atr: number | null;
+    position_size: number;
+    reason: string;
+    close: number;
+    timestamp: string | null;
+  };
+  positions?: {
+    ticket: number;
+    symbol: string;
+    side: string;
+    volume: number;
+    entry: number;
+    current: number;
+    sl: number | null;
+    tp: number | null;
+    profit: number;
+  }[];
+  provenance?: {
+    source: string;
+    mode: string;
+    engine: string;
+    stop_multiplier: number;
+    reward_risk_ratio: number;
+    risk_percent: number;
+  };
+};
 
 const TIMEFRAMES = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1', 'MN1'] as const;
 type Timeframe = (typeof TIMEFRAMES)[number];
@@ -29,6 +69,7 @@ export default function MarketPage() {
   const [showMacd, setShowMacd] = useState(true);
 
   const [data, setData] = useState<ChartData | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -45,7 +86,11 @@ export default function MarketPage() {
         timeframe,
         bars: String(bars),
       });
-      const res = await apiFetch(`/chart/candles?${qs.toString()}`);
+      // Analisa memakai bar yang sama; jalankan paralel agar satu kali muat.
+      const [res, ares] = await Promise.all([
+        apiFetch(`/chart/candles?${qs.toString()}`),
+        apiFetch(`/chart/analysis?${qs.toString()}`),
+      ]);
       if (!res.ok) {
         // 401 = belum login; pesan jujur, bukan chart kosong.
         const msg =
@@ -61,6 +106,13 @@ export default function MarketPage() {
       setUpdatedAt(new Date());
       if (body.ok && body.symbol) {
         setSymbols((prev) => (prev.includes(body.symbol!) ? prev : [...prev, body.symbol!]));
+      }
+      // Analisa bersifat tambahan: bila gagal, chart tetap tampil (tanpa level).
+      if (ares.ok) {
+        const abody: AnalysisData = await ares.json();
+        if (seq === reqSeq.current) setAnalysis(abody);
+      } else if (seq === reqSeq.current) {
+        setAnalysis(null);
       }
     } catch {
       if (seq === reqSeq.current) setError('Tidak bisa menghubungi API. Cek apakah Node :3001 hidup.');
@@ -81,6 +133,32 @@ export default function MarketPage() {
 
   const barCount = data?.bars?.length ?? 0;
   const prov = data?.provenance;
+  const ana = analysis?.ok ? analysis.analysis : undefined;
+  const openPositions = analysis?.ok ? analysis.positions ?? [] : [];
+
+  // Level yang digambar di chart: rencana engine (entry/SL/TP) + SL/TP posisi
+  // nyata yang sedang terbuka. Hanya nilai yang benar-benar ada yang dikirim —
+  // SL/TP yang tidak dipasang tetap null dan tidak digambar.
+  const chartLevels: ChartLevel[] = [];
+  if (ana) {
+    if (ana.signal === 'BUY' || ana.signal === 'SELL') {
+      chartLevels.push({ label: 'Entry', value: ana.entry, kind: 'entry' });
+    }
+    if (typeof ana.stop_loss === 'number') {
+      chartLevels.push({ label: 'SL', value: ana.stop_loss, kind: 'stop' });
+    }
+    if (typeof ana.take_profit === 'number') {
+      chartLevels.push({ label: 'TP', value: ana.take_profit, kind: 'target' });
+    }
+  }
+  for (const p of openPositions) {
+    if (typeof p.sl === 'number') {
+      chartLevels.push({ label: `SL #${p.ticket}`, value: p.sl, kind: 'stop' });
+    }
+    if (typeof p.tp === 'number') {
+      chartLevels.push({ label: `TP #${p.ticket}`, value: p.tp, kind: 'target' });
+    }
+  }
 
   return (
     <AppShell
@@ -210,6 +288,7 @@ export default function MarketPage() {
       {data ? (
         <PriceChart
           data={data}
+          levels={chartLevels}
           showEma={showEma}
           showBollinger={showBollinger}
           showRsi={showRsi}
@@ -218,6 +297,135 @@ export default function MarketPage() {
       ) : (
         <div className={styles.loadingBox}>{loading ? 'Memuat chart…' : 'Chart belum tersedia.'}</div>
       )}
+
+      {/* ── Hasil analisa engine (rencana trade nyata) ── */}
+      {analysis && !analysis.ok ? (
+        <div className={styles.errorBox}>
+          {analysis.reason ?? 'Analisa engine tidak tersedia untuk simbol ini.'}
+        </div>
+      ) : null}
+
+      {ana ? (
+        <section className={styles.analysisBox}>
+          <div className={styles.analysisHead}>
+            <span
+              className={`${styles.signalBadge} ${
+                ana.signal === 'BUY'
+                  ? styles.signalBuy
+                  : ana.signal === 'SELL'
+                    ? styles.signalSell
+                    : styles.signalHold
+              }`}
+            >
+              {ana.signal}
+            </span>
+            <span className={styles.analysisMeta}>
+              keyakinan {(ana.confidence * 100).toFixed(0)}%
+              {typeof ana.atr === 'number' ? ` · ATR ${ana.atr.toFixed(2)}` : ''}
+              {analysis?.provenance
+                ? ` · risiko ${analysis.provenance.risk_percent}%/trade`
+                : ''}
+            </span>
+          </div>
+
+          <div className={styles.levelGrid}>
+            <div className={styles.levelItem}>
+              <span className={styles.levelLabel}>Entry</span>
+              <span className={styles.levelValue}>
+                {ana.signal === 'HOLD' ? '—' : ana.entry.toFixed(2)}
+              </span>
+            </div>
+            <div className={styles.levelItem}>
+              <span className={styles.levelLabel}>Stop Loss</span>
+              <span className={`${styles.levelValue} ${styles.levelStop}`}>
+                {typeof ana.stop_loss === 'number' ? ana.stop_loss.toFixed(2) : '—'}
+              </span>
+            </div>
+            <div className={styles.levelItem}>
+              <span className={styles.levelLabel}>Take Profit</span>
+              <span className={`${styles.levelValue} ${styles.levelTarget}`}>
+                {typeof ana.take_profit === 'number' ? ana.take_profit.toFixed(2) : '—'}
+              </span>
+            </div>
+            <div className={styles.levelItem}>
+              <span className={styles.levelLabel}>Harga kini</span>
+              <span className={styles.levelValue}>{ana.close.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <p className={styles.analysisReason}>{ana.reason}</p>
+          {analysis?.provenance ? (
+            <p className={styles.analysisProv}>
+              SL {analysis.provenance.stop_multiplier}×ATR · TP {analysis.provenance.reward_risk_ratio}
+              :1 (≈
+              {(analysis.provenance.stop_multiplier * analysis.provenance.reward_risk_ratio).toFixed(
+                0,
+              )}
+              ×ATR) · mesin {analysis.provenance.engine} · read-only
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {/* ── Posisi terbuka pada simbol ini (level SL/TP nyata) ── */}
+      {openPositions.length > 0 ? (
+        <section className={styles.posBox}>
+          <h2 className={styles.posTitle}>Posisi terbuka · {analysis?.symbol ?? symbol}</h2>
+          <div className={styles.posTableWrap}>
+            <table className={styles.posTable}>
+              <thead>
+                <tr>
+                  <th>Ticket</th>
+                  <th>Arah</th>
+                  <th>Lot</th>
+                  <th>Entry</th>
+                  <th>Kini</th>
+                  <th>SL</th>
+                  <th>TP</th>
+                  <th>Profit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {openPositions.map((p) => (
+                  <tr key={p.ticket}>
+                    <td className={styles.posMono}>{p.ticket}</td>
+                    <td>
+                      <span
+                        className={`${styles.sideBadge} ${
+                          p.side === 'BUY' ? styles.sideBuy : styles.sideSell
+                        }`}
+                      >
+                        {p.side}
+                      </span>
+                    </td>
+                    <td className={styles.posMono}>{p.volume.toFixed(2)}</td>
+                    <td className={styles.posMono}>{p.entry.toFixed(2)}</td>
+                    <td className={styles.posMono}>{p.current.toFixed(2)}</td>
+                    <td className={styles.posMono}>
+                      {typeof p.sl === 'number' ? (
+                        p.sl.toFixed(2)
+                      ) : (
+                        <span className={styles.posNone}>tidak dipasang</span>
+                      )}
+                    </td>
+                    <td className={styles.posMono}>
+                      {typeof p.tp === 'number' ? (
+                        p.tp.toFixed(2)
+                      ) : (
+                        <span className={styles.posNone}>tidak dipasang</span>
+                      )}
+                    </td>
+                    <td className={`${styles.posMono} ${p.profit >= 0 ? styles.posUp : styles.posDown}`}>
+                      {p.profit >= 0 ? '+' : ''}
+                      {p.profit.toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       <p className={styles.note}>
         Data bar diambil read-only dari terminal MT5 aktif. Indikator dihitung dari bar yang sama

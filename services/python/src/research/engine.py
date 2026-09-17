@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from trading.indicators import ema
+from trading.indicators import atr_series, ema
 
 logger = logging.getLogger(__name__)
 
@@ -315,6 +315,8 @@ class ResearchEngine:
         historical_data: list[float],
         train_ratio: float = DEFAULT_TRAIN_RATIO,
         walk_forward: bool = True,
+        highs: list[float] | None = None,
+        lows: list[float] | None = None,
     ) -> BacktestResult:
         """Run a realistic, indicator-based backtest over historical closes.
 
@@ -332,6 +334,10 @@ class ResearchEngine:
             historical_data: Close prices (oldest → newest).
             train_ratio: Fraction of bars used for the train window (0<r<1).
             walk_forward: Whether to compute walk-forward metadata.
+            highs: Optional real high prices (same length) — enables ATR-based
+                stop-loss / take-profit exits on each simulated trade.
+            lows: Optional real low prices (same length) — enables ATR-based
+                stop-loss / take-profit exits on each simulated trade.
 
         Returns:
             BacktestResult with metrics, trade list, and walk-forward metadata.
@@ -363,12 +369,14 @@ class ResearchEngine:
         params.update(experiment.parameters)
 
         # Full-series simulation drives the headline metrics/trades.
-        trades = self._simulate(historical_data, params)
+        trades = self._simulate(historical_data, params, highs=highs, lows=lows)
         metrics = self.compute_metrics(trades)
 
         walk_forward_meta: dict[str, Any] = {"enabled": bool(walk_forward)}
         if walk_forward:
-            walk_forward_meta = self._walk_forward(historical_data, params, train_ratio)
+            walk_forward_meta = self._walk_forward(
+                historical_data, params, train_ratio, highs=highs, lows=lows
+            )
 
         result = BacktestResult(
             total_trades=metrics["total_trades"],
@@ -394,6 +402,8 @@ class ResearchEngine:
         self,
         prices: list[float],
         params: dict[str, Any],
+        highs: list[float] | None = None,
+        lows: list[float] | None = None,
     ) -> list[dict[str, Any]]:
         """Simulate EMA-crossover trades over a price series (deterministic).
 
@@ -401,6 +411,14 @@ class ResearchEngine:
         and slow lines, enters on a crossover and exits on the opposite
         crossover (or at end of data). The final open position is always closed
         so realised PnL reflects the whole series.
+
+        When *highs* and *lows* are supplied (real bars), each trade also gets
+        ATR-based stop-loss / take-profit levels — the same 2×ATR stop and
+        R:R 2:1 target the trading engine proposes. Intrabar the stop is checked
+        before the target (worst-case convention), and the exit is labelled with
+        ``exit_reason``: ``stop_loss`` / ``take_profit`` / ``signal_reversal`` /
+        ``end_of_data``. Without real highs/lows no ATR levels are fabricated —
+        trades then exit on signal only.
         """
         fast_period = int(params.get("fast_ema_period", 3))
         slow_period = int(params.get("slow_ema_period", 8))
@@ -413,6 +431,34 @@ class ResearchEngine:
         in_trade = False
         entry_price = 0.0
         direction = 0
+        stop_loss: float | None = None
+        take_profit: float | None = None
+        entry_atr: float | None = None
+        entry_bar = 0
+
+        # ATR levels need real highs/lows; without them the trades simply carry
+        # no stop/target (no fabricated levels from closes).
+        use_atr = (
+            highs is not None
+            and lows is not None
+            and len(highs) == len(prices)
+            and len(lows) == len(prices)
+        )
+        atr_values: list[float | None] = [None] * len(prices)
+        if use_atr:
+            atr_values = atr_series(
+                list(highs),  # type: ignore[arg-type]
+                list(lows),  # type: ignore[arg-type]
+                list(prices),
+                int(params.get("atr_period", 14)),
+            )
+
+        stop_multiplier = float(params.get("atr_stop_multiplier", 2.0))
+        reward_risk = float(params.get("reward_risk_ratio", 2.0))
+        if stop_multiplier <= 0:
+            stop_multiplier = 2.0
+        if reward_risk <= 0:
+            reward_risk = 2.0
 
         for bar_idx in range(len(prices)):
             window = prices[: bar_idx + 1]
@@ -429,22 +475,64 @@ class ResearchEngine:
                     entry_price, direction, in_trade = close, 1, True
                 elif fast_ema < slow_ema:
                     entry_price, direction, in_trade = close, -1, True
+                if in_trade:
+                    entry_bar = bar_idx
+                    entry_atr = atr_values[bar_idx] if use_atr else None
+                    if entry_atr is not None and entry_atr > 0:
+                        stop_loss = entry_price - direction * stop_multiplier * entry_atr
+                        take_profit = (
+                            entry_price + direction * stop_multiplier * reward_risk * entry_atr
+                        )
+                    else:
+                        stop_loss = None
+                        take_profit = None
             else:
+                exit_price: float | None = None
+                exit_reason = ""
+
+                # Intrabar stop/target using the real high/low of this bar.
+                # Worst-case convention: the stop is assumed hit before the
+                # target when a bar covers both — never an optimistic guess.
+                if stop_loss is not None and take_profit is not None:
+                    bar_high = float(highs[bar_idx]) if use_atr else close
+                    bar_low = float(lows[bar_idx]) if use_atr else close
+                    if direction == 1:
+                        if bar_low <= stop_loss:
+                            exit_price, exit_reason = stop_loss, "stop_loss"
+                        elif bar_high >= take_profit:
+                            exit_price, exit_reason = take_profit, "take_profit"
+                    else:
+                        if bar_high >= stop_loss:
+                            exit_price, exit_reason = stop_loss, "stop_loss"
+                        elif bar_low <= take_profit:
+                            exit_price, exit_reason = take_profit, "take_profit"
+
                 reversed_trend = (direction == 1 and fast_ema < slow_ema) or (
                     direction == -1 and fast_ema > slow_ema
                 )
-                if reversed_trend:
-                    pnl = (close - entry_price) * direction
+                if exit_price is None and reversed_trend:
+                    exit_price, exit_reason = close, "signal_reversal"
+
+                if exit_price is not None:
+                    pnl = (exit_price - entry_price) * direction
                     trades.append(
                         {
                             "entry": entry_price,
-                            "exit": close,
+                            "exit": exit_price,
                             "direction": direction,
                             "pnl": pnl,
-                            "exit_reason": "signal_reversal",
+                            "exit_reason": exit_reason,
+                            "stop_loss": stop_loss,
+                            "take_profit": take_profit,
+                            "atr_at_entry": entry_atr,
+                            "entry_bar": entry_bar,
+                            "exit_bar": bar_idx,
                         }
                     )
                     in_trade = False
+                    stop_loss = None
+                    take_profit = None
+                    entry_atr = None
 
         # Close final position at last price.
         if in_trade:
@@ -457,6 +545,11 @@ class ResearchEngine:
                     "direction": direction,
                     "pnl": pnl,
                     "exit_reason": "end_of_data",
+                    "stop_loss": stop_loss,
+                    "take_profit": take_profit,
+                    "atr_at_entry": entry_atr,
+                    "entry_bar": entry_bar,
+                    "exit_bar": len(prices) - 1,
                 }
             )
         return trades
@@ -466,6 +559,8 @@ class ResearchEngine:
         prices: list[float],
         params: dict[str, Any],
         train_ratio: float,
+        highs: list[float] | None = None,
+        lows: list[float] | None = None,
     ) -> dict[str, Any]:
         """Split data into train/test windows and aggregate their metrics.
 
@@ -486,7 +581,9 @@ class ResearchEngine:
         }
         for name, (start, end) in splits.items():
             window_prices = prices[start:end]
-            trades = self._simulate(window_prices, params)
+            window_highs = highs[start:end] if highs is not None else None
+            window_lows = lows[start:end] if lows is not None else None
+            trades = self._simulate(window_prices, params, highs=window_highs, lows=window_lows)
             metrics = self.compute_metrics(trades)
             windows.append(
                 {

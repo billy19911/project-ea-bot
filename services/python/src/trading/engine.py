@@ -421,7 +421,9 @@ class TradingEngine:
         else:
             raises = not isinstance(first, (int, float))
             if raises:
-                closes = [float(getattr(x, "close", float(x))) for x in data]
+                # NB: getattr's default is evaluated eagerly, so branch on the
+                # attribute instead of passing float(x) as the default.
+                closes = [float(x.close) if hasattr(x, "close") else float(x) for x in data]
                 highs = [float(getattr(x, "high", closes[i])) for i, x in enumerate(data)]
                 lows = [float(getattr(x, "low", closes[i])) for i, x in enumerate(data)]
             else:

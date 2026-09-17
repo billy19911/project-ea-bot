@@ -594,6 +594,16 @@ function ProvenanceLine({ provenance }: { provenance: Provenance }) {
   );
 }
 
+// Label tampilan untuk alasan keluar backtest — kode mentah dari engine tetap
+// `stop_loss`/`take_profit`/`signal_reversal`/`end_of_data` (dipakai logika),
+// hanya tampilan yang diterjemahkan. Kode tak dikenal ditampilkan apa adanya.
+const EXIT_REASON_LABELS: Record<string, string> = {
+  stop_loss: 'Stop loss',
+  take_profit: 'Take profit',
+  signal_reversal: 'Sinyal berbalik',
+  end_of_data: 'Data habis',
+};
+
 function TradesPreview({ trades }: { trades: Array<Record<string, unknown>> }) {
   if (!trades.length) return null;
   return (
@@ -604,6 +614,8 @@ function TradesPreview({ trades }: { trades: Array<Record<string, unknown>> }) {
           <thead>
             <tr>
               <th>Entry</th>
+              <th>SL</th>
+              <th>TP</th>
               <th>Exit</th>
               <th>Arah</th>
               <th>PnL / unit</th>
@@ -614,12 +626,14 @@ function TradesPreview({ trades }: { trades: Array<Record<string, unknown>> }) {
             {trades.map((t, i) => (
               <tr key={i}>
                 <td>{fmt(Number(t.entry))}</td>
+                <td>{t.stop_loss == null ? '—' : fmt(Number(t.stop_loss))}</td>
+                <td>{t.take_profit == null ? '—' : fmt(Number(t.take_profit))}</td>
                 <td>{fmt(Number(t.exit))}</td>
                 <td>{Number(t.direction) === 1 ? 'Long' : 'Short'}</td>
                 <td className={Number(t.pnl) > 0 ? styles.positive : styles.negative}>
                   {fmt(Number(t.pnl))}
                 </td>
-                <td>{String(t.exit_reason ?? '—')}</td>
+                <td>{EXIT_REASON_LABELS[String(t.exit_reason ?? '')] ?? String(t.exit_reason ?? '—')}</td>
               </tr>
             ))}
           </tbody>

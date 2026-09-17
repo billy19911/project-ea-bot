@@ -68,6 +68,8 @@ class Position(BaseModel):
     profit: float
     unrealized_pnl: float
     margin: float
+    sl: Optional[float] = None  # stop-loss price; None when not placed
+    tp: Optional[float] = None  # take-profit price; None when not placed
     entry: str  # POSITION_ENTRY_IN / OUT
     status: str
     time: datetime

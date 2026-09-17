@@ -59,8 +59,19 @@ export type ChartData = {
   provenance?: { source: string; mode: string; bar_count: number };
 };
 
+/**
+ * Garis level harga nyata di atas chart (entry/SL/TP analisa atau posisi
+ * terbuka). Nilai harus berasal dari server — bukan dihitung ulang di klien.
+ */
+export type ChartLevel = {
+  label: string;
+  value: number;
+  kind: 'entry' | 'stop' | 'target';
+};
+
 type Props = {
   data: ChartData;
+  levels?: ChartLevel[];
   showEma?: boolean;
   showBollinger?: boolean;
   showRsi?: boolean;
@@ -127,6 +138,7 @@ function fmtTime(iso: string, timeframe?: string): string {
 
 export default function PriceChart({
   data,
+  levels = [],
   showEma = true,
   showBollinger = true,
   showRsi = true,
@@ -155,6 +167,12 @@ export default function PriceChart({
         if (typeof u === 'number' && u > hi) hi = u;
         if (typeof l === 'number' && l < lo) lo = l;
       }
+    }
+    // Level nyata (SL/TP/entry) ikut menentukan rentang supaya tidak terpotong.
+    for (const lv of levels) {
+      if (!Number.isFinite(lv.value)) continue;
+      if (lv.value < lo) lo = lv.value;
+      if (lv.value > hi) hi = lv.value;
     }
     const pad = (hi - lo) * 0.04 || hi * 0.001 || 1;
     lo -= pad;
@@ -210,7 +228,7 @@ export default function PriceChart({
     }
 
     return { lo, hi, slot, bodyW, x, yMain, yRsi, yMacd, mLo, mHi, priceLines, timeTicks };
-  }, [bars, n, data.overlays, data.panels, data.timeframe, showBollinger, showMacd]);
+  }, [bars, n, data.overlays, data.panels, data.timeframe, showBollinger, showMacd, levels]);
 
   if (!data.ok || n === 0 || !geom) {
     return (
@@ -296,6 +314,29 @@ export default function PriceChart({
                 height={h}
                 className="pcBody"
               />
+            </g>
+          );
+        })}
+
+        {/* ── Garis level nyata: entry / SL / TP ── */}
+        {levels.map((lv, i) => {
+          if (!Number.isFinite(lv.value)) return null;
+          const y = geom.yMain(lv.value);
+          if (y < MAIN_TOP - 1 || y > MAIN_BOTTOM + 1) return null;
+          const cls =
+            lv.kind === 'stop' ? 'pcLevelStop' : lv.kind === 'target' ? 'pcLevelTarget' : 'pcLevelEntry';
+          const anchorRight = i % 2 === 1; // hindari label saling tumpuk
+          return (
+            <g key={`lv-${i}`} className={cls}>
+              <line x1={PAD_L} y1={y} x2={PAD_L + INNER_W} y2={y} className="pcLevelLine" />
+              <text
+                x={anchorRight ? PAD_L + INNER_W - 4 : PAD_L + 4}
+                y={y - 3.5}
+                className="pcLevelLabel"
+                textAnchor={anchorRight ? 'end' : 'start'}
+              >
+                {lv.label} · {fmtPrice(lv.value)}
+              </text>
             </g>
           );
         })}

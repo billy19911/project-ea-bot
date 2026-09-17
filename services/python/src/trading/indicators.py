@@ -19,6 +19,7 @@ __all__ = [
     "MACDResult",
     "StochasticResult",
     "atr",
+    "atr_series",
     "adx",
     "bollinger_series",
     "ema",
@@ -334,6 +335,36 @@ def atr(
     tr = true_range(highs, lows, closes)
     smoothed = _wilder_smooth(tr, period)
     return _last_non_none(smoothed)
+
+
+def atr_series(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    period: int = 14,
+) -> list[float | None]:
+    """Full ATR series (Wilder's smoothing), aligned with the bars.
+
+    Entries before enough data exists are ``None`` (never ``0.0`` — a zero ATR
+    would fabricate a stop level at the entry price). The last non-None value is
+    identical to :func:`atr` for the same inputs; tests keep them in lock-step.
+
+    Args:
+        highs: High prices (oldest → newest).
+        lows: Low prices (oldest → newest).
+        closes: Close prices (oldest → newest).
+        period: ATR period (default 14).
+
+    Returns:
+        One entry per bar: ``None`` until the first ATR exists, then the value.
+    """
+    if period < 1:
+        raise ValueError("period must be >= 1")
+    n = len(highs)
+    if n == 0 or len(lows) != n or len(closes) != n:
+        return [None] * n
+    tr = true_range(highs, lows, closes)
+    return _wilder_smooth(tr, period)
 
 
 # ---------------------------------------------------------------------------

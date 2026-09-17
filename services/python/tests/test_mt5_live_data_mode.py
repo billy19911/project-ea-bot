@@ -227,10 +227,11 @@ class TestOhlcTimeframeMapping:
 # ---------------------------------------------------------------------------
 
 
-def _fake_position(ticket: int = 1, reason: int = 0):
+def _fake_position(ticket: int = 1, reason: int = 0, sl: float = 0.0, tp: float = 0.0):
     """Build a SimpleNamespace mirroring the REAL MT5 TradePosition fields.
 
-    The real object has no ``margin`` and no ``entry`` attributes.
+    The real object has no ``margin`` and no ``entry`` attributes, but it does
+    carry ``sl``/``tp`` (0.0 when no level is placed).
     """
     return SimpleNamespace(
         ticket=ticket,
@@ -239,6 +240,8 @@ def _fake_position(ticket: int = 1, reason: int = 0):
         volume=0.01,
         price_open=4347.5,
         price_current=4346.1,
+        sl=sl,
+        tp=tp,
         swap=0.0,
         profit=-15.77,
         reason=reason,
@@ -277,6 +280,30 @@ class TestLivePositions:
 
         connector._live_mode = True
         assert connector.get_positions() == []
+
+    def test_position_sl_tp_mapped_when_placed(self, monkeypatch):
+        """Real stop/target levels reach the schema as-is."""
+        fake_mt5 = types.ModuleType("MetaTrader5")
+        fake_mt5.positions_get = lambda *a, **k: (_fake_position(201, sl=4300.5, tp=4400.25),)
+        fake_mt5.POSITION_REASON_CLIENT = 0
+        monkeypatch.setitem(sys.modules, "MetaTrader5", fake_mt5)
+
+        connector._live_mode = True
+        pos = connector.get_positions()[0]
+        assert pos.sl == 4300.5
+        assert pos.tp == 4400.25
+
+    def test_position_sl_tp_zero_is_none_not_fake_price(self, monkeypatch):
+        """MT5 reports 0.0 when no level is set — that is None, not a price."""
+        fake_mt5 = types.ModuleType("MetaTrader5")
+        fake_mt5.positions_get = lambda *a, **k: (_fake_position(202),)
+        fake_mt5.POSITION_REASON_CLIENT = 0
+        monkeypatch.setitem(sys.modules, "MetaTrader5", fake_mt5)
+
+        connector._live_mode = True
+        pos = connector.get_positions()[0]
+        assert pos.sl is None
+        assert pos.tp is None
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,18 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Fase 2 "Realistis": SL/TP ATR di Backtest, Posisi Live, dan Chart
+- **Backtest kini memakai SL/TP nyata** (2×ATR stop, 4×ATR target — default engine yang sama dipakai live): `_simulate` menerima high/low bar asli dan mengisi `stop_loss`/`take_profit`/`atr_at_entry` per trade + `exit_reason` eksplisit (`stop_loss`/`take_profit`/`signal_reversal`/`end_of_data`). Konvensi konservatif: 1 bar menyentuh SL **dan** TP → SL menang. Tanpa high/low → SL/TP tetap `null`, bukan angka karangan.
+- **`atr_series` baru** di `indicators.py` — seri None-aware yang konsisten persis dengan `atr()` (nilai terakhir seri = nilai fungsi latest, dikunci test).
+- **SL/TP posisi live di peta**: `Position.sl`/`tp` kini diambil dari MT5; `0.0` (tidak dipasang) dipetakan ke `null` jujur. `position_monitor` menormalkan `null`→`0.0` sesuai konvensi internalnya (semua logika `sl <= 0`).
+- **Endpoint `GET /chart/analysis`** (read-only): analisa `TradingEngine` NYATA atas bar live — sinyal, keyakinan, entry, SL, TP, ATR, alasan, plus posisi terbuka simbol yang sama (pencocokan suffix broker `XAUUSD` ↔ `XAUUSDc`) dan provenance formula (2×ATR, R:R 2:1, risiko 2%/trade).
+- **Halaman Pasar kini menampilkan**: garis Entry/SL/TP di chart (termasuk SL/TP posisi terbuka yang benar-benar terpasang), panel hasil analisa engine (badge sinyal, keyakinan, level, alasan, provenance), dan tabel posisi terbuka dengan kolom SL/TP — posisi tanpa SL/TP tampil "tidak dipasang", bukan nol.
+- **Preview trade backtest** menampilkan kolom SL/TP + alasan keluar berlabel Indonesia ("Stop loss", "Take profit", "Sinyal berbalik", "Data habis") — kode mentah engine tetap dipakai logika.
+- **Bug nyata diperbaiki**: `_parse_ohlc` di `trading/engine.py` memakai `float(x)` sebagai default `getattr` yang dievaluasi eager → `analyze()` crash untuk bar objek (termasuk bar nyata connector). Kini bercabang lewat `hasattr`.
+- **Anti-slop**: `position_size` mentah TIDAK ditampilkan sebagai "lot" (satuannya belum dinormalisasi ke lot broker — butuh contract size); UI menampilkan risiko 2%/trade dari config engine yang sebenarnya.
+- **Test**: 20 test baru (`test_backtest_sltp.py` 12, `test_charting.py` +8) — perilaku SL/TP intrabar, `exit_reason`, konsistensi `atr_series`, mapping `0.0`→`null`, endpoint analisa. Suite Python **1309 passed**; Node 45/45; lint bersih; build web+API sukses.
+- **Terverifikasi end-to-end** (data nyata): `/chart/analysis` XAUUSD H1 → BUY entry 4359.14, SL 4315.85 (2×ATR), TP 4445.73 (4×ATR), 3 posisi SELL live tanpa SL/TP tampil jujur; backtest XAUUSD H1 500 bar → 40 trades dengan `exit_reason` + SL/TP per trade; halaman Pasar ter-render dengan 3 garis level di chart, panel analisa, dan tabel posisi tanpa overflow.
+
 ### Added — Fase 1 "Pasar": Chart Candlestick Multi-Timeframe (nol dependency)
 - **Halaman baru `/market`** ("Pasar") di grup Operasional: chart candlestick SVG inline — nol library chart baru, konsisten dengan pola `TrendChart` (ide #8).
 - **Semua timeframe** M1/M5/M15/M30/H1/H4/D1/W1/MN1 dari bar NYATA MT5 read-only (`mt5.connector.get_ohlc`), 100–500 bar, simbol bebas (chip + input manual).

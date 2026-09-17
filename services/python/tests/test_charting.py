@@ -180,3 +180,123 @@ class TestChartEndpoint:
         r = self.client.get("/chart/candles", params={"symbol": "NOSUCHSYM"})
         assert r.status_code == 200
         assert r.json()["ok"] is False
+
+
+class TestChartAnalysisEndpoint:
+    """Fase 2 — real engine analysis (entry/SL/TP) + open position levels."""
+
+    def setup_method(self) -> None:
+        self.client = TestClient(app)
+
+    def _position(self, ticket=1, symbol="XAUUSD", sl=None, tp=None):
+        return SimpleNamespace(
+            ticket=ticket,
+            symbol=symbol,
+            side="BUY",
+            quantity=0.1,
+            price_open=2000.0,
+            price_current=2005.0,
+            sl=sl,
+            tp=tp,
+            profit=5.0,
+        )
+
+    def test_rejects_invalid_symbol(self) -> None:
+        r = self.client.get("/chart/analysis", params={"symbol": "not a symbol!"})
+        assert r.status_code == 400
+
+    def test_rejects_unknown_timeframe(self) -> None:
+        r = self.client.get("/chart/analysis", params={"symbol": "XAUUSD", "timeframe": "H7"})
+        assert r.status_code == 400
+
+    def test_not_live_returns_ok_false_with_reason(self, monkeypatch) -> None:
+        from src.mt5 import connector
+
+        monkeypatch.setattr(connector, "is_live_mode", lambda: False)
+        r = self.client.get("/chart/analysis", params={"symbol": "XAUUSD"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is False
+        assert "reason" in body and body["reason"]
+
+    def test_live_analysis_uses_real_engine_levels(self, monkeypatch) -> None:
+        from src.mt5 import connector
+
+        bars = _bars(120)
+        monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+        monkeypatch.setattr(connector, "get_ohlc", lambda symbol, tf, count: bars[:count])
+        monkeypatch.setattr(connector, "get_account_info", lambda: SimpleNamespace(equity=10000.0))
+        monkeypatch.setattr(connector, "get_positions", lambda: [])
+
+        r = self.client.get(
+            "/chart/analysis", params={"symbol": "XAUUSD", "timeframe": "H1", "bars": 120}
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["provenance"]["engine"] == "trading.TradingEngine"
+        assert body["provenance"]["stop_multiplier"] == 2.0
+        assert body["provenance"]["reward_risk_ratio"] == 2.0
+        assert body["provenance"]["risk_percent"] == 2.0
+
+        analysis = body["analysis"]
+        assert analysis["signal"] in {"BUY", "SELL", "HOLD"}
+        assert analysis["entry"] is not None
+        if analysis["signal"] != "HOLD":
+            assert analysis["stop_loss"] is not None
+            assert analysis["take_profit"] is not None
+        assert isinstance(analysis["reason"], str) and analysis["reason"]
+
+    def test_open_position_levels_passed_through(self, monkeypatch) -> None:
+        from src.mt5 import connector
+
+        bars = _bars(120)
+        monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+        monkeypatch.setattr(connector, "get_ohlc", lambda symbol, tf, count: bars[:count])
+        monkeypatch.setattr(connector, "get_account_info", lambda: SimpleNamespace(equity=10000.0))
+        monkeypatch.setattr(
+            connector,
+            "get_positions",
+            lambda: [
+                self._position(1, "XAUUSD", sl=1950.0, tp=2100.0),
+                self._position(2, "EURUSD", sl=None, tp=None),
+            ],
+        )
+
+        r = self.client.get("/chart/analysis", params={"symbol": "XAUUSD"})
+        body = r.json()
+        assert body["ok"] is True
+        assert len(body["positions"]) == 1  # EURUSD filtered out
+        pos = body["positions"][0]
+        assert pos["ticket"] == 1
+        assert pos["sl"] == 1950.0
+        assert pos["tp"] == 2100.0
+
+    def test_broker_suffix_symbol_matches(self, monkeypatch) -> None:
+        from src.mt5 import connector
+
+        bars = _bars(120)
+        monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+        monkeypatch.setattr(connector, "get_ohlc", lambda symbol, tf, count: bars[:count])
+        monkeypatch.setattr(connector, "get_account_info", lambda: SimpleNamespace(equity=10000.0))
+        monkeypatch.setattr(
+            connector,
+            "get_positions",
+            lambda: [self._position(7, "XAUUSDc", sl=None, tp=None)],
+        )
+
+        r = self.client.get("/chart/analysis", params={"symbol": "XAUUSD"})
+        body = r.json()
+        assert len(body["positions"]) == 1
+        # No fabricated level: nothing placed stays null.
+        assert body["positions"][0]["sl"] is None
+        assert body["positions"][0]["tp"] is None
+
+    def test_too_few_bars_ok_false(self, monkeypatch) -> None:
+        from src.mt5 import connector
+
+        monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+        monkeypatch.setattr(connector, "get_ohlc", lambda symbol, tf, count: _bars(10))
+        r = self.client.get("/chart/analysis", params={"symbol": "XAUUSD", "bars": 50})
+        assert r.status_code == 200
+        assert r.json()["ok"] is False

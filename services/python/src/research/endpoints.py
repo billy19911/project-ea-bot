@@ -311,6 +311,8 @@ def run_experiment_backtest(experiment_id: str, payload: BacktestRequest) -> dic
 
     bars = connector.get_ohlc(symbol, timeframe, payload.bars)
     closes = [float(bar.close) for bar in bars if getattr(bar, "close", None) is not None]
+    highs = [float(bar.high) for bar in bars if getattr(bar, "high", None) is not None]
+    lows = [float(bar.low) for bar in bars if getattr(bar, "low", None) is not None]
     if len(closes) < MIN_BARS_FOR_BACKTEST:
         return {
             "ok": False,
@@ -321,7 +323,13 @@ def run_experiment_backtest(experiment_id: str, payload: BacktestRequest) -> dic
             ),
         }
 
-    result = engine.run_backtest(experiment, closes, walk_forward=True)
+    result = engine.run_backtest(
+        experiment,
+        closes,
+        walk_forward=True,
+        highs=highs if len(highs) == len(closes) else None,
+        lows=lows if len(lows) == len(closes) else None,
+    )
 
     provenance = {
         "symbol": symbol,

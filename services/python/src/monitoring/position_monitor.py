@@ -283,8 +283,14 @@ class PositionMonitor:
         swap = float(
             getattr(pos, "swap", 0.0) if not isinstance(pos, dict) else pos.get("swap", 0.0)
         )
-        sl = float(getattr(pos, "sl", 0.0) if not isinstance(pos, dict) else pos.get("sl", 0.0))
-        tp = float(getattr(pos, "tp", 0.0) if not isinstance(pos, dict) else pos.get("tp", 0.0))
+        # Schema reports None when no level is placed; PositionSnapshot keeps
+        # its documented 0.0-if-unset convention for its stop/target logic.
+        sl = float(
+            (getattr(pos, "sl", 0.0) if not isinstance(pos, dict) else pos.get("sl", 0.0)) or 0.0
+        )
+        tp = float(
+            (getattr(pos, "tp", 0.0) if not isinstance(pos, dict) else pos.get("tp", 0.0)) or 0.0
+        )
 
         # Calculate PnL percentage
         position_value = entry_price * volume
