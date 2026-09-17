@@ -22,8 +22,8 @@ import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, getAuthToken } from '../lib/api';
 import styles from './AppShell.module.css';
 
-type NavKey = 'control-plane' | 'observability' | 'ai-control' | 'strategy' | 'research' | 'settings';
-type IconName = 'grid' | 'activity' | 'cpu' | 'trend' | 'flask' | 'sliders';
+type NavKey = 'control-plane' | 'observability' | 'ai-control' | 'strategy' | 'research' | 'settings' | 'login';
+type IconName = 'grid' | 'activity' | 'cpu' | 'trend' | 'flask' | 'sliders' | 'key';
 type AccountMode = 'LIVE' | 'DEMO' | 'CONTEST';
 
 type TerminalState = { label: string; running: boolean; armed: boolean };
@@ -50,7 +50,10 @@ const NAV_GROUPS: { label: string; items: { key: NavKey; label: string; href: st
   },
   {
     label: 'Sistem',
-    items: [{ key: 'settings', label: 'Pengaturan', href: '/settings', icon: 'sliders' }],
+    items: [
+      { key: 'settings', label: 'Pengaturan', href: '/settings', icon: 'sliders' },
+      { key: 'login', label: 'Masuk', href: '/login', icon: 'key' },
+    ],
   },
 ];
 
@@ -95,6 +98,12 @@ function Icon({ name }: { name: IconName }) {
           <path d="M1 14h6M9 8h6M17 16h6" />
         </>
       )}
+      {name === 'key' && (
+        <>
+          <circle cx="7.5" cy="15.5" r="4.5" />
+          <path d="M10.7 12.3L21 2M15 7l3 3M18 4l3 3" />
+        </>
+      )}
     </svg>
   );
 }
@@ -126,7 +135,6 @@ export default function AppShell({
   const [terminal, setTerminal] = useState<TerminalState | null>(null);
   const [terminalKnown, setTerminalKnown] = useState(false);
   const [account, setAccount] = useState<AccountState | null>(null);
-  const [accountKnown, setAccountKnown] = useState(false);
   const [needsToken, setNeedsToken] = useState(false);
 
   useEffect(() => {
@@ -168,7 +176,6 @@ export default function AppShell({
         if (res.ok) {
           const data = await res.json();
           if (!cancelled) {
-            setAccountKnown(true);
             setAccount({
               login: typeof data?.login === 'number' ? data.login : null,
               server: typeof data?.server === 'string' ? data.server : '',
@@ -239,16 +246,15 @@ export default function AppShell({
                     </span>
                   )}
                 </div>
-              ) : accountKnown ? (
-                <div className={styles.accountHint}>Info akun tidak tersedia.</div>
               ) : (
-                <div className={styles.accountHint}>Jalankan token.bat untuk info akun.</div>
+                <div className={styles.accountHint}>Info akun tidak tersedia.</div>
               )}
             </div>
           ) : needsToken ? (
             <div className={styles.accountHint}>
-              Butuh token — jalankan <code>token.bat</code> lalu set <code>ea-bot-token</code> di
-              console browser.
+              <Link href="/login" className={styles.loginLink}>
+                Masuk untuk melihat akun MT5 →
+              </Link>
             </div>
           ) : terminalKnown ? (
             <div className={styles.accountHint}>MT5 tidak terdeteksi.</div>

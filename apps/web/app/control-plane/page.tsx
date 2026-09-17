@@ -52,6 +52,33 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'learning', label: 'Analitik Learning' },
 ];
 
+// Tab dikelompokkan (UI/UX ide #4): 16 tab datar terlalu bising. Grup
+// mengurangi beban visual tanpa menghapus satu pun tab — semua tetap
+// dapat dijangkau dalam dua klik. Label memakai istilah yang dipakai
+// operator sehari-hari.
+const TAB_GROUPS: { label: string; tabs: Tab[] }[] = [
+  { label: 'Ringkasan', tabs: ['overview', 'health', 'audit'] },
+  { label: 'Trading', tabs: ['trading', 'positions', 'market'] },
+  { label: 'Organisasi AI', tabs: ['organization', 'tasks', 'decisions', 'committee'] },
+  { label: 'Risiko & Eksekusi', tabs: ['risk', 'execution'] },
+  { label: 'Sistem', tabs: ['telegram', 'providers', 'models', 'learning'] },
+];
+
+const TAB_LABEL: Record<Tab, string> = TABS.reduce(
+  (acc, t) => ({ ...acc, [t.id]: t.label }),
+  {} as Record<Tab, string>,
+);
+
+const GROUP_OF: Record<Tab, string> = TAB_GROUPS.reduce(
+  (acc, g) => {
+    g.tabs.forEach((id) => {
+      acc[id] = g.label;
+    });
+    return acc;
+  },
+  {} as Record<Tab, string>,
+);
+
 function badgeClass(status: string, s: Record<string, string>): string {
   const v = status.toUpperCase();
   if (['UP', 'HEALTHY', 'ACTIVE', 'APPROVED', 'COMPLETED', 'OPEN', 'AVAILABLE', 'CONNECTED'].includes(v)) return s.success;
@@ -234,7 +261,7 @@ export default function ControlPlanePage() {
     <AppShell
       activeKey="control-plane"
       eyebrow="EA BOT / CONTROL PLANE"
-      title={TABS.find((t) => t.id === tab)?.label ?? 'Control Plane'}
+      title={TAB_LABEL[tab] ?? 'Control Plane'}
       actions={
         <>
           <span className={styles.envBadge}>{mt5Mode?.live_data ? 'LIVE DATA · READ-ONLY' : 'PAPER'}</span>
@@ -256,16 +283,31 @@ export default function ControlPlanePage() {
       }
     >
       {/* Section navigasi pindah dari sidebar ke tab strip in-page: sidebar
-          sekarang milik AppShell (navigasi antar-halaman), bukan per-section. */}
-      <div className={styles.tabs} role="tablist" aria-label="Control Plane sections">
-        {TABS.map((t) => (
+          sekarang milik AppShell (navigasi antar-halaman), bukan per-section.
+          Ide #4: 16 tab dikelompokkan — baris grup di atas, tab grup terpilih
+          di bawah. Semua tab tetap terjangkau, dua klik maksimal. */}
+      <div className={styles.groupBar} role="tablist" aria-label="Grup Control Plane">
+        {TAB_GROUPS.map((g) => (
           <button
-            key={t.id}
-            className={`${styles.tab} ${tab === t.id ? styles.tabActive : ''}`}
-            onClick={() => setTab(t.id)}
-            aria-pressed={tab === t.id}
+            key={g.label}
+            className={`${styles.groupBtn} ${GROUP_OF[tab] === g.label ? styles.groupActive : ''}`}
+            onClick={() => setTab(g.tabs[0])}
+            aria-pressed={GROUP_OF[tab] === g.label}
           >
-            {t.label}
+            {g.label}
+            <span className={styles.groupCount}>{g.tabs.length}</span>
+          </button>
+        ))}
+      </div>
+      <div className={styles.tabs} role="tablist" aria-label="Section Control Plane">
+        {(TAB_GROUPS.find((g) => g.label === GROUP_OF[tab])?.tabs ?? []).map((id) => (
+          <button
+            key={id}
+            className={`${styles.tab} ${tab === id ? styles.tabActive : ''}`}
+            onClick={() => setTab(id)}
+            aria-pressed={tab === id}
+          >
+            {TAB_LABEL[id]}
           </button>
         ))}
       </div>
@@ -273,8 +315,9 @@ export default function ControlPlanePage() {
       {notice && <div className={styles.notice}>{notice}</div>}
         {!hasToken && (
           <div className={styles.notice} style={{ background: '#fffaeb', borderColor: '#fedf89', color: '#b54708' }}>
-            Belum ada token — data di bawah akan kosong. Jalankan <code>token.bat</code>, lalu set{' '}
-            <code>ea-bot-token</code> di console browser dan muat ulang.
+            Belum ada token — data di bawah akan kosong. Buka{' '}
+            <a href="/login" style={{ color: 'inherit', fontWeight: 600 }}>halaman Masuk</a> untuk
+            menyiapkan token.
           </div>
         )}
         {cycle && (
@@ -926,9 +969,36 @@ function TerminalPanel({
   const s = styles;
   const [busy, setBusy] = useState(false);
   const [probing, setProbing] = useState(false);
-  const list = terminals?.terminals ?? [];
+  // Ide #5: sembunyikan terminal STOPPED secara default (biasanya 7 dari 9
+  // entri hanya noise). Pilihan disimpan di localStorage agar tidak reset
+  // setiap muat ulang. Terminal terpilih selalu tampil apa pun filternya.
+  const [showStopped, setShowStopped] = useState(false);
+
+  useEffect(() => {
+    try {
+      setShowStopped(localStorage.getItem('ea-bot-show-stopped') === '1');
+    } catch {
+      // localStorage tidak tersedia — tetap default tersembunyi.
+    }
+  }, []);
+
+  const toggleStopped = () => {
+    setShowStopped((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('ea-bot-show-stopped', next ? '1' : '0');
+      } catch {
+        // abaikan
+      }
+      return next;
+    });
+  };
+
+  const all = terminals?.terminals ?? [];
+  const list = showStopped ? all : all.filter((t) => t.running || t.selected);
+  const hiddenCount = all.length - list.length;
   const armed = terminals?.execution_armed === true;
-  const selected = list.find((t) => t.selected);
+  const selected = all.find((t) => t.selected);
   const probedAt = terminals?.accounts_probed_at ?? null;
 
   const post = async (path: string, body: Record<string, unknown>, okMsg: string) => {
@@ -993,6 +1063,18 @@ function TerminalPanel({
         ) : (
           <span className={`${s.badge} ${s.muted}`}>eksekusi OFF</span>
         )}
+        <button
+          className={s.tab}
+          style={{ marginLeft: 'auto' }}
+          onClick={toggleStopped}
+          title={
+            showStopped
+              ? 'Sembunyikan terminal yang tidak berjalan'
+              : 'Tampilkan juga terminal yang tidak berjalan'
+          }
+        >
+          {showStopped ? 'Sembunyikan nonaktif' : `Tampilkan nonaktif${hiddenCount ? ` (${hiddenCount})` : ''}`}
+        </button>
       </h2>
       {list.length === 0 ? (
         <div className={s.empty}>

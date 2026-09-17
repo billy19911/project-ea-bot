@@ -322,3 +322,14 @@
     padding: 18px;
   }
 }
+
+.loginLink {
+  color: var(--sidebar-text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.loginLink:hover {
+  text-decoration: underline;
+}

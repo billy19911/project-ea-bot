@@ -2,6 +2,15 @@
 Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
+### Added — UI/UX Ide #3, #4, #5: Masuk, Tab Bergrup, Filter Terminal
+
+Tiga perbaikan UI yang dikerjakan bertahap dari daftar ide yang dipilih user
+(1,3,4,5,6,7,8,9). Tanpa dependency baru, tanpa menyentuh logika safety.
+
+- **#3 Halaman Masuk (`apps/web/app/login/page.tsx` + `login.module.css`)**: menggantikan alur manual "jalankan token.bat → buka DevTools → tempel localStorage". Dua jalur: tempel token, atau buat token dev sekali klik (`POST /auth/token`, sama seperti token.bat). **Token diverifikasi ke `/mt5/terminals` sebelum disimpan** — token salah (401) tidak pernah masuk localStorage. Backend auth tidak diubah. Sidebar AppShell dapat menu "Masuk" + ikon `key`; footer yang butuh token kini menaut ke `/login` alih-alih menyuruh buka console.
+- **#4 Tab Control Plane bergrup**: 16 tab datar → 5 grup (Ringkasan, Trading, Organisasi AI, Risiko & Eksekusi, Sistem) dengan baris tab kontekstual di bawahnya. Semua tab tetap terjangkau (maksimal dua klik), tidak ada yang dihapus. Judul halaman mengikuti tab aktif.
+- **#5 Filter terminal nonaktif**: terminal STOPPED disembunyikan secara default (9 terminal → 2 yang berjalan), dengan tombol "Tampilkan nonaktif (N)" dan pilihan tersimpan di localStorage. Terminal terpilih selalu tampil.
+
 ### Changed — UI/UX Fase 4: 5 Halaman Dirapikan (anti-slop)
 
 Rapikan semua halaman agar konsisten: bahasa Indonesia untuk label/aksi
