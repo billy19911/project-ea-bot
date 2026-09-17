@@ -32,6 +32,7 @@ type ModelsState = { models: AiModel[]; source: SourceState };
 
 type Knob = {
   key: string;
+  kind: string;
   value: number;
   minimum: number;
   maximum: number;
@@ -228,23 +229,42 @@ export default function SettingsPage() {
               {loadState === 'ready' && payload && (
                 <>
                   <div className={styles.formGrid}>
-                    {payload.writable.map((knob) => (
-                      <label className={styles.field} key={knob.key}>
-                        <span>{knob.key}</span>
-                        <input
-                          type="number"
-                          min={knob.minimum}
-                          max={knob.maximum}
-                          step={knob.key.includes('interval') ? '0.1' : '1'}
-                          value={draft[knob.key] ?? String(knob.value)}
-                          onChange={(e) => setDraft((d) => ({ ...d, [knob.key]: e.target.value }))}
-                        />
-                        <small className={styles.fieldHint}>
-                          {knob.description} Rentang {knob.minimum}–{knob.maximum} · dipakai oleh{' '}
-                          <code>{knob.applied_to}</code>
-                        </small>
-                      </label>
-                    ))}
+                    {payload.writable.map((knob) =>
+                      knob.kind === 'bool' ? (
+                        <label className={styles.field} key={knob.key}>
+                          <span>
+                            <input
+                              type="checkbox"
+                              checked={(draft[knob.key] ?? String(knob.value)) === '1'}
+                              onChange={(e) =>
+                                setDraft((d) => ({ ...d, [knob.key]: e.target.checked ? '1' : '0' }))
+                              }
+                            />{' '}
+                            {knob.key}
+                          </span>
+                          <small className={styles.fieldHint}>
+                            {knob.description} Default {knob.default === 1 ? 'AKTIF' : 'NONAKTIF'} · dibaca oleh{' '}
+                            <code>{knob.applied_to}</code>
+                          </small>
+                        </label>
+                      ) : (
+                        <label className={styles.field} key={knob.key}>
+                          <span>{knob.key}</span>
+                          <input
+                            type="number"
+                            min={knob.minimum}
+                            max={knob.maximum}
+                            step={knob.key.includes('interval') ? '0.1' : '1'}
+                            value={draft[knob.key] ?? String(knob.value)}
+                            onChange={(e) => setDraft((d) => ({ ...d, [knob.key]: e.target.value }))}
+                          />
+                          <small className={styles.fieldHint}>
+                            {knob.description} Rentang {knob.minimum}–{knob.maximum} · dipakai oleh{' '}
+                            <code>{knob.applied_to}</code>
+                          </small>
+                        </label>
+                      )
+                    )}
                   </div>
                   <div className={styles.formFooter}>
                     <span>Disimpan ke layanan Python dan langsung diterapkan tanpa restart.</span>

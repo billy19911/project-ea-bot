@@ -42,6 +42,7 @@ $nodePort = EnvOr 'PORT' '3001'
 $pyUrl    = EnvOr 'PYTHON_SERVICE_URL' 'http://127.0.0.1:8000'
 $mt5Live  = EnvOr 'MT5_LIVE_DATA' 'true'
 $nineUrl  = EnvOr 'NINE_ROUTER_BASE_URL' 'http://127.0.0.1:20128/v1'
+$nineKey  = EnvOr 'NINE_ROUTER_API_KEY' ''
 
 if (-not $jwt) {
   $bytes = New-Object byte[] 24
@@ -85,6 +86,7 @@ if (Test-Port 8000) {
   if (-not (Test-Path $pyExe)) { Fail "      venv tidak ditemukan: $pyExe"; exit 1 }
   $env:MT5_LIVE_DATA = $mt5Live
   $env:NINE_ROUTER_BASE_URL = $nineUrl
+  if ($nineKey) { $env:NINE_ROUTER_API_KEY = $nineKey }
   Start-Process -FilePath $pyExe `
     -ArgumentList '-m', 'uvicorn', 'src.main:app', '--host', '127.0.0.1', '--port', '8000' `
     -WorkingDirectory $pyDir -WindowStyle Hidden `

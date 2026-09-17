@@ -15,6 +15,8 @@ Wired knobs
   (``orchestration.scheduler``). Must stay >= 0.1s so the loop cannot spin.
 * ``trend_sample_interval`` — seconds between trend-chart samples
   (``observability.sampler.TrendSampler``). Clamped to 2–300s.
+* ``llm_advisor_enabled`` — opt-in switch for the LLM advisor
+  (``llm.advisor.LLMAdvisor``). Default OFF; no tokens are spent until enabled.
 
 Deliberately NOT here
 ---------------------
@@ -56,6 +58,12 @@ class Knob:
 
     def coerce(self, raw: Any) -> float:
         """Validate and coerce ``raw``; raises ``ValueError`` when invalid."""
+        if self.kind == "bool":
+            if isinstance(raw, bool):
+                return 1.0 if raw else 0.0
+            if raw in (0, 1, "0", "1"):
+                return float(int(raw))
+            raise ValueError(f"{self.key}: harus true/false")
         if isinstance(raw, bool):
             raise ValueError(f"{self.key}: nilai boolean tidak valid")
         if self.kind == "int":
@@ -97,6 +105,18 @@ KNOBS: tuple[Knob, ...] = (
         default=1.0,
         description="Jeda antar-poll scheduler (detik).",
         applied_to="Scheduler.poll_interval",
+    ),
+    Knob(
+        key="llm_advisor_enabled",
+        kind="bool",
+        minimum=0,
+        maximum=1,
+        default=0,
+        description=(
+            "Izinkan panggilan LLM 9Router (mode penasihat). Default OFF — "
+            "tidak ada token terpakai sampai diaktifkan."
+        ),
+        applied_to="LLMAdvisor.enabled",
     ),
     Knob(
         key="trend_sample_interval",
@@ -187,6 +207,7 @@ class RuntimeSettingsStore:
         return [
             {
                 "key": k.key,
+                "kind": k.kind,
                 "value": current.get(k.key, k.default),
                 "minimum": k.minimum,
                 "maximum": k.maximum,

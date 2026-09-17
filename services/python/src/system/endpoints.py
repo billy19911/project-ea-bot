@@ -138,6 +138,42 @@ async def ai_models() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+class AdvisorRequest(BaseModel):
+    """One advisory call: role + real market context."""
+
+    role: str = "market"
+    symbol: str | None = None
+    timeframe: str | None = None
+    bid: float | None = None
+    ask: float | None = None
+    spread_pips: float | None = None
+    trend: str | None = None
+    note: str | None = None
+
+
+@router.get("/ai/advisor/status", summary="LLM advisor guardrail + usage status")
+async def ai_advisor_status() -> dict[str, Any]:
+    """Report whether the advisor is enabled, its caps, and REAL usage totals."""
+    from ..llm.advisor import get_llm_advisor
+
+    return {"ok": True, **get_llm_advisor().status()}
+
+
+@router.post("/ai/advisor/advise", summary="Ask the guardrailed LLM advisor")
+async def ai_advisor_advise(payload: AdvisorRequest) -> dict[str, Any]:
+    """Run one advisory analysis. Advisory-only: nothing consumes the output.
+
+    Guardrails are fail-closed and reported per call (enabled, budget, data,
+    caps). When any gate refuses, ``ok: false`` carries the human-readable
+    reason — the UI shows it verbatim.
+    """
+    from ..llm.advisor import get_llm_advisor
+
+    market = payload.model_dump(exclude_none=True, exclude={"role"})
+    result = get_llm_advisor().advise(payload.role, market)
+    return result.to_dict()
+
+
 @router.get("/telegram/status", summary="Telegram gateway configuration state")
 async def telegram_status() -> dict[str, Any]:
     """Return Telegram configuration state without requiring a live bot."""
@@ -221,6 +257,7 @@ class SettingsPatch(BaseModel):
     supervisor_token_budget: int | None = None
     scheduler_poll_interval: float | None = None
     trend_sample_interval: float | None = None
+    llm_advisor_enabled: bool | None = None
 
 
 def _apply_to_runtime(values: dict[str, float]) -> dict[str, Any]:
@@ -247,6 +284,12 @@ def _apply_to_runtime(values: dict[str, float]) -> dict[str, Any]:
         sampler = get_trend_sampler()
         sampler.interval = float(values["trend_sample_interval"])
         applied["trend_sample_interval"] = sampler.interval
+    if "llm_advisor_enabled" in values:
+        # The advisor reads the store directly on every call, so the value is
+        # already live; report it so the UI can confirm what was applied.
+        from ..llm.advisor import get_llm_advisor
+
+        applied["llm_advisor_enabled"] = get_llm_advisor().status()["enabled"]
     return applied
 
 

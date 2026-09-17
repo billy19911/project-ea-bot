@@ -3,6 +3,18 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — UI/UX Ide #1: Penasihat LLM (9Router) dengan Guardrail Fail-Closed
+- **Advisory-only**: LLM TIDAK menyentuh pipeline trading — keluaran hanya teks untuk manusia, tidak ada yang mengonsumsinya otomatis.
+- **Guardrail berlapis (fail-closed, urut dari termurah)**: (1) knob `llm_advisor_enabled` default NONAKTIF — nol token sampai operator opt-in; (2) budget token lewat `SupervisorAgent.check_token_budget` NYATA (budget sama dengan yang di-edit di Pengaturan); (3) ketersediaan data pasar nyata; (4) batas keras `max_tokens=512` + timeout 30 dtk.
+- **Pemilihan model jujur**: daftar model live gateway diambil langsung (read-only, nol token); hanya model `*free` yang dipilih — model berbayar tidak pernah dipilih diam-diam. Model terverifikasi: `codebuddy-deepseekv4.1flashfree` + fallback `codebuddy-free`.
+- **Endpoint**: `GET /ai/advisor/status`, `POST /ai/advisor/advise` (Python) + proxy Node + panel UI di AI Control (status guardrail, form analisis, usage nyata).
+- **Usage nyata**: setiap panggilan mencatat model, token, biaya, latency dari respons gateway — bukan placeholder. Fallback rule-based (upstream down) DIFLAG `is_fallback` supaya UI jujur menyatakan teks bukan keluaran model.
+- **Terverifikasi end-to-end**: panggilan LLM nyata via UI → 232 token asli (153 prompt + 79 completion), biaya $0, latency 1,58 dtk, budget ter-commit 1200/8000. Knob baru muncul di Pengaturan sebagai checkbox dengan label jujur.
+- **Test**: 13 test baru (`test_llm_advisor.py`) — guardrail default-OFF, budget fail-closed, peran invalid ditolak, data kosong ditolak, fallback diflag, pemilihan model live. Suite Python **1257 passed**.
+- **Catatan**: `KillSwitch` ditemukan TIDAK ter-wire ke runtime mana pun (hanya dipakai `circuit_breaker` yang juga hanya dipakai test) — memakainya sebagai guardrail akan jadi teater; diganti dengan knob opt-in yang benar-benar mengontrol perilaku.
+
+
+
 ### Added — UI/UX Ide #6: Pusat Riset Tersambung (ResearchEngine nyata)
 - **Temuan:** `ResearchEngine` (583 baris) sudah lengkap — hipotesis, versi strategi, eksperimen, backtest deterministik (EMA crossover dengan `trading.indicators.ema` NYATA), walk-forward 70/30, perbandingan — tapi **terisolasi total** (nol pemakai). Halaman `/` hanya teater: baris eksperimen hardcoded kosong + tombol backtest tak tersambung.
 - **Router baru** `src/research/endpoints.py`: `/research/overview`, `/research/experiments` (GET/POST), `/research/experiments/{id}` (detail + provenance + trades preview), `/research/experiments/{id}/backtest`, `/research/compare`.

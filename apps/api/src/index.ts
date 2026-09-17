@@ -655,6 +655,17 @@ app.get('/reports/daily', async (req, res) => {
   await sendProxy(res, `/reports/daily?days=${days}`, undefined, req);
 });
 
+// LLM Advisor (UI/UX ide #1): advisory-only 9Router access with fail-closed
+// guardrails enforced in Python. The POST preserves Python's validation
+// detail via sendPostProxy.
+app.get('/ai/advisor/status', async (req, res) => {
+  await sendProxy(res, '/ai/advisor/status', undefined, req);
+});
+
+app.post('/ai/advisor/advise', authenticate, async (req, res) => {
+  await sendPostProxy(res, '/ai/advisor/advise', req, req.body ?? {});
+});
+
 // Research Center (UI/UX ide #6): wires the existing Python ResearchEngine.
 // GET routes proxy straight through; POST routes preserve Python's 4xx
 // validation detail (sendPostProxy) so the UI can show honest messages.

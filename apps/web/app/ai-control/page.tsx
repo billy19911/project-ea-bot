@@ -71,6 +71,26 @@ function SourceBadge({ source }: { source: SourceState | undefined }) {
   );
 }
 
+type AdvisorStatus = {
+  enabled: boolean;
+  calls: number;
+  refusals: number;
+  limits: { max_tokens: number; timeout_s: number };
+  usage: Record<string, number>;
+  budget: { available: boolean; token_budget?: number; token_used?: number };
+  checked_at?: string;
+};
+
+type AdvisorResult = {
+  ok: boolean;
+  reason?: string;
+  content?: string;
+  model?: string;
+  is_fallback?: boolean;
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number; cost_usd: number; latency_s: number };
+  guardrails?: Record<string, unknown>;
+};
+
 export default function AIControlPage() {
   const [agents, setAgents] = useState<AgentNode[]>([]);
   const activity: ActivityLog[] = [];
@@ -80,6 +100,12 @@ export default function AIControlPage() {
   const [supervisorStatus, setSupervisorStatus] = useState<SupervisorStatus | null>(null);
   const [source, setSource] = useState<SourceState>('unavailable');
   const [loading, setLoading] = useState(true);
+  // LLM Advisor (ide #1) — advisory-only, guardrail fail-closed.
+  const [advisorStatus, setAdvisorStatus] = useState<AdvisorStatus | null>(null);
+  const [advisorRole, setAdvisorRole] = useState('market');
+  const [advisorSymbol, setAdvisorSymbol] = useState('XAUUSD');
+  const [advisorBusy, setAdvisorBusy] = useState(false);
+  const [advisorResult, setAdvisorResult] = useState<AdvisorResult | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -98,6 +124,17 @@ export default function AIControlPage() {
       } catch (err) {
         console.error('Failed to fetch supervisor status:', err);
         setSource('unavailable');
+      }
+
+      try {
+        const res = await apiFetch(`/ai/advisor/status`);
+        if (res.ok) {
+          setAdvisorStatus((await res.json()) as AdvisorStatus);
+        } else {
+          setAdvisorStatus(null);
+        }
+      } catch {
+        setAdvisorStatus(null);
       }
 
       try {
@@ -263,6 +300,118 @@ export default function AIControlPage() {
               </div>
             </section>
           )}
+
+          {/* LLM Advisor (ide #1) — advisory-only, guardrail fail-closed */}
+          <section className={styles.card}>
+            <h2>Penasihat LLM (9Router)</h2>
+            {advisorStatus ? (
+              <div className={styles.modelSummary}>
+                <div>
+                  <small>Status</small>
+                  <strong className={advisorStatus.enabled ? styles.statusActive : undefined}>
+                    {advisorStatus.enabled ? 'Aktif' : 'Nonaktif (opt-in)'}
+                  </strong>
+                </div>
+                <div><small>Panggilan</small><strong>{advisorStatus.calls}</strong></div>
+                <div><small>Ditolak guardrail</small><strong>{advisorStatus.refusals}</strong></div>
+                <div>
+                  <small>Budget token</small>
+                  <strong>
+                    {advisorStatus.budget.available
+                      ? `${advisorStatus.budget.token_used ?? 0} / ${advisorStatus.budget.token_budget ?? 0}`
+                      : '—'}
+                  </strong>
+                </div>
+                <div><small>Batas per panggilan</small><strong>{advisorStatus.limits.max_tokens} token · {advisorStatus.limits.timeout_s}s</strong></div>
+              </div>
+            ) : (
+              <div className={styles.empty}>
+                Status penasihat tidak tersedia — API belum mengembalikan data. Cek token lalu muat ulang.
+              </div>
+            )}
+
+            <div className={styles.advisorForm}>
+              <label>
+                Peran
+                <select value={advisorRole} onChange={(e) => setAdvisorRole(e.target.value)}>
+                  <option value="market">market</option>
+                  <option value="risk">risk</option>
+                  <option value="research">research</option>
+                </select>
+              </label>
+              <label>
+                Simbol
+                <input value={advisorSymbol} onChange={(e) => setAdvisorSymbol(e.target.value)} />
+              </label>
+              <button
+                type="button"
+                className={styles.advisorRun}
+                disabled={advisorBusy}
+                onClick={async () => {
+                  setAdvisorBusy(true);
+                  setAdvisorResult(null);
+                  try {
+                    // Ambil harga nyata dulu (read-only) supaya prompt berisi data
+                    // pasar sungguhan; bila tidak ada, guardrail data menolak.
+                    let market: Record<string, unknown> = { symbol: advisorSymbol.trim().toUpperCase() };
+                    try {
+                      const symRes = await apiFetch(`/market/overview`);
+                      if (symRes.ok) {
+                        const data = await symRes.json();
+                        const row = Array.isArray(data.symbols)
+                          ? data.symbols.find((s: { symbol?: string }) => s.symbol === advisorSymbol.trim().toUpperCase())
+                          : null;
+                        if (row) market = { ...market, bid: row.bid, ask: row.ask, spread_pips: row.spread, trend: row.trend, timeframe: 'H1' };
+                      }
+                    } catch {
+                      // tetap lanjut — guardrail data akan menolak bila kosong
+                    }
+                    const res = await apiFetch(`/ai/advisor/advise`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ role: advisorRole, ...market }),
+                    });
+                    setAdvisorResult((await res.json()) as AdvisorResult);
+                  } catch {
+                    setAdvisorResult({ ok: false, reason: 'Permintaan gagal — API tidak terjangkau.' });
+                  } finally {
+                    setAdvisorBusy(false);
+                  }
+                }}
+              >
+                {advisorBusy ? 'Meminta…' : 'Minta analisis'}
+              </button>
+            </div>
+
+            {advisorResult && (
+              advisorResult.ok ? (
+                <div className={styles.advisorOutput}>
+                  <div className={styles.advisorMeta}>
+                    <span>Model: <code>{advisorResult.model || '—'}</code></span>
+                    {advisorResult.is_fallback && (
+                      <span className={styles.badge + ' ' + styles.warning}>
+                        Fallback rule-based — bukan keluaran model
+                      </span>
+                    )}
+                    <span>{advisorResult.usage?.total_tokens ?? 0} token · ${(advisorResult.usage?.cost_usd ?? 0).toFixed(4)} · {(advisorResult.usage?.latency_s ?? 0).toFixed(2)}s</span>
+                  </div>
+                  <pre className={styles.advisorText}>{advisorResult.content}</pre>
+                  <p className={styles.advisorNote}>
+                    Saran untuk manusia — tidak ada order yang dibuat dan tidak ada yang mengonsumsi keluaran ini secara otomatis.
+                  </p>
+                </div>
+              ) : (
+                <div className={styles.empty}>
+                  Ditolak: {advisorResult.reason}
+                  {advisorResult.guardrails && (
+                    <small>
+                      {' '}Guardrail: aktif={String(advisorResult.guardrails.enabled)} · budget={String(advisorResult.guardrails.budget_ok)} · data={String(advisorResult.guardrails.data_ok)}
+                    </small>
+                  )}
+                </div>
+              )
+            )}
+          </section>
 
           {/* Model Usage */}
           <section className={styles.card}>
