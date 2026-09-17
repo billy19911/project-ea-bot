@@ -276,6 +276,16 @@
     grid-template-columns: 1fr;
   }
 
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .actions {
+    flex-wrap: wrap;
+    flex-shrink: 1;
+    width: 100%;
+  }
+
   .sidebar {
     position: static;
     height: auto;

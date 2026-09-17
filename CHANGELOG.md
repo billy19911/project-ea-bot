@@ -3,6 +3,19 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Fase 1 "Pasar": Chart Candlestick Multi-Timeframe (nol dependency)
+- **Halaman baru `/market`** ("Pasar") di grup Operasional: chart candlestick SVG inline — nol library chart baru, konsisten dengan pola `TrendChart` (ide #8).
+- **Semua timeframe** M1/M5/M15/M30/H1/H4/D1/W1/MN1 dari bar NYATA MT5 read-only (`mt5.connector.get_ohlc`), 100–500 bar, simbol bebas (chip + input manual).
+- **Overlay indikator nyata**: EMA 20/50, Bollinger 20; sub-panel RSI 14 (garis 30/70) + MACD 12/26/9 (line/signal/histogram). Semua dihitung `src/trading/indicators.py` yang SAMA dipakai engine — tidak ada perhitungan duplikat yang bisa drift.
+- **Seri indikator baru** di `indicators.py`: `ema_series`, `sma_series`, `rsi_series`, `macd_series`, `bollinger_series` — None-aware, nilai terakhir TERBUKTI sama dengan fungsi lama (dikunci test).
+- **Aturan jujur**: warm-up indikator = `null` → garis putus (bukan 0 palsu); MT5 tidak live → `ok:false` + alasan, bukan chart karangan; tooltip OHLC menampilkan nilai bar yang benar-benar di-hover.
+- **Endpoint**: `GET /chart/candles` (Python, validasi simbol/timeframe/period) + proxy Node.
+- **Test**: 29 test baru (`test_indicator_series.py` 14, `test_charting.py` 15). Suite Python **1289 passed**; Node 45/45; build web+API sukses.
+- **Terverifikasi end-to-end** (browser, data nyata): XAUUSD H1 120 bar (10–18 Sep 2026), 300 candle ter-render, EMA/RSI/MACD terhitung, tooltip hover menampilkan OHLC + EMA 20/50 + RSI + MACD nyata; geometri 0 elemen keluar viewBox, 9 tombol timeframe 1 baris, tanpa overflow.
+
+### Fixed — Tabel "Penggunaan model LLM" menampilkan baris palsu
+- Tabel di AI Control sebelumnya membaca daftar registry (termasuk model yang belum pernah dipanggil) dengan angka nol — terbaca seolah "usage". Sekarang dibangun dari counter nyata per model di `LLMAdvisor` (`model_usage`): hanya model yang benar-benar dipanggil yang tampil; belum ada panggilan = empty state jujur.
+
 ### Added — UI/UX Ide #1: Penasihat LLM (9Router) dengan Guardrail Fail-Closed
 - **Advisory-only**: LLM TIDAK menyentuh pipeline trading — keluaran hanya teks untuk manusia, tidak ada yang mengonsumsinya otomatis.
 - **Guardrail berlapis (fail-closed, urut dari termurah)**: (1) knob `llm_advisor_enabled` default NONAKTIF — nol token sampai operator opt-in; (2) budget token lewat `SupervisorAgent.check_token_budget` NYATA (budget sama dengan yang di-edit di Pengaturan); (3) ketersediaan data pasar nyata; (4) batas keras `max_tokens=512` + timeout 30 dtk.

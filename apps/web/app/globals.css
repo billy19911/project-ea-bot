@@ -208,3 +208,92 @@ td {
   color: var(--text-muted);
   text-align: center;
 }
+
+/* ── PriceChart (Fase 1 "Pasar") ──────────────────────────────────────────
+   Chart candlestick SVG inline; nol dependency. Warna mengikuti token
+   semantik; garis indikator warm-up = putus (bukan nilai 0 palsu). */
+.priceChartWrap {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 10px 12px 6px;
+}
+.priceChartSvg {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+}
+.priceChartEmpty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  padding: 22px 16px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.priceChartEmpty strong { color: var(--text-secondary); }
+
+/* Grid & sumbu */
+.pcGrid { stroke: var(--border); stroke-width: 1; }
+.pcZeroLine { stroke: var(--border-strong); stroke-width: 1; }
+.pcAxisLabel {
+  fill: var(--text-muted);
+  font-size: 10.5px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+.pcTimeLabel { fill: var(--text-muted); font-size: 10.5px; }
+.pcPanelTitle { fill: var(--text-secondary); font-size: 10.5px; font-weight: 600; }
+
+/* Candle */
+.pcWick { stroke: currentColor; }
+.pcBody { fill: currentColor; }
+.pcUp { color: var(--success); }
+.pcDown { color: var(--danger); }
+.pcUpText { color: var(--success); }
+.pcDownText { color: var(--danger); }
+
+/* Overlay indikator */
+.pcEmaFast { stroke: var(--primary); stroke-width: 1.6; }
+.pcEmaSlow { stroke: var(--warning); stroke-width: 1.6; }
+.pcBbEdge { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+.pcBbMid { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 5 4; }
+.pcRsiLine { stroke: var(--primary); stroke-width: 1.6; }
+.pcBand70 { stroke: var(--danger-border); stroke-width: 1; stroke-dasharray: 4 4; }
+.pcBand30 { stroke: var(--success-border); stroke-width: 1; stroke-dasharray: 4 4; }
+.pcMacdLine { stroke: var(--primary); stroke-width: 1.6; }
+.pcMacdSignal { stroke: var(--warning); stroke-width: 1.6; }
+.pcHistUp { fill: var(--success); opacity: 0.55; }
+.pcHistDown { fill: var(--danger); opacity: 0.55; }
+.pcCrosshair { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
+
+/* Tooltip */
+.pcTooltip {
+  position: absolute;
+  top: 14px;
+  left: 20px;
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(16, 24, 40, 0.08);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 168px;
+}
+.pcTtTime { font-weight: 600; color: var(--text); margin-bottom: 4px; }
+.pcTtGrid {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 1px 10px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+.pcTtGrid b { color: var(--text); font-weight: 600; text-align: right; }
+.pcTtInd { margin-top: 4px; font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
+

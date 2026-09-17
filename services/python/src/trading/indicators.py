@@ -20,10 +20,13 @@ __all__ = [
     "StochasticResult",
     "atr",
     "adx",
+    "bollinger_series",
     "ema",
     "ema_series",
     "macd",
+    "macd_series",
     "rsi",
+    "rsi_series",
     "sma",
     "stochastic",
     "true_range",
@@ -494,3 +497,116 @@ def stochastic(
     d_window = k_values[-smooth:]
     d = sum(d_window) / len(d_window)
     return StochasticResult(k=k, d=d)
+
+
+# ---------------------------------------------------------------------------
+# Series variants — used by the charting layer (Fase 1 "Pasar").
+#
+# The latest-value functions above stay untouched for the trading engine.
+# These return full arrays aligned 1:1 with the input bars; positions where an
+# indicator is not yet defined are ``None`` (never a fake 0.0) so the chart can
+# draw a gap instead of a false line.
+# ---------------------------------------------------------------------------
+
+
+def rsi_series(prices: list[float], period: int = 14) -> list[float | None]:
+    """Full RSI series (Wilder's smoothing), aligned with *prices*.
+
+    Entries before enough data exists are ``None``.
+    """
+    if period < 1:
+        raise ValueError("period must be >= 1")
+    n = len(prices)
+    result: list[float | None] = [None] * n
+    if n < period + 1:
+        return result
+
+    deltas = [prices[i] - prices[i - 1] for i in range(1, n)]
+    gains = [d if d > 0 else 0.0 for d in deltas]
+    losses = [-d if d < 0 else 0.0 for d in deltas]
+
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+
+    def _rsi_value(gain: float, loss: float) -> float:
+        if loss == 0.0:
+            return 100.0
+        rs = gain / loss
+        return 100.0 - (100.0 / (1.0 + rs))
+
+    result[period] = _rsi_value(avg_gain, avg_loss)
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        result[i + 1] = _rsi_value(avg_gain, avg_loss)
+    return result
+
+
+def macd_series(
+    prices: list[float],
+    fast_period: int = 12,
+    slow_period: int = 26,
+    signal_period: int = 9,
+) -> tuple[list[float | None], list[float | None], list[float | None]]:
+    """Full MACD series: ``(macd_line, signal_line, histogram)``.
+
+    Each array is aligned with *prices*; undefined positions are ``None``.
+    """
+    if fast_period < 1 or slow_period < 1 or signal_period < 1:
+        raise ValueError("periods must be >= 1")
+    if fast_period >= slow_period:
+        raise ValueError("fast_period must be < slow_period")
+
+    n = len(prices)
+    macd_out: list[float | None] = [None] * n
+    signal_out: list[float | None] = [None] * n
+    hist_out: list[float | None] = [None] * n
+
+    if n < slow_period:
+        return macd_out, signal_out, hist_out
+
+    fast_ema = ema_series(prices, fast_period)
+    slow_ema = ema_series(prices, slow_period)
+
+    macd_vals: list[float] = []
+    for i in range(slow_period - 1, n):
+        v = fast_ema[i] - slow_ema[i]
+        macd_vals.append(v)
+        macd_out[i] = v
+
+    if len(macd_vals) < signal_period:
+        return macd_out, signal_out, hist_out
+
+    signal_ema = ema_series(macd_vals, signal_period)
+    for j in range(signal_period - 1, len(macd_vals)):
+        idx = slow_period - 1 + j
+        signal_out[idx] = signal_ema[j]
+        hist_out[idx] = macd_vals[j] - signal_ema[j]
+    return macd_out, signal_out, hist_out
+
+
+def bollinger_series(
+    prices: list[float], period: int = 20, num_std: float = 2.0
+) -> tuple[list[float | None], list[float | None], list[float | None]]:
+    """Full Bollinger Bands series: ``(upper, middle, lower)``.
+
+    Each array is aligned with *prices*; undefined positions are ``None``.
+    """
+    if period < 1:
+        raise ValueError("period must be >= 1")
+    n = len(prices)
+    upper: list[float | None] = [None] * n
+    middle: list[float | None] = [None] * n
+    lower: list[float | None] = [None] * n
+    if n < period:
+        return upper, middle, lower
+
+    for i in range(period - 1, n):
+        window = prices[i - period + 1 : i + 1]
+        mid = sum(window) / period
+        variance = sum((p - mid) ** 2 for p in window) / period
+        std = math.sqrt(variance)
+        middle[i] = mid
+        upper[i] = mid + num_std * std
+        lower[i] = mid - num_std * std
+    return upper, middle, lower

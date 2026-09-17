@@ -15,7 +15,7 @@ import { validatePayload, sanitizeInput, securityHeaders, preventParameterPollut
 import { generalLimiter, authLimiter } from './middleware/rateLimiter';
 import { validateSecrets, redactSecrets } from './middleware/secrets';
 // Run 18: honest supervisor status (real uptime; no fabricated zeros).
-import { buildSupervisorStatus } from './supervisorStatus.js';
+import { buildSupervisorStatus, buildUsageRows } from './supervisorStatus.js';
 import {
   mapTradingOverview,
   mapMarketOverview,
@@ -333,11 +333,12 @@ app.get('/ai-control/status', async (req, res) => {
   const log = (req as any).log;
   log.info('ai-control.status');
 
-  const [health, scheduler, tasksResult, modelsResult] = await Promise.all([
+  const [health, scheduler, tasksResult, modelsResult, advisorResult] = await Promise.all([
     getJson<any>('/health'),
     getJson<any>('/scheduler/status'),
     getJson<any>('/tasks'),
     getJson<any>('/ai/models'),
+    getJson<any>('/ai/advisor/status'),
   ]);
 
   if (!health.ok && !scheduler.ok && !tasksResult.ok && !modelsResult.ok) {
@@ -360,9 +361,18 @@ app.get('/ai-control/status', async (req, res) => {
       }))
     : [];
 
-  const models = modelsResult.ok && Array.isArray(modelsResult.data.models)
-    ? buildSupervisorStatus({ models: modelsResult.data.models }).models
+  // Usage rows come from the LLM advisor's REAL per-model counters — only
+  // models that were actually called appear. Previously this table listed
+  // every registry model padded with hard-coded zeros, which read as a
+  // "usage" report while containing no usage data at all.
+  const registryModels = modelsResult.ok && Array.isArray(modelsResult.data.models)
+    ? modelsResult.data.models
     : [];
+  const advisorUsage =
+    advisorResult.ok && Array.isArray(advisorResult.data.model_usage)
+      ? advisorResult.data.model_usage
+      : [];
+  const models = buildUsageRows(advisorUsage, registryModels);
 
   // Run 18: assemble the supervisor block from real sources only. Unknown values
   // (token budget/usage, uptime when the Python service is down) are reported as
@@ -692,6 +702,18 @@ app.post('/research/experiments/:id/backtest', authenticate, async (req, res) =>
 
 app.post('/research/compare', authenticate, async (req, res) => {
   await sendPostProxy(res, '/research/compare', req, req.body ?? {});
+});
+
+// ── Chart (Fase 1 "Pasar"): candles + indicator series ─────────────────────
+app.get('/chart/candles', async (req, res) => {
+  const log = (req as any).log;
+  log.info('chart.candles');
+  const qs = new URLSearchParams();
+  for (const key of ['symbol', 'timeframe', 'bars', 'ema_fast', 'ema_slow']) {
+    const v = (req.query as any)[key];
+    if (v !== undefined) qs.set(key, String(v));
+  }
+  await sendProxy(res, `/chart/candles?${qs.toString()}`, undefined, req);
 });
 
 app.get('/market/overview', async (req, res) => {

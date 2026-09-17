@@ -16,6 +16,7 @@ from agents.analysts import (
 from agents.base import TechnicalAnalystAgent
 from agents.registry import agent_registry
 
+from .charting.endpoints import router as charting_router
 from .config import settings
 from .mt5 import connector
 from .mt5.endpoints import router as mt5_router
@@ -164,6 +165,7 @@ app.add_middleware(
 )
 
 app.include_router(mt5_router)
+app.include_router(charting_router)
 app.include_router(trading_router)
 app.include_router(events_router)
 app.include_router(orchestration_router)

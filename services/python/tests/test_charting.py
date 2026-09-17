@@ -1,0 +1,182 @@
+# -*- coding: utf-8 -*-
+"""Tests for the charting layer (Fase 1 "Pasar").
+
+Locks in the honesty rules of the chart payload:
+
+* candles come 1:1 from the provided bars (oldest → newest),
+* indicator warm-up positions are ``None`` — never a fabricated 0.0,
+* the overlay EMA values equal the engine's own EMA implementation,
+* the endpoint refuses invalid input and says ``ok: false`` (with a reason)
+  instead of drawing fabricated data when MT5 is not live.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+from types import SimpleNamespace
+
+import pytest
+from fastapi.testclient import TestClient
+
+from src.charting.series import build_chart_payload, ema_chart_series
+from src.main import app
+from src.trading.indicators import ema_series
+
+
+def _bars(n: int = 120) -> list[SimpleNamespace]:
+    """Deterministic OHLC bars (oldest → newest)."""
+    out = []
+    price = 2000.0
+    start = datetime(2026, 9, 1, 0, 0, 0)
+    for i in range(n):
+        price += ((i % 5) - 2) * 1.5 + 0.4
+        o = price - 0.8
+        c = price
+        h = max(o, c) + 0.6
+        low = min(o, c) - 0.6
+        out.append(
+            SimpleNamespace(
+                time=start + timedelta(hours=i),
+                open=round(o, 2),
+                high=round(h, 2),
+                low=round(low, 2),
+                close=round(c, 2),
+                volume=100.0 + i,
+            )
+        )
+    return out
+
+
+class TestEmaChartSeries:
+    def test_warmup_is_none_not_zero(self) -> None:
+        prices = [100.0 + i for i in range(30)]
+        series = ema_chart_series(prices, 10)
+        assert all(v is None for v in series[:9])
+        assert series[9] is not None
+
+    def test_matches_engine_ema_from_seed_index(self) -> None:
+        prices = [100.0 + (i % 3) for i in range(40)]
+        ours = ema_chart_series(prices, 10)
+        ref = ema_series(prices, 10)
+        for i in range(9, len(prices)):
+            assert ours[i] == pytest.approx(ref[i])
+
+    def test_insufficient_data_all_none(self) -> None:
+        assert ema_chart_series([1.0, 2.0], 10) == [None, None]
+
+
+class TestBuildChartPayload:
+    def test_candles_mirror_bars(self) -> None:
+        bars = _bars(50)
+        payload = build_chart_payload(bars, ema_fast=5, ema_slow=20)
+        assert len(payload["bars"]) == 50
+        first = payload["bars"][0]
+        assert first["open"] == bars[0].open
+        assert first["close"] == bars[0].close
+        assert first["time"] == bars[0].time.isoformat()
+
+    def test_series_aligned_with_bars(self) -> None:
+        bars = _bars(80)
+        payload = build_chart_payload(bars, ema_fast=5, ema_slow=20)
+        n = len(bars)
+        assert len(payload["overlays"]["ema_fast"]["values"]) == n
+        assert len(payload["overlays"]["ema_slow"]["values"]) == n
+        assert len(payload["overlays"]["bollinger"]["upper"]) == n
+        assert len(payload["panels"]["rsi"]["values"]) == n
+        assert len(payload["panels"]["macd"]["line"]) == n
+
+    def test_ema_values_real_not_zero_filled(self) -> None:
+        bars = _bars(60)
+        payload = build_chart_payload(bars, ema_fast=10, ema_slow=30)
+        fast = payload["overlays"]["ema_fast"]["values"]
+        # Warm-up = None (not 0.0); after warm-up real values near price range.
+        assert all(v is None for v in fast[:9])
+        assert all(v is not None and v > 100 for v in fast[9:])
+
+    def test_invalid_periods_rejected(self) -> None:
+        bars = _bars(40)
+        with pytest.raises(ValueError):
+            build_chart_payload(bars, ema_fast=0, ema_slow=20)
+        with pytest.raises(ValueError):
+            build_chart_payload(bars, ema_fast=20, ema_slow=20)
+
+    def test_optional_panels_can_be_skipped(self) -> None:
+        bars = _bars(60)
+        payload = build_chart_payload(
+            bars,
+            ema_fast=5,
+            ema_slow=20,
+            include_bollinger=False,
+            include_rsi=False,
+            include_macd=False,
+        )
+        assert payload["overlays"]["bollinger"] is None
+        assert payload["panels"]["rsi"] is None
+        assert payload["panels"]["macd"] is None
+
+
+class TestChartEndpoint:
+    def setup_method(self) -> None:
+        self.client = TestClient(app)
+
+    def test_rejects_invalid_symbol(self) -> None:
+        r = self.client.get("/chart/candles", params={"symbol": "not a symbol!"})
+        assert r.status_code == 400
+
+    def test_rejects_unknown_timeframe(self) -> None:
+        r = self.client.get("/chart/candles", params={"symbol": "XAUUSD", "timeframe": "H7"})
+        assert r.status_code == 400
+
+    def test_rejects_ema_slow_not_above_fast(self) -> None:
+        r = self.client.get(
+            "/chart/candles",
+            params={"symbol": "XAUUSD", "ema_fast": 50, "ema_slow": 20},
+        )
+        assert r.status_code == 400
+
+    def test_rejects_out_of_range_bars(self) -> None:
+        r = self.client.get("/chart/candles", params={"symbol": "XAUUSD", "bars": 5})
+        assert r.status_code == 422
+
+    def test_not_live_returns_ok_false_with_reason(self, monkeypatch) -> None:
+        from src.mt5 import connector
+
+        monkeypatch.setattr(connector, "is_live_mode", lambda: False)
+        r = self.client.get("/chart/candles", params={"symbol": "XAUUSD"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is False
+        assert "reason" in body and body["reason"]
+
+    def test_live_mode_returns_real_series(self, monkeypatch) -> None:
+        from src.mt5 import connector
+
+        bars = _bars(100)
+        monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+        monkeypatch.setattr(connector, "get_ohlc", lambda symbol, tf, count: bars[:count])
+        r = self.client.get(
+            "/chart/candles",
+            params={"symbol": "XAUUSD", "timeframe": "H1", "bars": 60},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["symbol"] == "XAUUSD"
+        assert body["timeframe"] == "H1"
+        assert len(body["bars"]) == 60
+        assert body["provenance"]["mode"] == "live-read-only"
+        assert body["provenance"]["bar_count"] == 60
+        # Series aligned; warm-up None not 0.0.
+        fast = body["overlays"]["ema_fast"]["values"]
+        assert len(fast) == 60
+        assert all(v is None for v in fast[:19])
+        assert fast[19] is not None
+
+    def test_live_mode_empty_bars_ok_false(self, monkeypatch) -> None:
+        from src.mt5 import connector
+
+        monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+        monkeypatch.setattr(connector, "get_ohlc", lambda symbol, tf, count: [])
+        r = self.client.get("/chart/candles", params={"symbol": "NOSUCHSYM"})
+        assert r.status_code == 200
+        assert r.json()["ok"] is False

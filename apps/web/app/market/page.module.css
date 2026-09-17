@@ -1,0 +1,179 @@
+/* Halaman Pasar (Fase 1) — kontrol chart + layout dense, tanpa dekorasi. */
+
+.controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.1fr) minmax(260px, 1.2fr) minmax(220px, 1fr);
+  gap: 18px;
+  align-items: start;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  margin-bottom: 12px;
+}
+
+.ctlLabel {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+/* Simbol */
+.symbolForm { display: flex; flex-direction: column; }
+.symbolRow { display: flex; gap: 8px; }
+.symbolInput {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  text-transform: uppercase;
+}
+.symbolInput:focus { outline: 2px solid var(--primary-soft); border-color: var(--primary); }
+.goBtn {
+  padding: 7px 14px;
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.goBtn:hover { background: var(--primary-hover); }
+
+.symbolChips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  cursor: pointer;
+}
+.chip:hover { border-color: var(--border-strong); color: var(--text); }
+.chipActive {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* Timeframe */
+.tfBlock { display: flex; flex-direction: column; }
+.tfRow { display: flex; flex-wrap: wrap; gap: 4px; }
+.tfBtn {
+  min-width: 40px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  cursor: pointer;
+}
+.tfBtn:hover { border-color: var(--border-strong); color: var(--text); }
+.tfActive {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.barsRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.barsRow .ctlLabel { margin-bottom: 0; }
+.barsSelect {
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+/* Indikator */
+.toggleBlock { display: flex; flex-direction: column; }
+.toggleRow { display: flex; flex-direction: column; gap: 6px; }
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.toggle input { accent-color: var(--primary); width: 14px; height: 14px; cursor: pointer; }
+
+/* Meta & status */
+.metaRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0 2px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.metaItem { white-space: nowrap; }
+
+.errorBox {
+  padding: 10px 14px;
+  border: 1px solid var(--danger-border);
+  border-radius: 9px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.loadingBox {
+  padding: 40px 16px;
+  text-align: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.refreshBtn {
+  padding: 7px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.refreshBtn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.refreshBtn:disabled { opacity: 0.6; cursor: default; }
+
+.note {
+  margin: 12px 2px 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  max-width: 900px;
+}
+
+@media (max-width: 1080px) {
+  .controls { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 720px) {
+  .controls { grid-template-columns: 1fr; }
+}

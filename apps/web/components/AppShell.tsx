@@ -22,8 +22,8 @@ import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, getAuthToken } from '../lib/api';
 import styles from './AppShell.module.css';
 
-type NavKey = 'control-plane' | 'observability' | 'ai-control' | 'strategy' | 'research' | 'settings' | 'login';
-type IconName = 'grid' | 'activity' | 'cpu' | 'trend' | 'flask' | 'sliders' | 'key';
+type NavKey = 'control-plane' | 'observability' | 'ai-control' | 'strategy' | 'research' | 'market' | 'settings' | 'login';
+type IconName = 'grid' | 'activity' | 'cpu' | 'trend' | 'flask' | 'candles' | 'sliders' | 'key';
 type AccountMode = 'LIVE' | 'DEMO' | 'CONTEST';
 
 type TerminalState = { label: string; running: boolean; armed: boolean };
@@ -34,6 +34,7 @@ const NAV_GROUPS: { label: string; items: { key: NavKey; label: string; href: st
     label: 'Operasional',
     items: [
       { key: 'control-plane', label: 'Control Plane', href: '/control-plane', icon: 'grid' },
+      { key: 'market', label: 'Pasar', href: '/market', icon: 'candles' },
       { key: 'observability', label: 'Observability', href: '/observability', icon: 'activity' },
     ],
   },
@@ -96,6 +97,13 @@ function Icon({ name }: { name: IconName }) {
         <>
           <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3" />
           <path d="M1 14h6M9 8h6M17 16h6" />
+        </>
+      )}
+      {name === 'candles' && (
+        <>
+          <path d="M7 4v3M7 17v3M17 4v3M17 15v5" />
+          <rect x="4.5" y="7" width="5" height="10" rx="0.8" />
+          <rect x="14.5" y="9" width="5" height="6" rx="0.8" />
         </>
       )}
       {name === 'key' && (
