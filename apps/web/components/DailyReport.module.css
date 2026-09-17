@@ -1,0 +1,154 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.title {
+  margin: 0 0 4px;
+  font-size: 18px;
+  color: #101828;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: #667085;
+  max-width: 640px;
+}
+
+.rangeBar {
+  display: flex;
+  gap: 6px;
+}
+
+.rangeBtn {
+  padding: 6px 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  background: #fff;
+  color: #344054;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.rangeBtn:hover {
+  background: #f9fafb;
+}
+
+.rangeActive {
+  background: #101828;
+  border-color: #101828;
+  color: #fff;
+}
+
+.accountLine {
+  font-size: 13px;
+  color: #475467;
+  padding: 10px 12px;
+  background: #f9fafb;
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+}
+
+.kpiRow {
+  display: flex;
+  gap: 28px;
+  flex-wrap: wrap;
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.kpiValue {
+  font-size: 20px;
+  font-weight: 700;
+  color: #101828;
+}
+
+.kpiLabel {
+  font-size: 12px;
+  color: #667085;
+}
+
+.positive {
+  color: #027a48;
+}
+
+.negative {
+  color: #b42318;
+}
+
+.neutral {
+  color: #344054;
+}
+
+.sectionTitle {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #344054;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eaecf0;
+  color: #667085;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #f2f4f7;
+  color: #475467;
+  white-space: nowrap;
+}
+
+.table td strong {
+  color: #101828;
+}
+
+.table td small {
+  color: #98a2b3;
+}
+
+.muted {
+  color: #98a2b3;
+  font-size: 13px;
+}
+
+.errorBox {
+  padding: 12px 14px;
+  background: #fef3f2;
+  border: 1px solid #fecdca;
+  border-radius: 8px;
+  color: #b42318;
+  font-size: 13px;
+}
+
+.errorBox a {
+  color: inherit;
+  font-weight: 600;
+}

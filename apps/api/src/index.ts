@@ -646,6 +646,15 @@ app.post('/mt5/terminals/probe', authenticate, async (req, res) => {
   await sendPostProxy(res, '/mt5/terminals/probe', req, req.body ?? {}, 30000);
 });
 
+// Daily trading report (UI/UX ide #9): REAL closed deals from the attached
+// MT5 terminal via Python. Read-only — never re-binds, never orders.
+app.get('/reports/daily', async (req, res) => {
+  const log = (req as any).log;
+  const days = Math.min(Math.max(parseInt(String(req.query.days || '7'), 10) || 7, 1), 90);
+  log.info({ days }, 'reports.daily');
+  await sendProxy(res, `/reports/daily?days=${days}`, undefined, req);
+});
+
 app.get('/market/overview', async (req, res) => {
   const log = (req as any).log;
   log.info('market.overview');

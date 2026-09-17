@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
 import AppShell from '../../components/AppShell';
+import DailyReport from '../../components/DailyReport';
 
 // API routes require a Bearer token (PRD_V2 §28). The app has no login UI yet,
 // so the "Run Cycle" action stays disabled until a token is present in
@@ -31,7 +32,8 @@ type Tab =
   | 'telegram'
   | 'providers'
   | 'models'
-  | 'learning';
+  | 'learning'
+  | 'daily';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Ringkasan Sistem' },
@@ -50,6 +52,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'providers', label: 'Provider AI' },
   { id: 'models', label: 'Registry Model' },
   { id: 'learning', label: 'Analitik Learning' },
+  { id: 'daily', label: 'Laporan Harian' },
 ];
 
 // Tab dikelompokkan (UI/UX ide #4): 16 tab datar terlalu bising. Grup
@@ -58,7 +61,7 @@ const TABS: { id: Tab; label: string }[] = [
 // operator sehari-hari.
 const TAB_GROUPS: { label: string; tabs: Tab[] }[] = [
   { label: 'Ringkasan', tabs: ['overview', 'health', 'audit'] },
-  { label: 'Trading', tabs: ['trading', 'positions', 'market'] },
+  { label: 'Trading', tabs: ['trading', 'positions', 'market', 'daily'] },
   { label: 'Organisasi AI', tabs: ['organization', 'tasks', 'decisions', 'committee'] },
   { label: 'Risiko & Eksekusi', tabs: ['risk', 'execution'] },
   { label: 'Sistem', tabs: ['telegram', 'providers', 'models', 'learning'] },
@@ -840,6 +843,10 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
         </div>
       </section>
     );
+  }
+
+  if (tab === 'daily') {
+    return <DailyReport />;
   }
 
   if (tab === 'learning') {

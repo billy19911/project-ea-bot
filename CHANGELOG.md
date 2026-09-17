@@ -3,6 +3,18 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — UI/UX Ide #9: Laporan Harian (deal nyata MT5, read-only)
+- **Modul `src/reports/daily.py`** (baru): agregasi deal tertutup dari
+  `mt5.history_deals_get` terminal terpilih — read-only, tanpa order. Deal
+  dengan profit persis 0 dihitung *breakeven* (bukan menang, bukan kalah);
+  win rate `null` bila tidak ada keputusan (bukan 0% karangan).
+- **Endpoint** `GET /reports/daily?days=7|14|30` (Python) + proxy Node.
+- **Tab "Laporan Harian"** di grup Trading Control Plane: KPI (net, trade
+  tertutup, win rate, hari terbaik/terburuk), tabel per hari + per simbol.
+  Akun yang dibaca selalu dicantumkan; `ok:false` menampilkan alasan backend.
+- Test baru 11 (agregasi murni: breakeven, day buckets, simbol, honesty) →
+  total suite Python 1235 passed.
+
 ### Added — UI/UX Ide #8: Grafik Tren Nyata (sampler + SVG inline)
 - **Sampler ring-buffer nyata** (`services/python/src/observability/sampler.py`): menyampel
   equity/balance akun MT5 (read-only) + stats scheduler tiap 15 dtk (240 sampel ≈ 1 jam).
