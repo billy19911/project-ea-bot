@@ -43,7 +43,7 @@
   border: 1px solid var(--primary);
   border-radius: 8px;
   background: var(--primary);
-  color: #fff;
+  color: var(--surface);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -88,7 +88,7 @@
 .tfActive {
   background: var(--primary);
   border-color: var(--primary);
-  color: #fff;
+  color: var(--surface);
 }
 .barsRow {
   display: flex;

@@ -34,7 +34,7 @@
   height: 36px;
   border-radius: var(--r-md);
   background: var(--primary);
-  color: #fff;
+  color: var(--surface);
   font-weight: 700;
   font-size: var(--fs-md);
 }
@@ -97,7 +97,7 @@
   padding: var(--sp-2) var(--sp-4);
   border-radius: var(--r-md);
   background: var(--primary);
-  color: #fff;
+  color: var(--surface);
   font-size: var(--fs-md);
   font-weight: 600;
 }

@@ -3,6 +3,12 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Changed — Pembersihan Dead CSS & Migrasi Design Token (Fase 1-3 Hardening)
+- **Dead CSS dihapus via PostCSS AST parser**: 872 baris sisa migrasi AppShell (Tahap A) yang menduplikasi sidebar di 5 modul (`page.module.css`, `ai-control`, `control-plane`, `observability`, `strategy`) dibersihkan tuntas tanpa menyentuh class yang aktif dipakai TSX.
+- **233 deklarasi warna mentah dimigrasikan ke CSS design tokens**: hex mentah (`#1f6feb`, `#f5f7fb`, `#ffffff`, `#172033`, `#e5e7eb`, `#d0d5dd`, `#067647`, `#b42318`, `#d92d20`) diganti dengan `var(--primary)`, `var(--bg)`, `var(--surface)`, `var(--text)`, `var(--border)`, `var(--success-*)`, `var(--danger-*)`.
+- **Token baru `--neutral-muted: #f2f4f7`** ditambahkan ke `globals.css` untuk background netral sekunder.
+- **Verifikasi**: build Next.js lulus, lint 0 error, verifikasi browser headless di `/observability`, `/market`, `/strategy`, `/control-plane` mengonfirmasi background `#f5f7fb`, tombol primary `#1f6feb`, badge sinyal, dan garis level ter-render dengan kontras yang tepat dan nol overflow.
+
 ### Changed — Fase 3 "Menu Profesional": Navigasi Sidebar Dirapikan
 - **Item aktif kini tint lembut + pill aksen** di tepi kiri (3px) — blok biru penuh sebelumnya membuat sidebar terlihat seperti deretan tombol besar; ikon item aktif diberi warna aksen agar mata langsung menangkap posisi halaman.
 - **"Masuk" dihapus dari navigasi** — selalu tampil walau sudah login dan membingungkan; alur masuk tetap lewat footer ("Masuk untuk melihat akun MT5 →") dan halaman `/login`.
