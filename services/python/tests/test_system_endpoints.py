@@ -93,7 +93,17 @@ def test_ai_models_discovery_never_raises(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 # /telegram/status
 # ---------------------------------------------------------------------------
-def test_telegram_status_unconfigured(monkeypatch) -> None:
+@pytest.fixture
+def _fresh_telegram_gateway():
+    """Force the shared gateway singleton to rebuild from the test's env."""
+    from src.telegram.notifier import set_gateway
+
+    set_gateway(None)
+    yield
+    set_gateway(None)
+
+
+def test_telegram_status_unconfigured(monkeypatch, _fresh_telegram_gateway) -> None:
     """Without a token/allowlist the gateway reports not connected."""
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_ALLOWED_CHAT_IDS", raising=False)
@@ -108,8 +118,8 @@ def test_telegram_status_unconfigured(monkeypatch) -> None:
     assert data["source"] == "live"
 
 
-def test_telegram_status_configured_not_connected(monkeypatch) -> None:
-    """Token + allowlist present → configured, but still not 'connected' live."""
+def test_telegram_status_configured_connected(monkeypatch, _fresh_telegram_gateway) -> None:
+    """Token + allowlist present → a real transport is configured → connected."""
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:ABC")
     monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", "111,222")
 
@@ -119,8 +129,8 @@ def test_telegram_status_configured_not_connected(monkeypatch) -> None:
     assert data["enabled"] is True
     assert data["has_token"] is True
     assert data["allowlist_size"] == 2
-    # No real transport was initialized → honest connected=false.
-    assert data["connected"] is False
+    # A real HTTP transport was built from the token → honest connected=true.
+    assert data["connected"] is True
 
 
 # ---------------------------------------------------------------------------

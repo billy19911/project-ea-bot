@@ -49,6 +49,23 @@ TRACE_HISTORY_LIMIT = 200
 RECONCILIATION_HISTORY_LIMIT = 50
 
 
+def _notify_cycle_result(result: Any) -> None:
+    """Deliver one finished cycle to the Telegram notifier (fail-safe).
+
+    Wired into :class:`TradingPipeline` as its ``result_hook`` so *both* the
+    HTTP-triggered cycles and the scheduler-driven cycles report to the user.
+    Any failure here — import, conversion, delivery — is swallowed: reporting
+    must never break the autonomous loop.
+    """
+    try:
+        from ..telegram.notifier import notify_pipeline_result
+
+        payload = result.to_dict() if hasattr(result, "to_dict") else result
+        notify_pipeline_result(payload)
+    except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
+        logger.warning("Telegram cycle report failed (%s); cycle unaffected", type(exc).__name__)
+
+
 class OrchestrationRuntime:
     """Holds the pipeline, event queue, and scheduler for one process."""
 
@@ -117,6 +134,7 @@ class OrchestrationRuntime:
             risk_gate=risk_gate,
             execution_engine=execution_engine,
             order_builder=order_builder,
+            result_hook=_notify_cycle_result,
         )
 
     def run_cycle(

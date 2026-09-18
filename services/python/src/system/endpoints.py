@@ -27,7 +27,7 @@ from ..observability.sampler import get_trend_sampler
 from ..orchestration.runtime import get_runtime
 from ..security.audit_log import ProtectedAuditLog
 from ..system.settings_store import get_settings_store
-from ..telegram.gateway import TelegramGateway
+from ..telegram.notifier import get_gateway
 
 logger = logging.getLogger(__name__)
 
@@ -70,24 +70,22 @@ def get_metrics_registry() -> MetricsRegistry:
 def _telegram_configuration() -> dict[str, Any]:
     """Describe the Telegram gateway configuration without needing a token.
 
-    Reads only environment configuration. ``connected`` is True only when a real
-    transport has been successfully configured; we never claim a live bot when
-    only the *possibility* of one exists.
+    Reports on the *shared* gateway singleton (the same object the notifier
+    sends pipeline reports through), so the state is honest: ``connected`` is
+    True only when a real HTTP transport is configured — i.e. a bot token is
+    present and at least one chat id is allowlisted.
     """
     token = os.getenv("TELEGRAM_BOT_TOKEN") or ""
     raw_allowlist = os.getenv("TELEGRAM_ALLOWED_CHAT_IDS") or os.getenv("TELEGRAM_CHAT_IDS") or ""
     allowlist = [cid.strip() for cid in raw_allowlist.split(",") if cid.strip()]
 
-    configured = bool(token and allowlist)
-    # A gateway object is only "connected" when a transport is available. Since
-    # constructing a real HTTP transport requires a token, and this module never
-    # constructs one eagerly, report honestly: connected == False here.
-    gateway = TelegramGateway(transport=None, allowlist=allowlist)
+    gateway = get_gateway()
+    connected = bool(gateway.transport is not None and gateway.allowlist)
 
     return {
         "enabled": bool(token) or bool(allowlist),
-        "configured": configured,
-        "connected": False,
+        "configured": bool(token and allowlist),
+        "connected": connected,
         "source": "live",
         "has_token": bool(token),
         "allowlist_size": len(gateway.allowlist),

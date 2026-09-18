@@ -1,6 +1,6 @@
 # PHASE 5 — Telegram Transport Nyata + Report ke User
 
-> Bagian dari [MASTER_PLAN_V2_OPERATIONAL_LOOP.md](./MASTER_PLAN_V2_OPERATIONAL_LOOP.md) | Status: PENDING
+> Bagian dari [MASTER_PLAN_V2_OPERATIONAL_LOOP.md](./MASTER_PLAN_V2_OPERATIONAL_LOOP.md) | Status: **SELESAI** (commit Fase 5)
 
 ## Goal
 
@@ -88,12 +88,12 @@ TELEGRAM_ALLOWED_CHAT_IDS=<chat id user>   # wajib; allowlist penerima + pengiri
 
 ## Acceptance Criteria
 
-- [ ] `HttpTelegramTransport` mengirim POST nyata via httpx (terverifikasi dengan MockTransport)
-- [ ] `/telegram/status` → `connected:true` **hanya** bila token + allowlist terisi
-- [ ] Setiap `run_cycle` memicu notifikasi report (fail-safe; diam bila token kosong)
-- [ ] Token tidak pernah muncul di log/kode/repo; `.env.example` berisi placeholder
-- [ ] Guard test: gateway & transport tidak bisa menyentuh execution/MT5
-- [ ] Full suite lulus; Flake8/black/isort bersih; commit + push
+- [x] `HttpTelegramTransport` mengirim POST nyata via httpx (terverifikasi dengan MockTransport)
+- [x] `/telegram/status` → `connected:true` **hanya** bila token + allowlist terisi
+- [x] Setiap `run_cycle` memicu notifikasi report (fail-safe; diam bila token kosong)
+- [x] Token tidak pernah muncul di log/kode/repo; `.env.example` berisi placeholder
+- [x] Guard test: gateway & transport tidak bisa menyentuh execution/MT5
+- [x] Full suite lulus (1460 passed); Flake8/black/isort bersih; commit + push
 
 ## Verifikasi Manual (oleh user, setelah token tersedia)
 

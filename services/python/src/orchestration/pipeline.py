@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 from execution.engine import OrderRequest
 from execution.order_builder import OrderBuilder
@@ -115,6 +115,10 @@ class PipelineResult:
     execution_result: Optional[dict[str, Any]] = None
     trace: list[dict[str, Any]] = field(default_factory=list)
     error: Optional[str] = None
+    # Synthesis fields surfaced for reports/notifications (Phase 5).
+    event_type: str = ""
+    confidence: float = 0.0
+    summary: str = ""
 
     def add_stage(self, stage: str, status: str, detail: str = "") -> None:
         """Append a stage entry (as a plain dict) to the trace."""
@@ -138,12 +142,23 @@ class PipelineResult:
             "execution_result": self.execution_result,
             "trace": list(self.trace),
             "error": self.error,
+            "event_type": self.event_type,
+            "confidence": self.confidence,
+            "summary": self.summary,
         }
 
 
 def _new_id(prefix: str) -> str:
     """Generate a short unique identifier with a readable prefix."""
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+def _coerce_confidence(value: Any) -> float:
+    """Best-effort float conversion for a synthesis confidence (fail-safe 0.0)."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 class TradingPipeline:
@@ -160,6 +175,9 @@ class TradingPipeline:
         order_builder: Optional :class:`~execution.order_builder.OrderBuilder`;
             a default instance is created when omitted.
         strategy_version: Strategy version tag recorded for each cycle.
+        dependency_guard: Optional execution-critical guard (§24).
+        result_hook: Optional callable invoked exactly once per cycle with the
+            finished :class:`PipelineResult` (reporting/notification seam).
     """
 
     def __init__(
@@ -170,6 +188,7 @@ class TradingPipeline:
         order_builder: Optional[OrderBuilder] = None,
         strategy_version: str = "v1.0.0",
         dependency_guard: Optional[Any] = None,
+        result_hook: Optional[Callable[[PipelineResult], None]] = None,
     ) -> None:
         self.supervisor = supervisor
         self.risk_gate = risk_gate
@@ -181,6 +200,11 @@ class TradingPipeline:
         # orders at the execution check-point. Optional so existing callers and
         # tests are unaffected.
         self.dependency_guard = dependency_guard
+        # Optional per-cycle result hook (Phase 5). Invoked exactly once per
+        # cycle with the finished PipelineResult — the reporting seam used to
+        # deliver Telegram reports. A broken hook is swallowed: reporting must
+        # never break the autonomous loop.
+        self.result_hook = result_hook
 
     # ------------------------------------------------------------------
     # Public API
@@ -212,6 +236,7 @@ class TradingPipeline:
             task_id=_new_id("task"),
             decision_id=_new_id("dec"),
             strategy_version=self.strategy_version,
+            event_type=event_type,
         )
 
         # ── Step A: Supervisor analysis ─────────────────────────────────
@@ -228,6 +253,11 @@ class TradingPipeline:
             return result
 
         result.add_stage("supervisor", STAGE_OK, "analysis complete")
+
+        # Surface the synthesis fields the report/notification layer consumes.
+        if isinstance(analysis, dict):
+            result.confidence = _coerce_confidence(analysis.get("overall_confidence"))
+            result.summary = str(analysis.get("summary") or "")
 
         # ── Extract trade proposal ──────────────────────────────────────
         proposal = self._extract_proposal(analysis)
@@ -541,10 +571,16 @@ class TradingPipeline:
             "position_opened": getattr(exec_result, "position_opened", None),
         }
 
-    @staticmethod
-    def _finalise(result: PipelineResult) -> None:
-        """Attach a default execution result placeholder for no-trade paths."""
-        # Nothing to do today; kept as an explicit hook so status invariants
-        # (executed => execution_result present) can be asserted later.
-        if not result.executed and result.execution_result is None:
+    def _finalise(self, result: PipelineResult) -> None:
+        """Finish a cycle: invoke the optional result hook (fail-safe).
+
+        Every ``run()`` exit path funnels through here, so the hook observes
+        exactly one finished result per cycle. A broken hook is logged and
+        swallowed — reporting must never break the autonomous loop.
+        """
+        if self.result_hook is None:
             return
+        try:
+            self.result_hook(result)
+        except Exception as exc:  # noqa: BLE001 - reporting must never break a cycle
+            logger.warning("Pipeline result hook failed: %s", exc)

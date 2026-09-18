@@ -143,6 +143,7 @@ def format_notification(event_type: str, payload: Any) -> str:
         "position_closed": "🔴 Position Closed",
         "risk_alert": "⚠️ Risk Alert",
         "system_alert": "🔔 System Alert",
+        "pipeline_result": "🧠 Market Analysis",
     }
     title = labels.get(event_type, f"🔔 {event_type}")
 
