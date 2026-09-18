@@ -28,6 +28,7 @@ from .news_agent import (
     NewsSentimentOutput,
     SentimentDirection,
 )
+from .review_agent import InMemoryLessonStore, PostTradeReviewAgent, get_lesson_store
 from .structure_analyst import (
     KeyLevel,
     SignalType,
@@ -63,4 +64,7 @@ __all__ = [
     "FundamentalOutput",
     "FundamentalSignal",
     "EconomicEvent",
+    "PostTradeReviewAgent",
+    "InMemoryLessonStore",
+    "get_lesson_store",
 ]

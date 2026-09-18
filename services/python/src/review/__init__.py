@@ -8,6 +8,7 @@ from .auto_trigger import (
     on_position_closed,
     set_auto_trigger,
 )
+from .intelligence import ReviewLead
 from .trade_review import TradeReviewer, TradeReviewResult
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "on_position_closed",
     "get_auto_trigger",
     "set_auto_trigger",
+    "ReviewLead",
 ]

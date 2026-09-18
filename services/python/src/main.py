@@ -28,6 +28,7 @@ from .orchestration.endpoints import router as orchestration_router
 from .orchestration.runtime import get_runtime
 from .reports.endpoints import router as reports_router
 from .research.endpoints import router as research_router
+from .review.intelligence import ReviewLead
 from .risk.intelligence import RiskLead
 from .strategy.endpoints import register_live_strategy
 from .strategy.endpoints import router as strategy_router
@@ -58,6 +59,12 @@ def register_default_agents() -> list[str]:
     (``RISK_``, ``DRAWDOWN_``, ``MARGIN_``, …) route to its committee for
     advisory evidence. The deterministic Risk Gate remains the sole authority
     over hard limits — RiskLead can never veto, bypass, or reach MT5.
+
+    ``ReviewLead`` is the post-trade review department lead (EPIC 06):
+    ``TRADE_CLOSE*`` / ``POST_TRADE_REVIEW`` events route to its review
+    specialist, which extracts deterministic lessons and persists them through
+    the injectable lesson store. Review is analysis-only — it can never reach
+    MT5, the Risk Gate, or the Execution Engine.
     """
     default_agents = [
         TechnicalAnalystAgent(),
@@ -68,6 +75,7 @@ def register_default_agents() -> list[str]:
         FundamentalAnalystAgent(),
         MarketLead(),
         RiskLead(),
+        ReviewLead(),
     ]
     added: list[str] = []
     for agent in default_agents:
