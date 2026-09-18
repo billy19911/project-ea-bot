@@ -16,4 +16,8 @@ COPY services/python/ ./
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# ``src`` is the package root (agents/, orchestration/, …); ``src`` itself is
+# imported as a package, so both /app and /app/src belong on the path.
+ENV PYTHONPATH=/app:/app/src
+
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

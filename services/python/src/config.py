@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     market_feed_symbols: str = Field(default="XAUUSD", alias="MARKET_FEED_SYMBOLS")
     market_feed_timeframe: str = Field(default="M5", alias="MARKET_FEED_TIMEFRAME")
     market_feed_interval_s: float = Field(default=60.0, alias="MARKET_FEED_INTERVAL_S")
+    # Anti-spam: minimum seconds before the same (symbol, event_type) may be
+    # re-emitted into the pipeline (and reported to Telegram) again.
+    market_feed_event_cooldown_s: float = Field(default=300.0, alias="MARKET_FEED_EVENT_COOLDOWN_S")
 
     # Risk engine
     max_position_size: float = Field(default=1000.0, alias="MAX_POSITION_SIZE")

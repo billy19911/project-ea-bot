@@ -163,6 +163,7 @@ async def lifespan(app: FastAPI):
             symbols=[s.strip() for s in settings.market_feed_symbols.split(",") if s.strip()],
             timeframe=settings.market_feed_timeframe,
             interval_s=settings.market_feed_interval_s,
+            event_cooldown_s=settings.market_feed_event_cooldown_s,
         )
         feed_task = asyncio.create_task(feed.run())
         logger.info(
@@ -171,6 +172,23 @@ async def lifespan(app: FastAPI):
             settings.market_feed_timeframe,
             settings.market_feed_interval_s,
         )
+
+    # Telegram inbound poller (optional) — OFF unless TELEGRAM_POLLER_ENABLED
+    # is truthy AND a dedicated bot token is configured. Telegram allows only
+    # one getUpdates consumer per bot, so this uses a *second* bot
+    # (TELEGRAM_POLLER_BOT_TOKEN) and never the report bot's token. Read-only
+    # command surface — it can never place an order.
+    poller = None
+    poller_task = None
+    try:
+        from .telegram.poller import build_poller_from_env
+
+        poller = build_poller_from_env()
+        if poller is not None:
+            poller_task = asyncio.create_task(poller.run())
+            logger.info("Telegram inbound poller started (read-only commands)")
+    except Exception:  # pragma: no cover - defensive, never block startup
+        logger.exception("Telegram poller wiring failed (system continues)")
 
     # Trend sampler (UI/UX ide #8) — ring buffer of REAL samples for the
     # dashboard charts. Started regardless of the scheduler: account equity
@@ -203,6 +221,13 @@ async def lifespan(app: FastAPI):
             await asyncio.wait_for(feed_task, timeout=5.0)
         except Exception:  # pragma: no cover - defensive
             logger.exception("Error stopping market feed loop")
+
+    if poller_task is not None:
+        try:
+            poller.stop()
+            await asyncio.wait_for(poller_task, timeout=5.0)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Error stopping Telegram poller")
 
     if scheduler_task is not None:
         try:

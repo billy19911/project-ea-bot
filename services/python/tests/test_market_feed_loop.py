@@ -179,6 +179,78 @@ def test_second_poll_of_identical_bars_is_deduplicated() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Emit cooldown — anti-spam for a moving market
+# ---------------------------------------------------------------------------
+class _MovingConnector:
+    """Connector whose last close moves every call (simulates a live market)."""
+
+    def __init__(self, symbol: str = "EURUSD") -> None:
+        self._symbol = symbol
+        self._step = 0
+
+    def get_ohlc(self, symbol: str, timeframe: str = "H1", count: int = 100):
+        self._step += 1
+        bars = _bars(symbol)
+        # Move the last bar so the fingerprint changes each poll.
+        bars[-1].close = bars[-1].close + self._step * 0.01
+        return bars
+
+
+def test_moving_market_does_not_repeat_same_event_types() -> None:
+    """New bars each poll: repeated event *types* stay suppressed by cooldown.
+
+    A moving market legitimately produces NEW event types (e.g. a gap), but the
+    already-emitted types (TREND_BULLISH, …) must not be re-emitted inside the
+    cooldown window — otherwise every poll would re-run the pipeline and
+    re-message the user with the same analysis.
+    """
+    queue = EventQueue()
+    loop = _loop(queue=queue, connector=_MovingConnector())
+
+    first = loop.poll_once()
+    first_types = _drain_types(queue)
+    assert first > 0, "first poll must emit"
+
+    loop.poll_once()
+    second_types = _drain_types(queue)
+
+    assert second_types, "a moved market may emit genuinely new event types"
+    overlap = set(first_types) & set(second_types)
+    assert not overlap, f"cooldown must suppress repeats, got {overlap}"
+
+
+def _drain_types(queue: EventQueue) -> list[str]:
+    """Drain the queue and return the event-type names (test helper)."""
+    types: list[str] = []
+    while len(queue) > 0:
+        event = queue.dequeue()
+        if event is None:
+            break
+        types.append(str(getattr(event, "event_type", "") or ""))
+    return types
+
+
+def test_cooldown_expiry_allows_re_emission() -> None:
+    """Once the cooldown window passes, the same event type may emit again."""
+    now = {"t": 1000.0}
+    queue = EventQueue()
+    loop = _loop(
+        queue=queue,
+        connector=_MovingConnector(),
+        event_cooldown_s=60.0,
+        clock=lambda: now["t"],
+    )
+
+    first = loop.poll_once()
+    assert first > 0
+
+    now["t"] += 61.0  # cooldown expired
+    second = loop.poll_once()
+
+    assert second > 0, "after the cooldown window the event may re-emit"
+
+
+# ---------------------------------------------------------------------------
 # Async lifecycle
 # ---------------------------------------------------------------------------
 def test_run_stops_cleanly_after_stop() -> None:

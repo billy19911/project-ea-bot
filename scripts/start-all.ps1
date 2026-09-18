@@ -49,6 +49,9 @@ $feedOn   = EnvOr 'MARKET_FEED_ENABLED' 'false'
 $feedSyms = EnvOr 'MARKET_FEED_SYMBOLS' 'XAUUSD'
 $feedTf   = EnvOr 'MARKET_FEED_TIMEFRAME' 'M5'
 $feedInt  = EnvOr 'MARKET_FEED_INTERVAL_S' '60'
+$feedCool = EnvOr 'MARKET_FEED_EVENT_COOLDOWN_S' '300'
+$tgPollOn = EnvOr 'TELEGRAM_POLLER_ENABLED' 'false'
+$tgPollTok = EnvOr 'TELEGRAM_POLLER_BOT_TOKEN' ''
 $lessonP  = EnvOr 'LESSON_STORE_PATH' ''
 
 if (-not $jwt) {
@@ -101,6 +104,10 @@ if (Test-Port 8000) {
   $env:MARKET_FEED_SYMBOLS = $feedSyms
   $env:MARKET_FEED_TIMEFRAME = $feedTf
   $env:MARKET_FEED_INTERVAL_S = $feedInt
+  $env:MARKET_FEED_EVENT_COOLDOWN_S = $feedCool
+  # Telegram inbound poller (opsional) — read-only commands; needs its OWN bot.
+  $env:TELEGRAM_POLLER_ENABLED = $tgPollOn
+  if ($tgPollTok) { $env:TELEGRAM_POLLER_BOT_TOKEN = $tgPollTok }
   # Lesson store (Fase 7) — persistent JSONL path (default logs/lessons.jsonl).
   if ($lessonP) { $env:LESSON_STORE_PATH = $lessonP }
   Start-Process -FilePath $pyExe `

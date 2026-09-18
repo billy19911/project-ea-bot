@@ -264,8 +264,11 @@ jobs:
         run: npm audit --audit-level=high
 
   # ==========================================
-  # DEPLOY (Blueprint — belum diaktifkan)
+  # DEPLOY (opt-in — aktif HANYA bila target + secrets dikonfigurasi)
   # ==========================================
+  # Deploy nyata butuh target yang diputuskan operator. Gate di bawah membuat
+  # job ini SKIP (bukan gagal) sampai VPS_HOST + VPS_SSH_KEY diisi sebagai
+  # repository secrets; setelah itu deploy berjalan otomatis.
   deploy:
     runs-on: ubuntu-latest
     needs: [lint, test, build]
@@ -276,35 +279,34 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ---------------------------------------------------------
-      # Catatan: Step deploy ini adalah blueprint.
-      #   Diadaptasi sesuai deployment target yang sebenarnya
-      #   (mis. VPS, AWS, Azure, atau platform lain).
-      # ---------------------------------------------------------
-
-      - name: Setup deployment environment
+      - name: Check deployment target configured
+        id: gate
         run: |
-          echo "Deploy step placeholder"
-          echo "Replace with actual deployment steps"
-          echo "Example: SSH to server, pull latest, restart services"
+          if [ -n "${{ secrets.VPS_HOST }}" ] && [ -n "${{ secrets.VPS_SSH_KEY }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Deploy dilewati: set VPS_HOST / VPS_USER / VPS_SSH_KEY / DEPLOY_PATH sebagai repository secrets."
+          fi
 
-      # Contoh deployment ke VPS via SSH:
-      # - name: Deploy to VPS
-      #   uses: appleboy/ssh-action@v1.0.0
-      #   with:
-      #     host: ${{ secrets.VPS_HOST }}
-      #     username: ${{ secrets.VPS_USER }}
-      #     key: ${{ secrets.VPS_SSH_KEY }}
-      #     script: |
-      #       cd /var/www/project-ea-bot
-      #       git pull origin main
-      #       docker compose up -d --build
-      #       docker compose exec web python manage.py migrate
-      #       docker compose exec web python manage.py collectstatic --noinput
+      # Deploy ke VPS via SSH — pull terbaru + rebuild stack Docker.
+      - name: Deploy to VPS
+        if: steps.gate.outputs.configured == 'true'
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd "${{ secrets.DEPLOY_PATH || '/var/www/project-ea-bot' }}"
+            git pull origin main
+            docker compose -f infrastructure/docker/docker-compose.yml up -d --build
+            docker compose -f infrastructure/docker/docker-compose.yml ps
 
-      # Catatan: Jika menggunakan Docker di production,
-      # pastikan Docker tersedia di environment deployment.
-      # Saat ini environment development TIDAK memiliki Docker.
+      - name: Deploy skipped (target not configured)
+        if: steps.gate.outputs.configured != 'true'
+        run: echo "No deployment target configured — CI remains green."
 
   # ==========================================
   # NOTIFICATION (Opsional)

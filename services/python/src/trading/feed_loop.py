@@ -15,17 +15,24 @@ Design rules:
 * **Dedup by data fingerprint** — identical bars (same length, last bar time
   and close) are skipped, so a quiet market does not flood the queue with the
   same event every interval.
+* **Emit cooldown** — the same ``(symbol, event_type)`` pair is not emitted
+  again within ``event_cooldown_s`` (default 300s), so a moving market cannot
+  flood the pipeline (and the user's Telegram) with the same analysis every
+  poll.
 * **OFF by default** — the lifespan starts this loop only when
   ``MARKET_FEED_ENABLED=true`` (operator opt-in).
 
-Events are enqueued through the detector's own routing (queue + optional
-history), so no separate enqueue logic lives here.
+This loop owns event routing: detected events are enqueued into the shared
+``EventQueue`` (and optional ``EventHistory``) by the loop itself, after the
+cooldown filter — so the cooldown and the fingerprint dedup are the single
+place that decides what enters the pipeline.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Callable, Optional
 
 from .event_engine import EventHistory, EventQueue
@@ -50,8 +57,11 @@ class MarketFeedLoop:
         history: Optional :class:`EventHistory` for emitted events.
         detector_factory: Optional factory returning a detector exposing
             ``detect(ohlcv, prev_state)`` / ``update_state(ohlcv, prev_state)``.
-            Defaults to a production :class:`EventDetector` bound to ``queue``
-            (and ``history`` when supplied).
+            Defaults to a production :class:`EventDetector`. Routing (queue +
+            history) is owned by this loop, so the detector only detects.
+        event_cooldown_s: Seconds before the same ``(symbol, event_type)`` may
+            be emitted again (anti-spam; default 300s).
+        clock: Optional monotonic clock callable (tests inject a fake).
     """
 
     def __init__(
@@ -64,19 +74,27 @@ class MarketFeedLoop:
         connector: Any = None,
         history: Optional[EventHistory] = None,
         detector_factory: Optional[Callable[[], Any]] = None,
+        event_cooldown_s: float = 300.0,
+        clock: Optional[Callable[[], float]] = None,
     ) -> None:
         self.queue = queue
         self.symbols = [str(s).strip() for s in (symbols or []) if str(s).strip()]
         self.timeframe = str(timeframe or "M5")
         self.interval_s = float(interval_s)
         self.count = int(count)
+        self.event_cooldown_s = float(event_cooldown_s)
+        self._history = history
+        self._clock = clock if clock is not None else time.monotonic
         self._connector = connector if connector is not None else self._default_connector()
         if detector_factory is not None:
             self._detector = detector_factory()
         else:
-            self._detector = EventDetector(queue=self.queue, history=history)
+            # Routing lives in this loop (cooldown + fingerprint), so the
+            # detector is built without its own queue/history.
+            self._detector = EventDetector()
         self._fingerprints: dict[str, tuple] = {}
         self._states: dict[str, Any] = {}
+        self._last_emitted: dict[tuple[str, str], float] = {}
         self._running = False
 
     @staticmethod
@@ -134,7 +152,32 @@ class MarketFeedLoop:
             return 0
 
         self._fingerprints[symbol] = fingerprint
-        return len(events)
+        return self._route_events(symbol, events)
+
+    def _route_events(self, symbol: str, events: list[Any]) -> int:
+        """Enqueue cooldown-filtered events; returns the number routed.
+
+        A moving market re-detects the same regime every poll; without a
+        cooldown that would re-run the pipeline (and re-message the user) every
+        interval. The cooldown suppresses repeats per ``(symbol, event_type)``.
+        """
+        now = self._clock()
+        routed = 0
+        for event in events:
+            event_type = str(getattr(event, "event_type", "") or "")
+            key = (symbol, event_type)
+            last = self._last_emitted.get(key)
+            if last is not None and (now - last) < self.event_cooldown_s:
+                continue
+            self._last_emitted[key] = now
+            self.queue.enqueue(event)
+            if self._history is not None:
+                try:
+                    self._history.add(event)
+                except Exception:  # noqa: BLE001 - history must never kill the loop
+                    logger.warning("Market feed history add failed for %s", symbol)
+            routed += 1
+        return routed
 
     @staticmethod
     def _bar_to_dict(bar: Any) -> dict[str, Any]:

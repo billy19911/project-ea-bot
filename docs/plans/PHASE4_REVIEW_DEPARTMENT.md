@@ -124,10 +124,10 @@ untuk memastikan method yang tersedia (`add_lesson`, `get_lessons`, dst).
 
 ## Acceptance Criteria
 
-- [ ] `PostTradeReviewAgent` punya logika review deterministik
-- [ ] Lesson disimpan ke `trade_memory.py` store
-- [ ] `ReviewLead` terdaftar sebagai `department_lead`
-- [ ] Supervisor route event `TRADE_CLOSE` ke `review_lead`
-- [ ] 3 department leads aktif (market, risk, review)
-- [ ] Full suite pass
-- [ ] Flake8 bersih
+- [x] `PostTradeReviewAgent` punya logika review deterministik
+- [x] Lesson disimpan via injectable lesson store (`review_agent` + `JsonlLessonStore`); `trade_memory.py` sengaja tidak diubah (tidak punya API lesson)
+- [x] `ReviewLead` terdaftar sebagai `department_lead`
+- [x] Supervisor route event `TRADE_CLOSE` ke `review_lead`
+- [x] 3 department leads aktif (market, risk, review)
+- [x] Full suite pass
+- [x] Flake8 bersih

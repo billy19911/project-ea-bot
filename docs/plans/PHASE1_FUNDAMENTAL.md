@@ -81,11 +81,11 @@ deterministik yang mengonsumsi data kalender ekonomi real-time dari `NewsFeedPro
 
 ## Acceptance Criteria
 
-- [ ] `pytest tests/test_fundamental_analyst.py` — semua pass
-- [ ] Full suite pass (`pytest tests/ -q`)
-- [ ] `flake8 --max-line-length=100` bersih
-- [ ] Agent terdaftar di registry setelah startup
-- [ ] Feed offline → tidak crash, return UNSUPPORTED
+- [x] `pytest tests/test_fundamental_analyst.py` — semua pass
+- [x] Full suite pass (`pytest tests/ -q`)
+- [x] `flake8 --max-line-length=100` bersih
+- [x] Agent terdaftar di registry setelah startup
+- [x] Feed offline → tidak crash, return UNSUPPORTED
 
 ## Commit Message
 

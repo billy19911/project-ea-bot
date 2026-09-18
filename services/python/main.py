@@ -1,71 +1,21 @@
-# FastAPI application entry point
-# Run: uvicorn main:app --reload
+# -*- coding: utf-8 -*-
+"""Compatibility shim — the real application lives in ``src.main``.
 
-from datetime import datetime
-from typing import Optional
+Historically this module held a standalone skeleton FastAPI app. The
+production app (routers, agents, orchestration, safety stack) is
+``src.main:app``; this shim only re-exports it so legacy invocations like
+``uvicorn main:app`` (from ``services/python``) keep working and can never
+serve a second, divergent application.
 
-from fastapi import FastAPI
-from pydantic import BaseModel
+Run (canonical):  uvicorn src.main:app --host 127.0.0.1 --port 8000
+"""
 
-app = FastAPI(
-    title="EA Bot API", description="Electronic Assistant Bot API Service", version="1.0.0"
-)
+from src.main import app  # noqa: F401  (re-exported for uvicorn)
 
-
-class HealthResponse(BaseModel):
-    status: str
-    timestamp: str
-    version: str
-
-
-class SignalRequest(BaseModel):
-    pair: str
-    side: str
-    price: float
-    reason: Optional[str] = None
-    confidence: Optional[float] = None
-
-
-class SignalResponse(BaseModel):
-    id: str
-    status: str
-    signal: dict
-    created_at: str
-
-
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """Health check endpoint"""
-    return HealthResponse(
-        status="healthy", timestamp=datetime.utcnow().isoformat(), version="1.0.0"
-    )
-
-
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {"message": "EA Bot API", "version": "1.0.0", "docs": "/docs"}
-
-
-@app.post("/signals", response_model=SignalResponse)
-async def create_signal(signal: SignalRequest):
-    """Create a new trade signal"""
-    signal_id = f"sig_{datetime.utcnow().timestamp()}"
-    return SignalResponse(
-        id=signal_id,
-        status="received",
-        signal=signal.dict(),
-        created_at=datetime.utcnow().isoformat(),
-    )
-
-
-@app.get("/signals")
-async def list_signals():
-    """List all trade signals"""
-    return {"signals": [], "count": 0}
+__all__ = ["app"]
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("src.main:app", host="0.0.0.0", port=8000)

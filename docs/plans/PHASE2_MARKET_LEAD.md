@@ -129,9 +129,9 @@ tidak patah.
 
 ## Acceptance Criteria
 
-- [ ] MarketLead terdaftar sebagai `agent_type="department_lead"` di registry
-- [ ] Supervisor otomatis route event pasar ke `market_lead`
-- [ ] Deteksi rezim: Trending (ADX>25), Ranging (ADX<20), News Shock (ada high impact)
-- [ ] Bobot adaptif berubah sesuai rezim
-- [ ] Semua tes lama + baru pass
-- [ ] Flake8 bersih
+- [x] MarketLead terdaftar sebagai `agent_type="department_lead"` di registry
+- [x] Supervisor otomatis route event pasar ke `market_lead`
+- [x] Deteksi rezim: Trending (ADX>25), Ranging (ADX<20), News Shock (ada high impact)
+- [x] Bobot adaptif berubah sesuai rezim
+- [x] Semua tes lama + baru pass
+- [x] Flake8 bersih

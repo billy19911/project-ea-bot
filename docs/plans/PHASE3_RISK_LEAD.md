@@ -91,8 +91,8 @@ jadi begitu RiskLead terdaftar + `can_handle` cocok, otomatis terpakai.
 
 ## Acceptance Criteria
 
-- [ ] `RiskLead` terdaftar sebagai `department_lead`
-- [ ] `can_handle` kompatibel + `analyze` return dict
-- [ ] Semua tes risk existing pass (tidak ada regresi)
-- [ ] Tidak ada perubahan pada `gate.py` / `engine.py`
-- [ ] Flake8 bersih
+- [x] `RiskLead` terdaftar sebagai `department_lead`
+- [x] `can_handle` kompatibel + `analyze` return dict
+- [x] Semua tes risk existing pass (tidak ada regresi)
+- [x] Tidak ada perubahan pada `gate.py` / `engine.py`
+- [x] Flake8 bersih

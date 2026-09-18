@@ -82,6 +82,10 @@ def _telegram_configuration() -> dict[str, Any]:
     gateway = get_gateway()
     connected = bool(gateway.transport is not None and gateway.allowlist)
 
+    poller_raw = (os.getenv("TELEGRAM_POLLER_ENABLED") or "").strip().lower()
+    poller_enabled = poller_raw in {"1", "true", "yes", "on"}
+    poller_token = (os.getenv("TELEGRAM_POLLER_BOT_TOKEN") or "").strip()
+
     return {
         "enabled": bool(token) or bool(allowlist),
         "configured": bool(token and allowlist),
@@ -90,6 +94,11 @@ def _telegram_configuration() -> dict[str, Any]:
         "has_token": bool(token),
         "allowlist_size": len(gateway.allowlist),
         "commands": ["/status", "/positions", "/risk", "/why", "/review", "/help"],
+        # Inbound commands (chat → bot) require a SECOND bot token: Telegram
+        # allows only one getUpdates consumer per bot, and the report bot may
+        # already be polled elsewhere (e.g. by the operator's assistant).
+        "inbound_poller_enabled": poller_enabled,
+        "inbound_poller_configured": bool(poller_token),
     }
 
 
