@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from fastapi import APIRouter
 
@@ -119,6 +119,11 @@ class DetectedEvent:
     description: str
     timestamp: str
     symbol: str = ""
+    #: Market evidence captured when the event was detected (close/high/low
+    #: series, computed market state, volatility inputs), attached by the
+    #: market feed loop so downstream analysis runs on real data. Optional and
+    #: backward compatible — defaults to an empty snapshot.
+    market_snapshot: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

@@ -19,6 +19,10 @@ Design rules:
   again within ``event_cooldown_s`` (default 300s), so a moving market cannot
   flood the pipeline (and the user's Telegram) with the same analysis every
   poll.
+* **Market evidence** — every emitted event carries the exact inputs behind
+  it (close/high/low series, computed market state, the detected events,
+  volatility inputs); the latest snapshot per symbol is cached so cycles that
+  arrive without one (e.g. a manual run) are still analysed with real data.
 * **OFF by default** — the lifespan starts this loop only when
   ``MARKET_FEED_ENABLED=true`` (operator opt-in).
 
@@ -34,6 +38,8 @@ import asyncio
 import logging
 import time
 from typing import Any, Callable, Optional
+
+from trading.market_snapshot import set_latest_snapshot
 
 from .event_engine import EventHistory, EventQueue
 from .events import EventDetector
@@ -152,9 +158,19 @@ class MarketFeedLoop:
             return 0
 
         self._fingerprints[symbol] = fingerprint
-        return self._route_events(symbol, events)
+        snapshot = self._build_snapshot(symbol, ohlcv, events)
+        try:
+            set_latest_snapshot(symbol, snapshot)
+        except Exception:  # noqa: BLE001 - the snapshot cache must never kill the loop
+            logger.warning("Market feed snapshot cache update failed for %s", symbol)
+        return self._route_events(symbol, events, snapshot)
 
-    def _route_events(self, symbol: str, events: list[Any]) -> int:
+    def _route_events(
+        self,
+        symbol: str,
+        events: list[Any],
+        snapshot: Optional[dict[str, Any]] = None,
+    ) -> int:
         """Enqueue cooldown-filtered events; returns the number routed.
 
         A moving market re-detects the same regime every poll; without a
@@ -174,6 +190,11 @@ class MarketFeedLoop:
             last = self._last_emitted.get(key)
             if last is not None and (now - last) < self.event_cooldown_s:
                 continue
+            if snapshot:
+                try:
+                    event.market_snapshot = snapshot
+                except Exception:  # noqa: BLE001 - evidence attach is best-effort
+                    logger.warning("Market feed could not attach snapshot to %s", event_type)
             if not self.queue.enqueue(event):
                 logger.warning(
                     "Market feed queue full; dropping %s %s this cycle",
@@ -189,6 +210,45 @@ class MarketFeedLoop:
                     logger.warning("Market feed history add failed for %s", symbol)
             routed += 1
         return routed
+
+    def _build_snapshot(
+        self,
+        symbol: str,
+        ohlcv: list[dict[str, Any]],
+        events: list[Any],
+    ) -> dict[str, Any]:
+        """Build the market-evidence snapshot attached to every emitted event.
+
+        Carries the exact inputs the analysis committee consumes: the
+        close/high/low series, the computed market state (ADX/trend/ATR/BB
+        width), the detected events themselves, and the volatility inputs —
+        so specialists run on real evidence instead of an empty context.
+        """
+        closes = [float(bar.get("close", 0.0) or 0.0) for bar in ohlcv]
+        highs = [float(bar.get("high", 0.0) or 0.0) for bar in ohlcv]
+        lows = [float(bar.get("low", 0.0) or 0.0) for bar in ohlcv]
+        returns = [
+            (closes[i] - closes[i - 1]) / closes[i - 1]
+            for i in range(1, len(closes))
+            if closes[i - 1]
+        ]
+        state = self._states.get(symbol)
+        return {
+            "symbol": symbol,
+            "prices": closes,
+            "highs": highs,
+            "lows": lows,
+            "market_state": state,
+            "detected_events": list(events),
+            "volatility": {
+                "atr": float(getattr(state, "atr", 0.0) or 0.0),
+                "price": float(getattr(state, "close", 0.0) or 0.0),
+                "bollinger_width": float(getattr(state, "BB_width", 0.0) or 0.0),
+                "high": float(getattr(state, "high", 0.0) or 0.0),
+                "low": float(getattr(state, "low", 0.0) or 0.0),
+                "returns": returns,
+            },
+        }
 
     @staticmethod
     def _bar_to_dict(bar: Any) -> dict[str, Any]:

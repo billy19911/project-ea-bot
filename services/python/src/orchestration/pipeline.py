@@ -28,6 +28,7 @@ from typing import Any, Callable, Optional, Protocol, runtime_checkable
 from execution.engine import OrderRequest
 from execution.order_builder import OrderBuilder
 from risk.gate import GateDecision
+from trading.market_snapshot import get_latest_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -433,6 +434,34 @@ class TradingPipeline:
             symbol = context.get("symbol")
         return str(symbol) if symbol else ""
 
+    @staticmethod
+    def _merge_market_snapshot(event: Any, analysis_context: dict[str, Any]) -> None:
+        """Merge market evidence into the analysis context (fail-safe).
+
+        The market feed loop attaches a snapshot (close/high/low series,
+        market state, detected events, volatility inputs) to every event it
+        emits, and caches the latest snapshot per symbol. Cycles that arrive
+        without one (e.g. a manual ``POST /pipeline/run``) still receive the
+        cached snapshot so the committee never runs blind. Explicit
+        caller-provided context keys always win; missing evidence changes
+        nothing.
+        """
+        snapshot: Any = None
+        if isinstance(event, dict):
+            snapshot = event.get("market_snapshot")
+        else:
+            snapshot = getattr(event, "market_snapshot", None)
+        if not isinstance(snapshot, dict) or not snapshot:
+            try:
+                symbol = str(analysis_context.get("symbol") or "")
+                snapshot = get_latest_snapshot(symbol)
+            except Exception:  # noqa: BLE001 - evidence is best-effort only
+                return
+        if not isinstance(snapshot, dict):
+            return
+        for key, value in snapshot.items():
+            analysis_context.setdefault(key, value)
+
     def _build_analysis_context(
         self,
         event: Any,
@@ -453,6 +482,9 @@ class TradingPipeline:
                 symbol = getattr(event, "symbol", None)
             if symbol:
                 analysis_context["symbol"] = symbol
+        # Fase 6: merge the market evidence behind this event (or the latest
+        # cached snapshot) so the analysis committee runs on real data.
+        self._merge_market_snapshot(event, analysis_context)
         # Phase 7: attach prior lessons (advisory). Fail-safe — a broken
         # provider must never break the cycle.
         if self.lesson_provider is not None:
