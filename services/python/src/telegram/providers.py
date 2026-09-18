@@ -68,7 +68,15 @@ def _positions_provider() -> dict[str, Any]:
 
 
 def _risk_provider() -> dict[str, Any]:
-    """Return the live risk limits plus a read-only account safety check."""
+    """Return the live risk limits plus a read-only account safety check.
+
+    The pipeline's live gate (``risk.gate.RiskGate``) has spread/RR limits
+    and a ``RiskEngine`` with thresholds — but **no** ``check_account_safety``
+    method. That method lives on ``trading.risk_gate.RiskGate`` (the
+    dashboard/health-check variant), so we construct a standalone instance
+    for the account safety check rather than calling a non-existent method
+    on the pipeline gate.
+    """
     from ..orchestration.runtime import get_runtime
 
     runtime = get_runtime()
@@ -89,26 +97,33 @@ def _risk_provider() -> dict[str, Any]:
                     limits[str(name).lower()] = value
 
     safety: Any = None
-    if gate is not None:
-        try:
-            from ..mt5 import connector
+    try:
+        from ..mt5 import connector
 
-            account = connector.get_account_info()
-            safety = gate.check_account_safety(
-                account_equity=float(getattr(account, "equity", 0.0) or 0.0),
-                account_balance=float(getattr(account, "balance", 0.0) or 0.0),
-                margin_used=float(getattr(account, "margin", 0.0) or 0.0),
-                open_positions_value=0.0,
-                daily_pnl=0.0,
-                current_drawdown=0.0,
-            )
-        except Exception:  # noqa: BLE001 - limits alone are still useful
-            safety = None
+        account = connector.get_account_info()
+        from ..trading.risk_gate import RiskGate
+
+        equity = float(getattr(account, "equity", 0.0) or 0.0)
+        margin = float(getattr(account, "margin", 0.0) or 0.0)
+        # check_account_safety expects margin_used as a *fraction* (0–1),
+        # but MT5's account.margin is an absolute currency amount.
+        margin_frac = margin / equity if equity > 0 else 0.0
+        safety_rg = RiskGate()
+        safety = safety_rg.check_account_safety(
+            account_equity=equity,
+            account_balance=float(getattr(account, "balance", 0.0) or 0.0),
+            margin_used=margin_frac,
+            open_positions_value=0.0,
+            daily_pnl=0.0,
+            current_drawdown=0.0,
+        )
+    except Exception:  # noqa: BLE001 - limits alone are still useful
+        safety = None
 
     result: dict[str, Any] = {"limits": limits}
     if isinstance(safety, dict):
         result["safe"] = bool(safety.get("safe"))
-        result["flags"] = safety.get("flags", [])
+        result["flags"] = safety.get("flags", {})
     else:
         result["safe"] = None
     return result
@@ -144,7 +159,13 @@ def _decision_trace_provider() -> dict[str, Any]:
 
 
 def _review_provider() -> dict[str, Any]:
-    """Return the latest recorded lesson summary (read-only)."""
+    """Return the latest recorded lesson summary (read-only).
+
+    Lesson dicts (written by ``learning.feedback.record_review_lesson``)
+    use the keys ``outcome``, ``lesson``, ``symbol``, ``root_cause``, etc.
+    Older/test lessons may use ``text`` instead of ``lesson`` — we fall
+    back to either key so the command never shows an empty summary.
+    """
     from agents.analysts.review_agent import get_lesson_store
 
     lessons = get_lesson_store().get_lessons()
@@ -152,7 +173,7 @@ def _review_provider() -> dict[str, Any]:
         return {"summary": "No lessons recorded yet."}
     last = lessons[-1] if isinstance(lessons[-1], dict) else {}
     outcome = str(last.get("outcome") or "?")
-    text = str(last.get("text") or "")
+    text = str(last.get("lesson") or last.get("text") or "")
     return {"summary": f"[{outcome}] {text}".strip()}
 
 

@@ -160,6 +160,11 @@ class MarketFeedLoop:
         A moving market re-detects the same regime every poll; without a
         cooldown that would re-run the pipeline (and re-message the user) every
         interval. The cooldown suppresses repeats per ``(symbol, event_type)``.
+
+        The cooldown stamp is only written when the event actually entered the
+        queue: a full queue (``enqueue`` → False) must not silently swallow an
+        event *and* suppress it for the whole cooldown window — it is skipped
+        now and may be emitted on the next poll once the queue drains.
         """
         now = self._clock()
         routed = 0
@@ -169,8 +174,14 @@ class MarketFeedLoop:
             last = self._last_emitted.get(key)
             if last is not None and (now - last) < self.event_cooldown_s:
                 continue
+            if not self.queue.enqueue(event):
+                logger.warning(
+                    "Market feed queue full; dropping %s %s this cycle",
+                    symbol,
+                    event_type,
+                )
+                continue
             self._last_emitted[key] = now
-            self.queue.enqueue(event)
             if self._history is not None:
                 try:
                     self._history.add(event)
@@ -211,12 +222,19 @@ class MarketFeedLoop:
 
         Fail-safe: poll errors are logged and the loop continues. Cancellation
         propagates cleanly (no swallowed ``CancelledError``).
+
+        ``poll_once`` does blocking MT5 IPC (``copy_rates_from_pos``) which can
+        stall for seconds on a live terminal; running it on the event-loop
+        thread would freeze every FastAPI endpoint. We offload it to a worker
+        thread (``asyncio.to_thread``) so the loop stays responsive.
         """
         self._running = True
         try:
             while self._running:
                 try:
-                    self.poll_once()
+                    await asyncio.to_thread(self.poll_once)
+                except asyncio.CancelledError:
+                    raise
                 except Exception as exc:  # noqa: BLE001 - belt and braces
                     logger.warning("Market feed poll failed: %s", exc)
                 await asyncio.sleep(self.interval_s)

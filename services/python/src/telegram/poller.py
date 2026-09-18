@@ -150,12 +150,20 @@ class TelegramPoller:
             self._offset = value + 1
 
     async def run(self) -> None:
-        """Poll until :meth:`stop`; failures back off, cancellation is clean."""
+        """Poll until :meth:`stop`; failures back off, cancellation is clean.
+
+        ``poll_once`` performs **blocking** HTTP I/O (long-poll ``getUpdates``
+        up to ``poll_timeout`` seconds plus ``sendMessage`` replies). Running
+        it directly in the async event loop would freeze every FastAPI
+        endpoint for the entire duration of each poll. We therefore offload
+        the blocking call to a worker thread via ``asyncio.to_thread`` so the
+        event loop stays responsive.
+        """
         self._running = True
         try:
             while self._running:
                 try:
-                    self.poll_once()
+                    await asyncio.to_thread(self.poll_once)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:  # noqa: BLE001 - the loop never dies

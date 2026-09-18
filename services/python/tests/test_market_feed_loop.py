@@ -250,6 +250,84 @@ def test_cooldown_expiry_allows_re_emission() -> None:
     assert second > 0, "after the cooldown window the event may re-emit"
 
 
+def test_full_queue_does_not_burn_the_cooldown() -> None:
+    """Regression: an event dropped by a *full* queue must not be suppressed.
+
+    The cooldown stamp used to be written before ``enqueue``; when the queue
+    was full the event was dropped *and* marked as emitted, so it could not be
+    re-emitted for the whole cooldown window — a silent data loss. The stamp
+    must only be written once the event actually entered the queue.
+    """
+    queue = EventQueue(max_size=0)  # every enqueue returns False
+    loop = _loop(
+        queue=queue,
+        connector=_MovingConnector(),
+        event_cooldown_s=300.0,
+    )
+
+    dropped = loop.poll_once()
+    assert dropped == 0, "nothing can be enqueued into a zero-size queue"
+    assert len(queue) == 0
+    # The precise bug: dropped events must not be stamped as emitted.
+    assert loop._last_emitted == {}, (
+        "cooldown was burned for events that never entered the queue — they "
+        "would be suppressed for the whole window"
+    )
+
+    # Queue drains (in reality the scheduler consumed events); a later poll of
+    # the same moving market must still be able to emit — the cooldown was
+    # never burned.
+    queue._max_size = 1000
+    emitted = loop.poll_once()
+
+    assert emitted > 0, (
+        "an event dropped by a full queue must be retried on the next poll, "
+        "not suppressed for the whole cooldown window"
+    )
+
+
+def test_run_offloads_blocking_poll_to_thread() -> None:
+    """Regression: ``poll_once`` does blocking MT5 IPC (read-only get_ohlc).
+
+    A stalled MT5 terminal can block the read for seconds. Running it on the
+    event-loop thread would freeze every FastAPI endpoint, so ``run()`` must
+    offload it (``asyncio.to_thread``) and keep the loop ticking.
+    """
+    import threading
+
+    release = threading.Event()
+
+    class _BlockingConnector:
+        def get_ohlc(self, symbol, timeframe="M5", count=200):
+            release.wait(timeout=2.0)  # simulate stalled MT5 IPC
+            return _bars(symbol)
+
+    loop = _loop(connector=_BlockingConnector())
+    ticks = {"n": 0}
+
+    async def ticker() -> None:
+        while True:
+            await asyncio.sleep(0.02)
+            ticks["n"] += 1
+
+    async def scenario() -> None:
+        task = asyncio.create_task(loop.run())
+        tk = asyncio.create_task(ticker())
+        await asyncio.sleep(0.3)
+        release.set()
+        loop.stop()
+        await asyncio.wait_for(task, timeout=3.0)
+        tk.cancel()
+        try:
+            await tk
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(scenario())
+
+    assert ticks["n"] >= 5, f"event loop was blocked during poll — only {ticks['n']} ticks"
+
+
 # ---------------------------------------------------------------------------
 # Async lifecycle
 # ---------------------------------------------------------------------------

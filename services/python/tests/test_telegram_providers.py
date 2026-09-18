@@ -160,6 +160,34 @@ def test_review_provider_returns_latest_lesson(monkeypatch) -> None:
     assert "signal-consistent" in out["summary"]
 
 
+def test_review_provider_reads_real_lesson_key(monkeypatch) -> None:
+    """Regression: real lesson dicts use ``lesson`` (not ``text``).
+
+    ``learning.feedback.record_review_lesson`` writes ``lesson``; reading only
+    ``text`` made ``/review`` always show an empty summary.
+    """
+
+    class _Store:
+        def get_lessons(self):
+            return [
+                {
+                    "outcome": "loss",
+                    "lesson": "Widen stops on high-volatility sessions.",
+                    "symbol": "EURUSD",
+                }
+            ]
+
+    monkeypatch.setattr(
+        "agents.analysts.review_agent.get_lesson_store",
+        lambda: _Store(),
+    )
+
+    out = build_default_providers()["review_provider"]()
+
+    assert "[loss]" in out["summary"]
+    assert "Widen stops" in out["summary"]
+
+
 def test_review_provider_is_honest_when_empty(monkeypatch) -> None:
     class _Store:
         def get_lessons(self):
@@ -173,6 +201,69 @@ def test_review_provider_is_honest_when_empty(monkeypatch) -> None:
     out = build_default_providers()["review_provider"]()
 
     assert "No lessons" in out["summary"]
+
+
+# ---------------------------------------------------------------------------
+# /risk — limits from pipeline gate + account safety from trading.RiskGate
+# ---------------------------------------------------------------------------
+def test_risk_provider_converts_margin_to_fraction(monkeypatch) -> None:
+    """Regression: MT5 ``account.margin`` is absolute, but the safety check
+    expects a 0–1 fraction; passing the raw value would always look like a
+    margin call. Also asserts the safety check comes from the *trading*
+    RiskGate variant (the pipeline gate has no ``check_account_safety``).
+    """
+    captured: dict = {}
+
+    class _Account:
+        equity = 10000.0
+        balance = 10000.0
+        margin = 500.0  # 5% used → fraction 0.05
+
+    class _TradingRiskGate:
+        def check_account_safety(self, **kwargs):
+            captured.update(kwargs)
+            return {"safe": True, "flags": {"margin_ok": True}}
+
+    class _Gate:
+        _max_spread_pips = 3.0
+        _min_rr = 1.8
+        _engine = None
+
+    class _Pipeline:
+        risk_gate = _Gate()
+
+    class _Runtime:
+        pipeline = _Pipeline()
+
+    monkeypatch.setattr("src.orchestration.runtime.get_runtime", lambda: _Runtime())
+    monkeypatch.setattr("src.mt5.connector.get_account_info", lambda: _Account())
+    monkeypatch.setattr("src.trading.risk_gate.RiskGate", _TradingRiskGate)
+
+    out = build_default_providers()["risk_provider"]()
+
+    assert captured["account_equity"] == 10000.0
+    assert captured["margin_used"] == 0.05  # 500 / 10000 — a fraction, not 500
+    assert out["safe"] is True
+    assert out["limits"]["max_spread_pips"] == 3.0
+    assert out["limits"]["min_rr"] == 1.8
+
+
+def test_risk_provider_degrades_when_account_unavailable(monkeypatch) -> None:
+    class _Runtime:
+        pipeline = None
+
+    monkeypatch.setattr("src.orchestration.runtime.get_runtime", lambda: _Runtime())
+
+    def _boom():
+        raise RuntimeError("mt5 down")
+
+    monkeypatch.setattr("src.mt5.connector.get_account_info", lambda: _boom())
+
+    out = build_default_providers()["risk_provider"]()
+
+    # Honest degradation: no fabricated safety verdict, but limits still there.
+    assert out["safe"] is None
+    assert "limits" in out
 
 
 # ---------------------------------------------------------------------------

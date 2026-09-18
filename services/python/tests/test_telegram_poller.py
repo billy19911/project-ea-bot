@@ -227,6 +227,58 @@ def test_run_survives_read_failures_and_stops_cleanly() -> None:
     assert poller.running is False
 
 
+def test_run_offloads_blocking_poll_to_thread() -> None:
+    """Regression: ``poll_once`` does blocking HTTP I/O (long-poll up to 25s).
+
+    Running it directly in the event loop would freeze every FastAPI endpoint
+    for the whole poll duration. The loop must offload it (``asyncio.to_thread``)
+    so concurrent tasks keep ticking while a poll is in flight.
+    """
+    import threading
+
+    release = threading.Event()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Block the worker thread until released (simulates a long-poll).
+        release.wait(timeout=2.0)
+        return _updates_response([])
+
+    poller = TelegramPoller(
+        token=TOKEN,
+        allowlist=[AUTHORIZED],
+        client=_client(handler),
+        idle_delay=0.01,
+        error_delay=0.01,
+    )
+
+    ticks = {"n": 0}
+
+    async def ticker() -> None:
+        while True:
+            await asyncio.sleep(0.02)
+            ticks["n"] += 1
+
+    async def scenario() -> None:
+        task = asyncio.create_task(poller.run())
+        tk = asyncio.create_task(ticker())
+        await asyncio.sleep(0.3)
+        release.set()
+        poller.stop()
+        await asyncio.wait_for(task, timeout=3.0)
+        tk.cancel()
+        try:
+            await tk
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(scenario())
+
+    # If poll_once ran on the event-loop thread, the ticker could not run
+    # during the blocking call — fewer than 5 ticks in 0.3 s means the loop
+    # was frozen. With to_thread the ticker runs ~15 times.
+    assert ticks["n"] >= 5, f"event loop was blocked during poll — only {ticks['n']} ticks"
+
+
 # ---------------------------------------------------------------------------
 # Env wiring — OFF by default, requires its own token
 # ---------------------------------------------------------------------------
