@@ -1,6 +1,6 @@
 # PHASE 6 — Market Feed Loop (MT5 → Event → Queue → Pipeline)
 
-> Bagian dari [MASTER_PLAN_V2_OPERATIONAL_LOOP.md](./MASTER_PLAN_V2_OPERATIONAL_LOOP.md) | Status: PENDING FASE 5
+> Bagian dari [MASTER_PLAN_V2_OPERATIONAL_LOOP.md](./MASTER_PLAN_V2_OPERATIONAL_LOOP.md) | Status: **SELESAI** (commit Fase 6)
 
 ## Goal
 
@@ -88,12 +88,12 @@ if settings.market_feed_enabled:
 
 ## Acceptance Criteria
 
-- [ ] `MARKET_FEED_ENABLED=false` (default) → tidak ada task tambahan; perilaku lama utuh
-- [ ] Enabled → queue terisi otomatis; `/scheduler/status` `events_processed` naik
-- [ ] MT5 down → loop tetap hidup, hanya log warning (fail-safe terbukti di test)
-- [ ] Dedupe mencegah event kembar; history event terekam
-- [ ] Tidak ada jalur kode yang bisa memicu order dari feed
-- [ ] Full suite lulus; Flake8/black/isort bersih; commit + push
+- [x] `MARKET_FEED_ENABLED=false` (default) → tidak ada task tambahan; perilaku lama utuh
+- [x] Enabled → queue terisi otomatis; `/scheduler/status` `events_processed` naik (E2E: 20)
+- [x] MT5 down → loop tetap hidup, hanya log warning (fail-safe terbukti di test)
+- [x] Dedupe mencegah event kembar; history event terekam
+- [x] Tidak ada jalur kode yang bisa memicu order dari feed
+- [x] Full suite lulus (1475 passed); Flake8/black/isort bersih; commit + push
 
 ## Verifikasi Manual
 

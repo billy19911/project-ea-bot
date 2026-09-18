@@ -1,5 +1,6 @@
 """FastAPI application skeleton for EA Bot Python services."""
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -129,6 +130,28 @@ async def lifespan(app: FastAPI):
             runtime.scheduler.poll_interval,
         )
 
+    # Market feed loop (Fase 6) — OFF by default; operator opts in via
+    # MARKET_FEED_ENABLED=true. Reads MT5 OHLC (read-only) and enqueues
+    # detected events so the scheduler analyses the market autonomously.
+    feed_task = None
+    if settings.market_feed_enabled:
+        from .trading.feed_loop import MarketFeedLoop
+
+        runtime = get_runtime()
+        feed = MarketFeedLoop(
+            queue=runtime.queue,
+            symbols=[s.strip() for s in settings.market_feed_symbols.split(",") if s.strip()],
+            timeframe=settings.market_feed_timeframe,
+            interval_s=settings.market_feed_interval_s,
+        )
+        feed_task = asyncio.create_task(feed.run())
+        logger.info(
+            "Market feed loop started (symbols=%s, timeframe=%s, interval=%ss)",
+            settings.market_feed_symbols,
+            settings.market_feed_timeframe,
+            settings.market_feed_interval_s,
+        )
+
     # Trend sampler (UI/UX ide #8) — ring buffer of REAL samples for the
     # dashboard charts. Started regardless of the scheduler: account equity
     # moves whether or not an event is queued. Read-only against MT5.
@@ -153,6 +176,13 @@ async def lifespan(app: FastAPI):
         await trend_sampler.stop()
     except Exception:  # pragma: no cover - defensive
         logger.exception("Error stopping trend sampler")
+
+    if feed_task is not None:
+        try:
+            feed.stop()
+            await asyncio.wait_for(feed_task, timeout=5.0)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Error stopping market feed loop")
 
     if scheduler_task is not None:
         try:

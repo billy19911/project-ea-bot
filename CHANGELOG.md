@@ -3,6 +3,16 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Fase 6: Market Feed Loop (MT5 → Event → Queue → Pipeline)
+- **`MarketFeedLoop` (`services/python/src/trading/feed_loop.py`)**: Loop latar belakang otonom yang membaca OHLC MT5 (**read-only**) → deteksi event (`EventDetector` + dedupe + history) → enqueue ke queue produksi → scheduler memproses. **Default OFF** (`MARKET_FEED_ENABLED=false`) — operator menyalakan eksplisit.
+  - Fail-safe: MT5/detector error → log warning + skip siklus; loop tidak pernah mati. Satu simbol gagal tidak memblokir simbol lain.
+  - Dedupe fingerprint: bar identik (length + waktu + close terakhir) tidak di-emit ulang — pasar tenang tidak membanjiri queue.
+  - Guard invariant: modul tidak boleh mengimport execution/order; tidak punya method pemesan order (ditegakkan test).
+- **Config baru (`src/config.py`)**: `MARKET_FEED_ENABLED` (default `false`), `MARKET_FEED_SYMBOLS` (`XAUUSD`), `MARKET_FEED_TIMEFRAME` (`M5`), `MARKET_FEED_INTERVAL_S` (`60`).
+- **Wiring lifespan (`src/main.py`)**: saat enabled → `MarketFeedLoop` di-start sebagai task; saat shutdown → `stop()` + await (pola sama dengan scheduler). Disabled → tidak ada task tambahan, perilaku lama utuh.
+- **`_RecordingPipelineProxy` (`src/orchestration/runtime.py`)**: Siklus yang dijalankan scheduler (event feed) kini dicatat ke history `/decisions` + trace store — sebelumnya scheduler memanggil `pipeline.run()` langsung sehingga keputusan feed tidak pernah terlihat.
+- **Verifikasi**: 15 test baru; full suite **1475 passed**; Flake8/black/isort bersih. **E2E nyata** (server :8001, feed ON, simulasi read-only): `events_processed` naik ke 20, `/decisions` terisi otomatis (`EMA_CROSSOVER`, `STOCH_OVERBOUGHT`, `MOMENTUM_BULLISH`) **tanpa POST manual** — sistem menganalisis market sendiri.
+
 ### Added — Fase 5: Telegram Transport Nyata + Report Otomatis ke User
 - **`HttpTelegramTransport` (`services/python/src/telegram/transport.py`)**: Transport HTTP nyata satu-satunya yang bicara ke `api.telegram.org` — POST `/bot<token>/sendMessage` via `httpx` (timeout 10s), injectable client (test pakai `httpx.MockTransport`, nol network). Error di-raise sebagai `TelegramTransportError` **tanpa membocorkan token** (URL/token tidak pernah muncul di pesan error/log). Guard invariant: modul ini tidak boleh mengimport execution/MT5 (ditegakkan guard test, pola sama dengan gateway).
 - **`src/telegram/notifier.py`**: `summarize_pipeline_result()` (ringkasan jujur: event_type, decision, status, confidence, summary ≤240 char, risk_reason, executed, trace_id), `notify_pipeline_result()` (fail-safe — tidak pernah raise; diam saat fitur mati), `build_gateway_from_env()` + singleton `get_gateway()`/`set_gateway()` (token kosong → transport `None`, perilaku lama).

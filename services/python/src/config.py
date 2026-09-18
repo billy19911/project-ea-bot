@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = Field(default=True, alias="SCHEDULER_ENABLED")
     scheduler_poll_interval: float = Field(default=1.0, alias="SCHEDULER_POLL_INTERVAL")
 
+    # Market feed loop (Fase 6) — reads MT5 OHLC (read-only) and enqueues
+    # detected events so the scheduler analyses the market autonomously.
+    # Default OFF: the operator must explicitly switch it on.
+    market_feed_enabled: bool = Field(default=False, alias="MARKET_FEED_ENABLED")
+    market_feed_symbols: str = Field(default="XAUUSD", alias="MARKET_FEED_SYMBOLS")
+    market_feed_timeframe: str = Field(default="M5", alias="MARKET_FEED_TIMEFRAME")
+    market_feed_interval_s: float = Field(default=60.0, alias="MARKET_FEED_INTERVAL_S")
+
     # Risk engine
     max_position_size: float = Field(default=1000.0, alias="MAX_POSITION_SIZE")
     max_daily_loss: float = Field(default=500.0, alias="MAX_DAILY_LOSS")

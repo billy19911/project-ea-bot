@@ -66,6 +66,37 @@ def _notify_cycle_result(result: Any) -> None:
         logger.warning("Telegram cycle report failed (%s); cycle unaffected", type(exc).__name__)
 
 
+class _RecordingPipelineProxy:
+    """Pipeline proxy that records scheduler-driven cycles in the runtime.
+
+    The scheduler calls ``pipeline.run(event, context)`` directly — not via
+    :meth:`OrchestrationRuntime.run_cycle` — so without this proxy a
+    scheduler-driven decision (e.g. from the market feed loop, Fase 6) would
+    never appear in ``/decisions`` or the trace store. The proxy delegates to
+    the real pipeline and records the serialised result (fail-safe: a
+    recording failure never affects the cycle).
+    """
+
+    def __init__(self, pipeline: TradingPipeline, runtime: "OrchestrationRuntime") -> None:
+        self._pipeline = pipeline
+        self._runtime = runtime
+
+    def run(self, event: Any, context: Optional[dict[str, Any]] = None) -> Any:
+        """Run the wrapped pipeline and record the finished cycle."""
+        result = self._pipeline.run(event, context)
+        try:
+            record = result.to_dict() if hasattr(result, "to_dict") else result
+            if isinstance(record, dict):
+                self._runtime._record_decision(record)
+                self._runtime._record_trace(record)
+        except Exception as exc:  # noqa: BLE001 - recording must never break a cycle
+            logger.warning("Failed to record scheduler cycle: %s", exc)
+        return result
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._pipeline, name)
+
+
 class OrchestrationRuntime:
     """Holds the pipeline, event queue, and scheduler for one process."""
 
@@ -95,7 +126,9 @@ class OrchestrationRuntime:
             if scheduler is not None
             else AutonomousScheduler(
                 queue=self.queue,
-                pipeline=self.pipeline,
+                # Scheduler-driven cycles are recorded through the proxy so
+                # /decisions + traces stay complete for feed-driven events.
+                pipeline=_RecordingPipelineProxy(self.pipeline, self),
                 reconciliation_runner=self.reconciliation,
                 context_provider=lambda evt: get_news_feed_provider().get_news_context(
                     symbol=str(getattr(evt, "symbol", "XAUUSD") or "XAUUSD")

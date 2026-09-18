@@ -1,7 +1,7 @@
 # MASTER PLAN V2 — Operational Loop (Fase 5–7)
 
 > Lanjutan [MASTER_PLAN.md](./MASTER_PLAN.md) (Fase 1–4: Upgrade Kecerdasan Agent — SELESAI & TER-PUSH).
-> Status: **Fase 5 SELESAI** · Fase 6–7 PENDING.
+> Status: **Fase 5–6 SELESAI** · Fase 7 PENDING.
 
 ## Ringkasan
 
@@ -54,7 +54,9 @@ tetapi 3 sambungan operasional belum terpasang:
    transport httpx + notifier + `result_hook` pipeline + `/telegram/status` jujur;
    24 test baru, full suite **1460 passed**.
 2. **Fase 6** — [PHASE6_MARKET_FEED_LOOP.md](./PHASE6_MARKET_FEED_LOOP.md)
-   (sistem analisis sendiri saat market bergerak)
+   (sistem analisis sendiri saat market bergerak) — ✅ **SELESAI**:
+   `MarketFeedLoop` read-only + lifespan wiring + proxy perekam; E2E terbukti
+   `events_processed` naik & `/decisions` terisi otomatis; full suite **1475 passed**.
 3. **Fase 7** — [PHASE7_LEARNING_FEEDBACK.md](./PHASE7_LEARNING_FEEDBACK.md)
    (belajar dari hasil trade: lessons dibaca kembali + analytics nyata)
 
