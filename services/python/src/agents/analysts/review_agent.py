@@ -26,7 +26,7 @@ from agents.base import AgentPriority, BaseAgent
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PostTradeReviewAgent", "InMemoryLessonStore", "get_lesson_store"]
+__all__ = ["PostTradeReviewAgent", "InMemoryLessonStore", "get_lesson_store", "set_lesson_store"]
 
 _BULLISH_TOKENS = {"BUY", "LONG", "BULLISH", "BULL", "UP"}
 _BEARISH_TOKENS = {"SELL", "SHORT", "BEARISH", "BEAR", "DOWN"}
@@ -114,9 +114,24 @@ class InMemoryLessonStore:
 _default_lesson_store = InMemoryLessonStore()
 
 
-def get_lesson_store() -> InMemoryLessonStore:
-    """Return the process-wide default lesson store."""
+def get_lesson_store() -> Any:
+    """Return the process-wide default lesson store.
+
+    The default is an in-memory store; production wiring may swap in a
+    persistent store (e.g. ``learning.JsonlLessonStore``) via
+    :func:`set_lesson_store` before agents are constructed.
+    """
     return _default_lesson_store
+
+
+def set_lesson_store(store: Any) -> None:
+    """Override the process-wide default lesson store (tests / startup wiring).
+
+    Agents already constructed keep their injected store; agents built after
+    this call (or without an explicit store) use ``store``.
+    """
+    global _default_lesson_store
+    _default_lesson_store = store if store is not None else InMemoryLessonStore()
 
 
 class PostTradeReviewAgent(BaseAgent):

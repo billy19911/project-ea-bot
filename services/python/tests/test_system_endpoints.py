@@ -201,11 +201,21 @@ def test_tasks_empty_is_honest() -> None:
 # ---------------------------------------------------------------------------
 # /learning/analytics
 # ---------------------------------------------------------------------------
-def test_learning_analytics_unavailable() -> None:
-    resp = client.get("/learning/analytics")
+def test_learning_analytics_empty_store_is_honest() -> None:
+    """An empty lesson store reports available:false — real data only."""
+    from agents.analysts.review_agent import InMemoryLessonStore, get_lesson_store, set_lesson_store
+
+    original = get_lesson_store()
+    set_lesson_store(InMemoryLessonStore())
+    try:
+        resp = client.get("/learning/analytics")
+    finally:
+        set_lesson_store(original)
+
     assert resp.status_code == 200
     data = resp.json()
     assert data["available"] is False
-    assert data["source"] == "unavailable"
+    assert data["source"] == "lesson_store"
+    assert data["lessons"] == []
     assert data["by_hour"] == []
     assert data["supervisor_kpis"] is None

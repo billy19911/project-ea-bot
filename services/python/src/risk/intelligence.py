@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agents.base import AgentPriority, BaseAgent
+from learning.feedback import format_lessons_reason
 
 
 @dataclass
@@ -573,6 +574,13 @@ class RiskLead(BaseAgent):
             f"Aggregate risk score {avg_score:.3f} → {overall_risk}",
         ]
         reasons.extend(f"warning: {warning}" for warning in warnings[:5])
+        # Phase 7 (advisory only): cite prior lessons without touching the
+        # signal or confidence — advisory evidence stays deterministic.
+        lessons_reason = format_lessons_reason(
+            context.get("lessons") if isinstance(context, dict) else None
+        )
+        if lessons_reason:
+            reasons.append(lessons_reason)
 
         return {
             "agent": self.name,

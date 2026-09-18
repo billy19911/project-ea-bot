@@ -1,6 +1,6 @@
 # PHASE 7 — Learning Feedback Loop (Lessons → Analisis)
 
-> Bagian dari [MASTER_PLAN_V2_OPERATIONAL_LOOP.md](./MASTER_PLAN_V2_OPERATIONAL_LOOP.md) | Status: PENDING FASE 6
+> Bagian dari [MASTER_PLAN_V2_OPERATIONAL_LOOP.md](./MASTER_PLAN_V2_OPERATIONAL_LOOP.md) | Status: **SELESAI** (commit Fase 7)
 
 ## Goal
 
@@ -92,13 +92,22 @@ class LessonFeedbackProvider:
 
 ## Acceptance Criteria
 
-- [ ] Lessons bertahan lintas restart (JSONL) — dibuktikan test reload
-- [ ] `context["lessons"]` muncul di analisis & reasons MarketLead/RiskLead (advisory, tanpa ubah signal)
-- [ ] `/learning/analytics` melaporkan lessons nyata (`available:true`, by_outcome benar)
-- [ ] Kedua jalur review menulis ke store yang sama
-- [ ] Fail-safe: store korup / provider error tidak memutus pipeline
-- [ ] Backward-compat: tanpa provider/store baru, semua perilaku lama utuh
-- [ ] Full suite lulus; Flake8/black/isort bersih; commit + push
+- [x] Lessons bertahan lintas restart (JSONL) — dibuktikan test reload
+- [x] `context["lessons"]` muncul di analisis & reasons MarketLead/RiskLead (advisory, tanpa ubah signal)
+- [x] `/learning/analytics` melaporkan lessons nyata (`available:true`, by_outcome benar)
+- [x] Kedua jalur review menulis ke store yang sama
+- [x] Fail-safe: store korup / provider error tidak memutus pipeline
+- [x] Backward-compat: tanpa provider/store baru, semua perilaku lama utuh
+- [x] Full suite lulus; Flake8/black/isort bersih; commit + push
+
+## Hasil Implementasi (2026-09-18)
+
+- **Test**: 26 test baru; full suite **1501 passed, 0 failed** (1475 → 1501).
+- **E2E terbukti**: `TRADE_CLOSE` → lesson JSONL → `/learning/analytics` (`available:true`, `by_outcome:{win:1}`)
+  → reload instance baru → siklus `TREND_BULLISH` berikutnya membawa reason
+  `"Historical lessons: 1 (W 1/L 0) — last: …"`; pipeline produksi memakai `JsonlLessonStore`.
+- **Wiring**: lifespan `main.py` (store + bridge `ReviewAutoTrigger`) + runtime `_build_pipeline`
+  (`LessonFeedbackProvider`).
 
 ## Follow-up (di luar fase ini)
 

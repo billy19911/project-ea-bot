@@ -374,18 +374,57 @@ async def put_settings(patch: SettingsPatch) -> dict[str, Any]:
 
 @router.get("/learning/analytics", summary="Learning-loop analytics")
 async def learning_analytics() -> dict[str, Any]:
-    """Return learning-loop/performance data if available in-process.
+    """Report real lesson-store analytics (Fase 7).
 
-    There is no process-wide performance tracker wired yet, so this honestly
-    reports ``unavailable`` rather than fabricating analytics.
+    Reads the process-wide lesson store — the same sink both review paths
+    (ReviewLead events and the paper-close auto-trigger) write to. An empty
+    store reports ``available:false`` honestly; a broken store degrades to
+    ``source="unavailable"`` instead of raising. Hour/regime/performance
+    breakdowns stay empty until a performance tracker is wired (never
+    fabricated).
     """
+    try:
+        from agents.analysts.review_agent import get_lesson_store
+
+        raw_lessons = get_lesson_store().all_lessons() or []
+        lessons = [lesson for lesson in raw_lessons if isinstance(lesson, dict)]
+    except Exception as exc:  # fail-safe: a status endpoint must never raise
+        logger.warning("Lesson store unavailable for analytics: %s", exc)
+        return {
+            "available": False,
+            "source": "unavailable",
+            "by_hour": [],
+            "by_regime": [],
+            "supervisor_kpis": None,
+            "lessons": [],
+            "by_outcome": {},
+            "total": 0,
+        }
+
+    by_outcome: dict[str, int] = {}
+    for lesson in lessons:
+        outcome = str(lesson.get("outcome") or "").strip().lower()
+        if outcome:
+            by_outcome[outcome] = by_outcome.get(outcome, 0) + 1
+
     return {
-        "available": False,
-        "source": "unavailable",
+        "available": bool(lessons),
+        "source": "lesson_store",
         "by_hour": [],
         "by_regime": [],
         "supervisor_kpis": None,
-        "lessons": [],
+        "lessons": [
+            {
+                "id": str(lesson.get("trade_id") or lesson.get("id") or f"lesson_{index}"),
+                "category": str(lesson.get("category") or ""),
+                "outcome": str(lesson.get("outcome") or ""),
+                "symbol": str(lesson.get("symbol") or ""),
+                "text": str(lesson.get("lesson") or lesson.get("rule") or ""),
+            }
+            for index, lesson in enumerate(lessons)
+        ],
+        "by_outcome": by_outcome,
+        "total": len(lessons),
     }
 
 

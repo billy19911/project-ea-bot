@@ -162,12 +162,24 @@ class OrchestrationRuntime:
         risk_gate = RiskGate(RiskEngine(), MoneyManager())
         execution_engine = ExecutionEngine(mt5_connector=None)
         order_builder = OrderBuilder()
+        # Fase 7: prior lessons are summarised into the analysis context
+        # (advisory only). Fail-safe — a missing/broken store simply disables
+        # feedback without affecting the pipeline.
+        lesson_provider = None
+        try:
+            from agents.analysts.review_agent import get_lesson_store
+            from learning.feedback import LessonFeedbackProvider
+
+            lesson_provider = LessonFeedbackProvider(get_lesson_store())
+        except Exception as exc:  # noqa: BLE001 - feedback must never block wiring
+            logger.warning("Lesson feedback not wired: %s", exc)
         return TradingPipeline(
             supervisor=supervisor,
             risk_gate=risk_gate,
             execution_engine=execution_engine,
             order_builder=order_builder,
             result_hook=_notify_cycle_result,
+            lesson_provider=lesson_provider,
         )
 
     def run_cycle(

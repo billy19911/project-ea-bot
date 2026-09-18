@@ -28,7 +28,12 @@ from .news_agent import (
     NewsSentimentOutput,
     SentimentDirection,
 )
-from .review_agent import InMemoryLessonStore, PostTradeReviewAgent, get_lesson_store
+from .review_agent import (
+    InMemoryLessonStore,
+    PostTradeReviewAgent,
+    get_lesson_store,
+    set_lesson_store,
+)
 from .structure_analyst import (
     KeyLevel,
     SignalType,
@@ -67,4 +72,5 @@ __all__ = [
     "PostTradeReviewAgent",
     "InMemoryLessonStore",
     "get_lesson_store",
+    "set_lesson_store",
 ]

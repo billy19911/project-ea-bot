@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agents.base import AgentPriority, BaseAgent
+from learning.feedback import format_lessons_reason
 
 logger = logging.getLogger(__name__)
 
@@ -751,6 +752,12 @@ class MarketLead(BaseAgent):
             reasons.append(
                 f"dissent: {name} reported " f"{specialist_results[name].get('signal', 'NEUTRAL')}"
             )
+
+        # Phase 7 (advisory only): cite prior lessons without touching the
+        # signal or confidence — the deterministic synthesis stays intact.
+        lessons_reason = format_lessons_reason(context.get("lessons"))
+        if lessons_reason:
+            reasons.append(lessons_reason)
 
         return {
             "agent": self.name,

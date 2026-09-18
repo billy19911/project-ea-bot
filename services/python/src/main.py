@@ -89,6 +89,26 @@ def register_default_agents() -> list[str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan — startup and shutdown hooks."""
+    # Learning feedback (Fase 7) — persist lessons across restarts (JSONL) and
+    # bridge the paper-close review path into the *same* store the ReviewLead
+    # writes to. Wired before agent registration so ReviewLead captures the
+    # persistent store. Fail-safe: a wiring error must never block startup.
+    try:
+        from agents.analysts.review_agent import get_lesson_store, set_lesson_store
+        from learning.feedback import record_review_lesson
+        from learning.lesson_store import JsonlLessonStore
+        from review.auto_trigger import ReviewAutoTrigger, set_auto_trigger
+
+        set_lesson_store(JsonlLessonStore())
+        set_auto_trigger(
+            ReviewAutoTrigger(
+                on_review=lambda record: record_review_lesson(get_lesson_store(), record)
+            )
+        )
+        logger.info("Learning feedback wired: persistent lesson store + review bridge")
+    except Exception:  # pragma: no cover - defensive, never block startup
+        logger.exception("Learning feedback wiring failed (system continues)")
+
     # Startup — register every default analyst (idempotent).
     added = register_default_agents()
     logger.info("Registered default agents: %s", added or "none (already present)")

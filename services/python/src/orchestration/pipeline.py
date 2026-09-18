@@ -178,6 +178,9 @@ class TradingPipeline:
         dependency_guard: Optional execution-critical guard (§24).
         result_hook: Optional callable invoked exactly once per cycle with the
             finished :class:`PipelineResult` (reporting/notification seam).
+        lesson_provider: Optional learning-feedback provider (Phase 7) exposing
+            ``summarize_for_symbol(symbol)``; when present, prior lessons are
+            attached to the analysis context (advisory only).
     """
 
     def __init__(
@@ -189,6 +192,7 @@ class TradingPipeline:
         strategy_version: str = "v1.0.0",
         dependency_guard: Optional[Any] = None,
         result_hook: Optional[Callable[[PipelineResult], None]] = None,
+        lesson_provider: Optional[Any] = None,
     ) -> None:
         self.supervisor = supervisor
         self.risk_gate = risk_gate
@@ -205,6 +209,10 @@ class TradingPipeline:
         # deliver Telegram reports. A broken hook is swallowed: reporting must
         # never break the autonomous loop.
         self.result_hook = result_hook
+        # Optional learning-feedback provider (Phase 7). When present, prior
+        # lessons are summarised into the analysis context so leads can cite
+        # them (advisory only — signals/confidence stay deterministic).
+        self.lesson_provider = lesson_provider
 
     # ------------------------------------------------------------------
     # Public API
@@ -410,7 +418,8 @@ class TradingPipeline:
         analysis_context: dict[str, Any] = dict(context)
         analysis_context["event_type"] = event_type
         analysis_context.setdefault("event", event)
-        # Surface symbol from the event when the caller omitted it.
+        # Surface symbol from the event when the caller omitted it (needed
+        # *before* lesson feedback so the summary is symbol-scoped).
         if "symbol" not in analysis_context:
             symbol = None
             if isinstance(event, dict):
@@ -419,6 +428,14 @@ class TradingPipeline:
                 symbol = getattr(event, "symbol", None)
             if symbol:
                 analysis_context["symbol"] = symbol
+        # Phase 7: attach prior lessons (advisory). Fail-safe — a broken
+        # provider must never break the cycle.
+        if self.lesson_provider is not None:
+            try:
+                symbol = analysis_context.get("symbol") or "*"
+                analysis_context["lessons"] = self.lesson_provider.summarize_for_symbol(str(symbol))
+            except Exception as exc:  # noqa: BLE001 - feedback must never break a cycle
+                logger.warning("Lesson provider failed (cycle continues): %s", exc)
         return analysis_context
 
     # ------------------------------------------------------------------
