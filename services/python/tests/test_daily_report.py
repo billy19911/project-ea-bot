@@ -119,13 +119,16 @@ def test_deals_older_than_window_are_excluded():
 
 
 def test_best_and_worst_day_tracked():
-    import time
+    from datetime import datetime
 
-    now = int(time.time())
-    yesterday = now - 24 * 3600
+    # Anchor to local midnight so the two deals are guaranteed to land in
+    # different calendar days. Using "now - 60s" would flip days when the
+    # suite runs just after midnight and merge both deals into one bucket
+    # (30 - 10 = 20) → false failure.
+    midnight = int(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
     deals = [
-        _deal(now - 60, 1, 30.0),  # hari ini
-        _deal(yesterday, 1, -10.0),  # kemarin
+        _deal(midnight + 60, 1, 30.0),  # hari ini, 00:01
+        _deal(midnight - 60, 1, -10.0),  # kemarin, 23:59
     ]
     r = aggregate_deals(deals, days=7)
     assert r["totals"]["best_day"]["net"] == 30.0
