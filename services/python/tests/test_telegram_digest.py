@@ -165,7 +165,7 @@ def test_queue_routes_report_into_digest() -> None:
     assert flush_pipeline_digest() is True
     assert len(transport.sent) == 1
     _, text = transport.sent[0]
-    assert "Market Analysis" in text  # gateway title
+    assert "Ringkasan Siklus" in text  # gateway title for the digest
     assert "1 siklus" in text
 
 

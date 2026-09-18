@@ -423,7 +423,7 @@ def _send_digest(items: list[dict[str, Any]]) -> bool:
     text = format_pipeline_digest(items)
     if not text:
         return False
-    ok = bool(gateway.notify("pipeline_result", text))
+    ok = bool(gateway.notify("pipeline_digest", text))
     if ok:
         logger.info("Telegram digest sent (%d cycles)", len(items))
     return ok

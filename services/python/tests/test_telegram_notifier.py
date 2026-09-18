@@ -245,7 +245,9 @@ def test_runtime_cycle_triggers_notification() -> None:
 
     assert transport.sent, "expected a pipeline report to be delivered"
     _, text = transport.sent[0]
-    assert "Market Analysis" in text
+    # Runtime cycles go through the anti-spam digest → digest title.
+    assert "Ringkasan Siklus" in text
+    assert "BREAKOUT" in text
 
 
 def test_runtime_cycle_survives_broken_gateway() -> None:
