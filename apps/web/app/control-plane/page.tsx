@@ -259,7 +259,12 @@ export default function ControlPlanePage() {
           'Content-Type': 'application/json',
           'X-Trace-Id': traceId,
         },
-        body: JSON.stringify({ symbol: 'EURUSD', timeframe: 'M15' }),
+        // Kirim event eksplisit: payload datar {symbol, timeframe} membuat
+        // pipeline memakai event_type UNKNOWN. MARKET_SCAN = scan manual dan
+        // dirutekan ke komite MarketLead (prefix MARKET_).
+        body: JSON.stringify({
+          event: { event_type: 'MARKET_SCAN', symbol: 'EURUSD', timeframe: 'M15' },
+        }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {

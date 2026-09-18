@@ -45,6 +45,19 @@ def test_pipeline_run_echoes_provided_trace_id():
     assert data["trace_id"] == "abc123trace"
 
 
+def test_pipeline_run_accepts_flat_payload_as_event():
+    """Dashboard-style flat payloads become the event (not UNKNOWN)."""
+    _reset_runtime()
+    resp = client.post(
+        "/pipeline/run",
+        json={"event_type": "MARKET_SCAN", "symbol": "XAUUSD", "timeframe": "M15"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["event_type"] == "MARKET_SCAN"
+    assert data["symbol"] == "XAUUSD"
+
+
 # ---------------------------------------------------------------------------
 # GET /observability/traces
 # ---------------------------------------------------------------------------

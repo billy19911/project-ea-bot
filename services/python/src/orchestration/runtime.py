@@ -50,18 +50,21 @@ RECONCILIATION_HISTORY_LIMIT = 50
 
 
 def _notify_cycle_result(result: Any) -> None:
-    """Deliver one finished cycle to the Telegram notifier (fail-safe).
+    """Offer one finished cycle to the Telegram notifier (fail-safe).
 
     Wired into :class:`TradingPipeline` as its ``result_hook`` so *both* the
     HTTP-triggered cycles and the scheduler-driven cycles report to the user.
+    Reports go through the anti-spam digest: a burst of autonomous cycles
+    becomes ONE compact message per window instead of one message per cycle
+    (urgent trade outcomes are still delivered immediately).
     Any failure here — import, conversion, delivery — is swallowed: reporting
     must never break the autonomous loop.
     """
     try:
-        from ..telegram.notifier import notify_pipeline_result
+        from ..telegram.notifier import queue_pipeline_result
 
         payload = result.to_dict() if hasattr(result, "to_dict") else result
-        notify_pipeline_result(payload)
+        queue_pipeline_result(payload)
     except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
         logger.warning("Telegram cycle report failed (%s); cycle unaffected", type(exc).__name__)
 
@@ -200,12 +203,26 @@ class OrchestrationRuntime:
         Returns:
             The serialised :class:`PipelineResult` with an added ``trace_id``.
         """
-        result = self.pipeline.run(event, context)
+        # Surface the caller's trace id to the pipeline so the cycle result (and
+        # therefore the Telegram report) can reference it.
+        run_context = dict(context) if isinstance(context, dict) else {}
+        if trace_id:
+            run_context.setdefault("trace_id", trace_id)
+        result = self.pipeline.run(event, run_context)
         record = result.to_dict()
         if trace_id:
             record["trace_id"] = str(trace_id)
         self._record_decision(record)
         self._record_trace(record, trace_id)
+        # A manual (HTTP-triggered) cycle is user-initiated: flush the pending
+        # Telegram digest now so the user sees the outcome without waiting for
+        # the digest window. Fail-safe — reporting never breaks the cycle.
+        try:
+            from ..telegram.notifier import flush_pipeline_digest
+
+            flush_pipeline_digest()
+        except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
+            logger.warning("Telegram digest flush failed (%s)", type(exc).__name__)
         # Periodic reconciliation (PRD_V2 §14) — fail-safe, never raises.
         self._reconciliation_runner.tick()
         return record

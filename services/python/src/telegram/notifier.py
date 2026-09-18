@@ -4,7 +4,11 @@
 Wires the read-only :class:`TelegramGateway` into the orchestration loop:
 
 * ``summarize_pipeline_result`` — compact, honest summary of a pipeline record,
-* ``notify_pipeline_result`` — fail-safe delivery through the shared gateway,
+* ``format_pipeline_report`` / ``format_pipeline_digest`` — human formatting,
+* ``queue_pipeline_result`` / ``flush_pipeline_digest`` — anti-spam digest: a
+  burst of autonomous cycles becomes ONE compact message per window instead of
+  one message per cycle (urgent trade outcomes bypass the digest),
+* ``notify_pipeline_result`` — immediate single-report delivery,
 * ``build_gateway_from_env`` / ``get_gateway`` / ``set_gateway`` — env-driven
   gateway singleton (no token → transport stays ``None``, feature is off).
 
@@ -20,7 +24,11 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Optional
+import re
+import threading
+import time
+from collections import Counter
+from typing import Any, Callable, Optional
 
 from .gateway import TelegramGateway
 from .transport import HttpTelegramTransport
@@ -28,17 +36,44 @@ from .transport import HttpTelegramTransport
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "PipelineDigest",
     "build_gateway_from_env",
+    "flush_pipeline_digest",
+    "format_pipeline_digest",
+    "format_pipeline_report",
+    "get_digest",
     "get_gateway",
-    "set_gateway",
     "notify_pipeline_result",
+    "queue_pipeline_result",
+    "reset_digest",
+    "set_digest",
+    "set_gateway",
     "summarize_pipeline_result",
 ]
 
 # Max length of the free-text summary carried in a report (Telegram-friendly).
 _SUMMARY_MAX_CHARS = 240
+# Digest defaults: one compact message per window (or per N cycles, whichever
+# comes first). Tune via TELEGRAM_DIGEST_WINDOW_S / TELEGRAM_DIGEST_MAX_ITEMS.
+_DIGEST_WINDOW_S_DEFAULT = 600.0
+_DIGEST_MAX_ITEMS_DEFAULT = 15
+# Distinct (event, decision, direction) groups kept in a digest body.
+_DIGEST_GROUP_MAX = 6
+# Decisions that bypass the digest and are delivered immediately.
+_URGENT_DECISIONS = {"BUY", "SELL"}
+
+_MARKET_DIRECTION_RE = re.compile(r"market_lead:\s*([A-Z_]+)")
+_MARKET_CONF_RE = re.compile(r"market_lead:\s*[A-Z_]+\s*\(conf=([0-9]*\.?[0-9]+)\)")
+_CONFIDENCE_RE = re.compile(r"conf=([0-9]*\.?[0-9]+)")
+
+# Machine reasons translated for the report body (fallback: raw value).
+_REASON_LABELS = {
+    "no actionable proposal": "tidak ada proposal layak eksekusi",
+    "risk did not approve": "ditolak oleh risk gate",
+}
 
 _gateway: Optional[TelegramGateway] = None
+_digest: Optional["PipelineDigest"] = None
 
 
 def _parse_allowlist(raw: str) -> list[str]:
@@ -81,6 +116,334 @@ def set_gateway(gateway: Optional[TelegramGateway]) -> None:
     _gateway = gateway
 
 
+# ---------------------------------------------------------------------------
+# Digest (anti-spam coalescing)
+# ---------------------------------------------------------------------------
+def _digest_enabled_from_env() -> bool:
+    """Return False only for an explicit opt-out (default: enabled)."""
+    raw = (os.getenv("TELEGRAM_DIGEST_ENABLED") or "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _float_from_env(name: str, default: float) -> float:
+    """Read a float from the environment with a fail-safe default."""
+    try:
+        return float(os.getenv(name) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _default_timer(delay: float, callback: Callable[[], None]) -> Any:
+    """Arm a daemon timer firing ``callback`` after ``delay`` seconds."""
+    timer = threading.Timer(delay, callback)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
+class PipelineDigest:
+    """Coalesce pipeline summaries into one Telegram message per window.
+
+    A busy market detects several events per poll; without coalescing the user
+    receives one message per cycle. This buffer keeps the reports for
+    ``window_s`` seconds (or until ``max_items`` accumulate) and then delivers
+    a single compact digest.
+
+    Args:
+        send: Callable receiving the finished batch; defaults to the shared
+            gateway delivery (``_send_digest``).
+        window_s: Seconds a batch may wait before it is flushed.
+        max_items: Flush threshold — a batch of this size is sent immediately.
+        timer_factory: Injectable timer factory ``(delay, callback) -> timer``
+            (tests inject a fake; production uses a daemon ``threading.Timer``).
+    """
+
+    def __init__(
+        self,
+        send: Optional[Callable[[list[dict[str, Any]]], bool]] = None,
+        window_s: float = _DIGEST_WINDOW_S_DEFAULT,
+        max_items: int = _DIGEST_MAX_ITEMS_DEFAULT,
+        timer_factory: Optional[Callable[[float, Callable[[], None]], Any]] = None,
+    ) -> None:
+        self._send = send
+        self.window_s = max(0.0, float(window_s))
+        self.max_items = max(1, int(max_items))
+        self._timer_factory = timer_factory or _default_timer
+        self._lock = threading.Lock()
+        self._items: list[dict[str, Any]] = []
+        self._timer: Any = None
+
+    @property
+    def pending(self) -> int:
+        """Number of cycles currently waiting in the batch."""
+        with self._lock:
+            return len(self._items)
+
+    def add(self, item: dict[str, Any]) -> bool:
+        """Queue one cycle summary; flushes automatically at the threshold."""
+        with self._lock:
+            self._items.append(item)
+            if len(self._items) >= self.max_items:
+                self._flush_locked()
+            else:
+                self._arm_timer_locked()
+            return True
+
+    def flush(self) -> bool:
+        """Send the pending batch now (no-op when the batch is empty)."""
+        with self._lock:
+            return self._flush_locked()
+
+    # -- internals ---------------------------------------------------------
+    def _arm_timer_locked(self) -> None:
+        if self._timer is not None or self.window_s <= 0:
+            return
+        self._timer = self._timer_factory(self.window_s, self._on_timer)
+
+    def _on_timer(self) -> None:
+        with self._lock:
+            self._timer = None
+            self._flush_locked()
+
+    def _flush_locked(self) -> bool:
+        self._cancel_timer_locked()
+        if not self._items:
+            return False
+        items, self._items = self._items, []
+        send = self._send or _send_digest
+        try:
+            return bool(send(items))
+        except Exception as exc:  # noqa: BLE001 - reporting must never break a cycle
+            logger.warning("Telegram digest send failed (%s)", type(exc).__name__)
+            return False
+
+    def _cancel_timer_locked(self) -> None:
+        timer = self._timer
+        self._timer = None
+        if timer is None:
+            return
+        try:
+            timer.cancel()
+        except Exception:  # pragma: no cover - defensive
+            pass
+
+
+def get_digest() -> Optional[PipelineDigest]:
+    """Return the process-wide digest, building it from env on first use.
+
+    Returns ``None`` when the digest is disabled via
+    ``TELEGRAM_DIGEST_ENABLED=false`` — callers then deliver every report
+    immediately.
+    """
+    global _digest
+    if _digest is None:
+        if not _digest_enabled_from_env():
+            return None
+        _digest = PipelineDigest(
+            window_s=_float_from_env("TELEGRAM_DIGEST_WINDOW_S", _DIGEST_WINDOW_S_DEFAULT),
+            max_items=int(_float_from_env("TELEGRAM_DIGEST_MAX_ITEMS", _DIGEST_MAX_ITEMS_DEFAULT)),
+        )
+    return _digest
+
+
+def set_digest(digest: Optional[PipelineDigest]) -> None:
+    """Override the process-wide digest (used by tests)."""
+    global _digest
+    _digest = digest
+
+
+def reset_digest() -> None:
+    """Drop the process-wide digest so the next use rebuilds it from env."""
+    set_digest(None)
+
+
+# ---------------------------------------------------------------------------
+# Formatting (pure helpers)
+# ---------------------------------------------------------------------------
+def _time_of(stamp: Any) -> str:
+    """Format a unix timestamp as local ``HH:MM`` (fail-safe to now)."""
+    try:
+        value = float(stamp)
+    except (TypeError, ValueError):
+        value = time.time()
+    return time.strftime("%H:%M", time.localtime(value))
+
+
+def _market_direction(summary: Any) -> str:
+    """Extract the market committee direction from a summary string."""
+    match = _MARKET_DIRECTION_RE.search(str(summary or ""))
+    return match.group(1) if match else ""
+
+
+def _consensus_pct(summary: str, confidence: Any) -> str:
+    """Return a short consensus label (``conf=1.00`` → ``100%``).
+
+    Prefers the market committee's own confidence (``market_lead: X (conf=…)``);
+    falls back to the first ``conf=`` in the summary, then to the numeric
+    ``confidence`` field.
+    """
+    raw = ""
+    match = _MARKET_CONF_RE.search(summary or "") or _CONFIDENCE_RE.search(summary or "")
+    if match:
+        raw = match.group(1)
+    else:
+        try:
+            number = float(confidence or 0.0)
+        except (TypeError, ValueError):
+            number = 0.0
+        raw = f"{number:.2f}" if number else ""
+    if not raw:
+        return ""
+    try:
+        return f"{float(raw) * 100.0:.0f}%"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _reason_label(reason: str) -> str:
+    """Translate the common machine reasons; unknown reasons pass through."""
+    text = str(reason or "").strip()
+    if not text:
+        return ""
+    for key, label in _REASON_LABELS.items():
+        if text == key or text.startswith(f"{key}:"):
+            return label
+    return text
+
+
+def _digest_group_lines(batch: list[dict[str, Any]]) -> list[str]:
+    """Group a batch by (event, decision, direction) for a compact body."""
+    groups: dict[tuple[str, str, str], int] = {}
+    for item in batch:
+        key = (
+            str(item.get("event_type") or "—"),
+            str(item.get("decision") or "—"),
+            _market_direction(item.get("summary")),
+        )
+        groups[key] = groups.get(key, 0) + 1
+
+    lines: list[str] = []
+    for (event, decision, direction), count in list(groups.items())[:_DIGEST_GROUP_MAX]:
+        suffix = f" · {direction}" if direction else ""
+        times = f" ×{count}" if count > 1 else ""
+        lines.append(f"• {event}{times} → {decision}{suffix}")
+    hidden = len(groups) - _DIGEST_GROUP_MAX
+    if hidden > 0:
+        lines.append(f"… dan {hidden} jenis lainnya")
+    return lines
+
+
+def format_pipeline_report(summary: dict[str, Any]) -> str:
+    """Format ONE cycle as a compact multi-line report body."""
+    head = [_time_of(summary.get("queued_at"))]
+    symbol = str(summary.get("symbol") or "").strip()
+    if symbol:
+        head.append(symbol)
+    event = str(summary.get("event_type") or "").strip()
+    if event:
+        head.append(event)
+    lines = ["🕒 " + " · ".join(head)]
+
+    decision = str(summary.get("decision") or "—")
+    direction = _market_direction(summary.get("summary"))
+    tail = f" · arah {direction}" if direction else ""
+    consensus = _consensus_pct(str(summary.get("summary") or ""), summary.get("confidence"))
+    if consensus:
+        tail += f" (konsensus {consensus})"
+    lines.append(f"🎯 {decision}{tail}")
+
+    reason = _reason_label(str(summary.get("risk_reason") or ""))
+    if reason:
+        lines.append(f"💬 {reason}")
+    if summary.get("executed"):
+        lines.append("⚡ dieksekusi")
+    trace = str(summary.get("trace_id") or "").strip()
+    if trace:
+        lines.append(f"🔎 trace {trace}")
+    return "\n".join(lines)
+
+
+def format_pipeline_digest(items: list[dict[str, Any]]) -> str:
+    """Format a batch of cycles as ONE compact digest message body."""
+    batch = [item for item in items if isinstance(item, dict)]
+    if not batch:
+        return ""
+
+    span = _time_of(batch[0].get("queued_at"))
+    if len(batch) > 1:
+        span = f"{span}–{_time_of(batch[-1].get('queued_at'))}"
+    symbols = sorted({str(item.get("symbol") or "").strip() for item in batch} - {""})
+    header = f"🕒 {span} · {len(batch)} siklus"
+    if symbols:
+        label = symbols[0] if len(symbols) == 1 else f"{len(symbols)} simbol"
+        header += f" · {label}"
+
+    directions = Counter(d for d in (_market_direction(item.get("summary")) for item in batch) if d)
+    neutral = len(batch) - sum(directions.values())
+    direction_line = " · ".join(f"{name} ({count})" for name, count in directions.most_common())
+    if neutral:
+        if direction_line:
+            direction_line += f" · netral ({neutral})"
+        else:
+            direction_line = f"netral ({neutral})"
+
+    decisions = Counter(str(item.get("decision") or "—") for item in batch)
+    decision_line = " · ".join(f"{name} ({count})" for name, count in decisions.most_common())
+    executed = sum(1 for item in batch if item.get("executed"))
+    execution_line = f"eksekusi {executed}" if executed else "tanpa eksekusi"
+
+    lines = [
+        header,
+        f"📈 Arah: {direction_line or 'netral'}",
+        f"🎯 Keputusan: {decision_line} · {execution_line}",
+    ]
+    # A single shared reason (the common no-trade case) is stated once.
+    reasons = {
+        _reason_label(str(item.get("risk_reason") or ""))
+        for item in batch
+        if str(item.get("risk_reason") or "").strip()
+    }
+    if len(reasons) == 1:
+        reason = reasons.pop()
+        if reason:
+            lines.append(f"💬 {reason}")
+    lines.append("")
+    lines.extend(_digest_group_lines(batch))
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Delivery
+# ---------------------------------------------------------------------------
+def _send_digest(items: list[dict[str, Any]]) -> bool:
+    """Deliver one digest batch through the shared gateway (fail-safe)."""
+    gateway = get_gateway()
+    if gateway is None or getattr(gateway, "transport", None) is None:
+        return False
+    text = format_pipeline_digest(items)
+    if not text:
+        return False
+    ok = bool(gateway.notify("pipeline_result", text))
+    if ok:
+        logger.info("Telegram digest sent (%d cycles)", len(items))
+    return ok
+
+
+def _deliver(summary: dict[str, Any]) -> bool:
+    """Send one summary through the shared gateway (fail-safe)."""
+    gateway = get_gateway()
+    if gateway is None or getattr(gateway, "transport", None) is None:
+        return False
+    return bool(gateway.notify("pipeline_result", format_pipeline_report(summary)))
+
+
+def _is_urgent(summary: dict[str, Any]) -> bool:
+    """True when the outcome must bypass the digest (trade-level events)."""
+    if summary.get("executed"):
+        return True
+    return str(summary.get("decision") or "").upper() in _URGENT_DECISIONS
+
+
 def summarize_pipeline_result(result: dict[str, Any]) -> dict[str, Any]:
     """Return a compact, JSON-friendly summary of a pipeline record.
 
@@ -107,14 +470,47 @@ def summarize_pipeline_result(result: dict[str, Any]) -> dict[str, Any]:
         "risk_reason": str(record.get("risk_reason") or ""),
         "executed": bool(record.get("executed", False)),
         "trace_id": str(record.get("trace_id") or ""),
+        "symbol": str(record.get("symbol") or ""),
     }
+
+
+def queue_pipeline_result(result: dict[str, Any]) -> bool:
+    """Queue one finished cycle for the anti-spam digest. Never raises.
+
+    Urgent outcomes (executed trades / BUY-SELL decisions) bypass the digest
+    and are delivered immediately. Returns True when the report was accepted
+    (queued or sent), False when Telegram is not configured.
+    """
+    try:
+        gateway = get_gateway()
+        if gateway is None or getattr(gateway, "transport", None) is None:
+            return False
+        summary = summarize_pipeline_result(result)
+        if _is_urgent(summary):
+            return _deliver(summary)
+        digest = get_digest()
+        if digest is None:
+            return _deliver(summary)
+        summary["queued_at"] = time.time()
+        return digest.add(summary)
+    except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
+        logger.warning("Telegram cycle report failed (%s); cycle unaffected", type(exc).__name__)
+        return False
+
+
+def flush_pipeline_digest() -> bool:
+    """Send the pending digest batch now (no-op when empty or disabled)."""
+    digest = _digest
+    if digest is None:
+        return False
+    return digest.flush()
 
 
 def notify_pipeline_result(
     result: dict[str, Any],
     gateway: Optional[TelegramGateway] = None,
 ) -> bool:
-    """Send a ``pipeline_result`` report. Never raises.
+    """Send a ``pipeline_result`` report immediately. Never raises.
 
     Returns True when the message was dispatched, False otherwise (no
     transport / no allowlist / delivery failure — all silently degraded).
@@ -128,7 +524,7 @@ def notify_pipeline_result(
         if getattr(gw, "transport", "unknown") is None:
             return False
         summary = summarize_pipeline_result(result)
-        return bool(gw.notify("pipeline_result", summary))
+        return bool(gw.notify("pipeline_result", format_pipeline_report(summary)))
     except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
         logger.warning("Telegram pipeline report failed (%s); cycle unaffected", type(exc).__name__)
         return False

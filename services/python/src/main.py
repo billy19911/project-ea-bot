@@ -235,6 +235,16 @@ async def lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - defensive
             logger.exception("Error stopping autonomous scheduler")
 
+    # Flush any pending Telegram digest batch so a clean shutdown never
+    # leaves queued reports undelivered. Fail-safe: a Telegram outage must
+    # never block shutdown.
+    try:
+        from .telegram.notifier import flush_pipeline_digest
+
+        flush_pipeline_digest()
+    except Exception:  # pragma: no cover - defensive
+        logger.exception("Error flushing Telegram digest")
+
     if connector.is_live_mode():
         connector.shutdown()
 

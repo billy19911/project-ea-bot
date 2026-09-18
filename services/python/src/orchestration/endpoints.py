@@ -27,10 +27,19 @@ router = APIRouter(tags=["orchestration"])
 
 
 class PipelineRunRequest(BaseModel):
-    """Payload for a single pipeline cycle."""
+    """Payload for a single pipeline cycle.
+
+    Two shapes are accepted (backward compatible):
+
+    * canonical — ``{"event": {...}, "context": {...}}``;
+    * flat — ``{"event_type": ..., "symbol": ...}`` sent straight by the
+      dashboard button; any flat keys become the event payload so the cycle
+      runs against the intended symbol/event instead of an ``UNKNOWN`` event.
+    """
 
     event: dict[str, Any] = Field(default_factory=dict)
     context: dict[str, Any] = Field(default_factory=dict)
+    model_config = {"extra": "allow"}
 
 
 @router.post("/pipeline/run", summary="Run one autonomous pipeline cycle")
@@ -44,8 +53,15 @@ async def run_pipeline(
     echoed in the response; otherwise a new trace id is generated.
     """
     trace_id = (x_trace_id or "").strip() or uuid.uuid4().hex[:12]
+    event = dict(payload.event) if payload.event else {}
+    if not event:
+        # Flat payload (dashboard button): promote the extra top-level keys to
+        # the event payload so symbol/timeframe/event_type are honoured.
+        extra = dict(getattr(payload, "model_extra", None) or {})
+        if extra:
+            event = extra
     runtime = get_runtime()
-    result = runtime.run_cycle(payload.event, payload.context, trace_id=trace_id)
+    result = runtime.run_cycle(event, payload.context, trace_id=trace_id)
     result["trace_id"] = trace_id
     return result
 

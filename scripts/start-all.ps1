@@ -52,6 +52,10 @@ $feedInt  = EnvOr 'MARKET_FEED_INTERVAL_S' '60'
 $feedCool = EnvOr 'MARKET_FEED_EVENT_COOLDOWN_S' '300'
 $tgPollOn = EnvOr 'TELEGRAM_POLLER_ENABLED' 'false'
 $tgPollTok = EnvOr 'TELEGRAM_POLLER_BOT_TOKEN' ''
+$tgDigestOn = EnvOr 'TELEGRAM_DIGEST_ENABLED' 'true'
+$tgDigestWin = EnvOr 'TELEGRAM_DIGEST_WINDOW_S' '600'
+$tgDigestMax = EnvOr 'TELEGRAM_DIGEST_MAX_ITEMS' '15'
+''
 $lessonP  = EnvOr 'LESSON_STORE_PATH' ''
 
 if (-not $jwt) {
@@ -108,6 +112,10 @@ if (Test-Port 8000) {
   # Telegram inbound poller (opsional) — read-only commands; needs its OWN bot.
   $env:TELEGRAM_POLLER_ENABLED = $tgPollOn
   if ($tgPollTok) { $env:TELEGRAM_POLLER_BOT_TOKEN = $tgPollTok }
+  # Telegram report digest (anti-spam) — satu pesan ringkas per jendela waktu.
+  $env:TELEGRAM_DIGEST_ENABLED = $tgDigestOn
+  $env:TELEGRAM_DIGEST_WINDOW_S = $tgDigestWin
+  $env:TELEGRAM_DIGEST_MAX_ITEMS = $tgDigestMax
   # Lesson store (Fase 7) — persistent JSONL path (default logs/lessons.jsonl).
   if ($lessonP) { $env:LESSON_STORE_PATH = $lessonP }
   Start-Process -FilePath $pyExe `

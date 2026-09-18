@@ -119,6 +119,10 @@ class PipelineResult:
     event_type: str = ""
     confidence: float = 0.0
     summary: str = ""
+    # Correlation fields surfaced for reports/notifications (Phase 5):
+    # ``trace_id`` is echoed from the caller context, ``symbol`` from the event.
+    trace_id: str = ""
+    symbol: str = ""
 
     def add_stage(self, stage: str, status: str, detail: str = "") -> None:
         """Append a stage entry (as a plain dict) to the trace."""
@@ -145,6 +149,8 @@ class PipelineResult:
             "event_type": self.event_type,
             "confidence": self.confidence,
             "summary": self.summary,
+            "trace_id": self.trace_id,
+            "symbol": self.symbol,
         }
 
 
@@ -246,6 +252,13 @@ class TradingPipeline:
             strategy_version=self.strategy_version,
             event_type=event_type,
         )
+
+        # Correlation fields for reports/notifications (Phase 5): the caller's
+        # trace id when supplied (else the cycle's own event id, which the trace
+        # store also uses) and the event symbol travel with the result so the
+        # Telegram report can reference a real, traceable id.
+        result.trace_id = str(context.get("trace_id") or event_id)
+        result.symbol = self._event_symbol(event, context)
 
         # ── Step A: Supervisor analysis ─────────────────────────────────
         analysis_context = self._build_analysis_context(event, event_type, context)
@@ -407,6 +420,18 @@ class TradingPipeline:
         # Normalise enums to their value.
         value = getattr(candidate, "value", candidate)
         return str(value) if value is not None else "UNKNOWN"
+
+    @staticmethod
+    def _event_symbol(event: Any, context: dict[str, Any]) -> str:
+        """Return the traded symbol from the event (fallback: context)."""
+        symbol = None
+        if isinstance(event, dict):
+            symbol = event.get("symbol")
+        else:
+            symbol = getattr(event, "symbol", None)
+        if not symbol:
+            symbol = context.get("symbol")
+        return str(symbol) if symbol else ""
 
     def _build_analysis_context(
         self,
