@@ -16,7 +16,7 @@ export function getAuthToken(): string | null {
   }
 }
 
-function generateTraceId(): string {
+export function generateTraceId(): string {
   try {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
       return crypto.randomUUID();

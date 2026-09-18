@@ -30,6 +30,8 @@
   cursor: pointer;
 }
 
+.tab:disabled { opacity: 0.55; cursor: not-allowed; }
+
 .tabActive { background: var(--primary); border-color: var(--primary); color: var(--surface); }
 
 /* Ide #4: navigasi bergrup — baris grup (kategori) di atas baris tab. */
@@ -90,5 +92,137 @@
 
 .loading { color: var(--text-muted); padding: 24px; font-size: 14px; }
 
-/* Zona berbahaya (F3): arm/disarm eksekusi nyata dipisah visual dari aksi
-   read-only — merah = butuh kesadaran penuh. */
+/* ── Layout kartu & KPI ─────────────────────────────────────────────────── */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
+}
+
+.card h2 { margin: 0 0 12px; font-size: 17px; color: var(--text); }
+
+.card h3 { margin: 14px 0 6px; font-size: 14px; color: var(--text-secondary); }
+
+.kpiRow { display: flex; gap: 24px; flex-wrap: wrap; }
+
+.kpi { display: flex; flex-direction: column; gap: 2px; }
+
+.kpiValue { font-size: 22px; font-weight: 700; color: var(--text); }
+
+.kpiLabel { font-size: 12px; color: var(--text-muted); }
+
+.bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--neutral-muted);
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.barFill { height: 100%; background: var(--primary); }
+
+.barFillGreen { height: 100%; background: var(--success); }
+
+/* ── Tabel ──────────────────────────────────────────────────────────────── */
+
+.tableWrapper { overflow-x: auto; }
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th,
+.table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table th {
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.table tbody tr:last-child td { border-bottom: none; }
+
+.table td strong { display: block; color: var(--text); }
+
+.table td small { display: block; margin-top: 2px; color: var(--text-muted); }
+
+.table td code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: var(--surface-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* ── Badge status ───────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.success { background: var(--success-soft); color: var(--success); }
+
+.warning { background: var(--warning-soft); color: var(--warning); }
+
+.danger { background: var(--danger-soft); color: var(--danger); }
+
+.info { background: var(--primary-soft); color: var(--primary); }
+
+.muted { background: var(--neutral-muted); color: var(--text-secondary); }
+
+/* ── Empty state ────────────────────────────────────────────────────────── */
+
+.empty { color: var(--text-muted); font-size: 13px; padding: 12px 0; }
+
+/* ── Aksi & zona berbahaya (F3) ─────────────────────────────────────────── */
+
+.actions { margin-top: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+.dangerZone {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--danger-border);
+  background: var(--danger-soft);
+  border-radius: 10px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ── Jejak komite / lessons ─────────────────────────────────────────────── */
+
+.traceRound {
+  border-left: 3px solid var(--border-strong);
+  padding: 8px 12px;
+  margin: 8px 0;
+  background: var(--surface-muted);
+  border-radius: 0 8px 8px 0;
+}
+
+.traceSpeaker { font-weight: 700; color: var(--text); font-size: 13px; }
+
+.traceText { color: var(--text-secondary); font-size: 12.5px; margin-top: 3px; }

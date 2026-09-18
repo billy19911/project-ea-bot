@@ -2,14 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import styles from './page.module.css';
-import { apiFetch } from '../../lib/api';
+import { apiFetch, generateTraceId, getAuthToken } from '../../lib/api';
 import AppShell from '../../components/AppShell';
 import DailyReport from '../../components/DailyReport';
 
-// API routes require a Bearer token (PRD_V2 §28). The app has no login UI yet,
-// so the "Run Cycle" action stays disabled until a token is present in
-// localStorage under this key (mirroring the `ea-bot-settings` convention used
-// on the home page). Do NOT invent a login flow here.
+// API routes require a Bearer token (PRD_V2 §28). The /login page mints and
+// stores the token in localStorage under this key; the "Run Cycle" action
+// tells the operator how to get one when it is missing.
 const AUTH_TOKEN_KEY = 'ea-bot-token';
 
 type CycleResult =
@@ -82,8 +81,9 @@ const GROUP_OF: Record<Tab, string> = TAB_GROUPS.reduce(
   {} as Record<Tab, string>,
 );
 
-function badgeClass(status: string, s: Record<string, string>): string {
-  const v = status.toUpperCase();
+// Accepts anything: a missing/unknown status must never crash the page.
+function badgeClass(status: unknown, s: Record<string, string>): string {
+  const v = String(status ?? '').toUpperCase();
   if (['UP', 'HEALTHY', 'ACTIVE', 'APPROVED', 'COMPLETED', 'OPEN', 'AVAILABLE', 'CONNECTED'].includes(v)) return s.success;
   if (['DEGRADED', 'WARNING', 'PENDING', 'QUEUED', 'UPCOMING', 'RUNNING'].includes(v)) return s.warning;
   if (['DOWN', 'FAILED', 'REJECTED', 'CRITICAL', 'UNAVAILABLE'].includes(v)) return s.danger;
@@ -159,6 +159,21 @@ function formatClock(v: unknown): string {
   return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 }
 
+// Epoch seconds (from the API) → local clock string. Invalid → em dash.
+function formatEpoch(v: unknown): string {
+  const n = typeof v === 'number' ? v : Number(v);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  return formatClock(new Date(n * 1000).toISOString());
+}
+
+// Money/number display: thousands separators, at most 2 decimals.
+function formatAmount(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '—';
+  const n = typeof v === 'number' ? v : Number(v);
+  if (!Number.isFinite(n)) return '—';
+  return n.toLocaleString('id-ID', { maximumFractionDigits: 2 });
+}
+
 // Gateway errors often carry raw HTML (e.g. an upstream 404 page). Strip tags,
 // collapse whitespace, and cap the length so the UI never dumps markup.
 function shortError(raw: unknown): string {
@@ -176,7 +191,7 @@ export default function ControlPlanePage() {
   const [hasToken, setHasToken] = useState(false);
 
   useEffect(() => {
-    // Read only; no login UI exists yet (see AUTH_TOKEN_KEY comment above).
+    // Read-only presence check; /login owns minting/storing the token.
     setHasToken(!!localStorage.getItem(AUTH_TOKEN_KEY));
   }, []);
 
@@ -226,9 +241,15 @@ export default function ControlPlanePage() {
   };
 
   const runCycle = async () => {
-    const token = localStorage.getItem(AUTH_TOKEN_KEY);
-    if (!token) return; // Button is disabled without a token; guard defensively.
-    const traceId = crypto.randomUUID();
+    const token = getAuthToken();
+    if (!token) {
+      setCycle({
+        kind: 'error',
+        message: 'Belum ada token. Buka halaman Masuk untuk membuat token dev, lalu klik lagi.',
+      });
+      return;
+    }
+    const traceId = generateTraceId();
     setRunningCycle(true);
     setCycle(null);
     try {
@@ -242,7 +263,13 @@ export default function ControlPlanePage() {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setCycle({ kind: 'error', message: body?.error || `HTTP ${res.status}` });
+        setCycle({
+          kind: 'error',
+          message:
+            res.status === 401
+              ? 'Token ditolak atau kedaluwarsa (401). Buka halaman Masuk untuk membuat token baru.'
+              : body?.error || `HTTP ${res.status}`,
+        });
         return;
       }
       setCycle({
@@ -271,8 +298,8 @@ export default function ControlPlanePage() {
           <button
             className={styles.tab}
             onClick={runCycle}
-            disabled={!hasToken || runningCycle}
-            title={hasToken ? 'Jalankan satu siklus pipeline' : 'Membutuhkan token di localStorage (ea-bot-token)'}
+            disabled={runningCycle}
+            title={hasToken ? 'Jalankan satu siklus pipeline' : 'Membutuhkan token — buka halaman Masuk dulu'}
           >
             {runningCycle ? '⏳ Menjalankan…' : '▶ Jalankan Siklus'}
           </button>
@@ -380,6 +407,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           </div>
           <h3>Services</h3>
           <table className={s.table}>
+            <thead><tr><th>Service</th><th>Status</th><th>Latency</th></tr></thead>
             <tbody>
               {overview.services?.map((svc: any) => (
                 <tr key={svc.name}>
@@ -395,7 +423,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           <h2>KPI Hari Ini</h2>
 <div className={s.kpiRow}>
               <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading?.open_positions)}</span><span className={s.kpiLabel}>Open positions</span></div>
-              <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading?.today?.unrealized_pnl)}</span><span className={s.kpiLabel}>Unrealized PnL</span></div>
+              <div className={s.kpi}><span className={s.kpiValue}>{formatAmount(trading?.today?.unrealized_pnl)}</span><span className={s.kpiLabel}>Unrealized PnL</span></div>
               <div className={s.kpi}><span className={s.kpiValue}>{
                 (trading?.today?.wins != null && trading?.today?.losses != null && (trading?.today?.wins + trading?.today?.losses) > 0)
                   ? ((trading?.today?.wins / (trading?.today?.wins + trading?.today?.losses)) * 100).toFixed(1) + '%'
@@ -421,9 +449,9 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
             <h2>Akun MT5 (Live)</h2>
             <div className={s.kpiRow}>
               <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading.account.login)}</span><span className={s.kpiLabel}>Login</span></div>
-              <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading.account.balance)}</span><span className={s.kpiLabel}>Balance ({trading.account.currency ?? '—'})</span></div>
-              <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading.account.equity)}</span><span className={s.kpiLabel}>Equity</span></div>
-              <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading.account.free_margin)}</span><span className={s.kpiLabel}>Free margin</span></div>
+              <div className={s.kpi}><span className={s.kpiValue}>{formatAmount(trading.account.balance)}</span><span className={s.kpiLabel}>Balance ({trading.account.currency ?? '—'})</span></div>
+              <div className={s.kpi}><span className={s.kpiValue}>{formatAmount(trading.account.equity)}</span><span className={s.kpiLabel}>Equity</span></div>
+              <div className={s.kpi}><span className={s.kpiValue}>{formatAmount(trading.account.free_margin)}</span><span className={s.kpiLabel}>Free margin</span></div>
             </div>
             <div className={s.mono}>{trading.account.server ?? '—'} · leverage {trading.account.leverage ?? '—'}</div>
           </section>
@@ -433,7 +461,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           <div className={s.kpiRow}>
             <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading.today?.trades)}</span><span className={s.kpiLabel}>Trades</span></div>
             <div className={s.kpi}><span className={s.kpiValue}>{trading.today?.wins == null || trading.today?.losses == null ? '—' : trading.today.wins + 'W / ' + trading.today.losses + 'L'}</span><span className={s.kpiLabel}>Win/Loss</span></div>
-            <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading.today?.unrealized_pnl)}</span><span className={s.kpiLabel}>Unrealized PnL</span></div>
+            <div className={s.kpi}><span className={s.kpiValue}>{formatAmount(trading.today?.unrealized_pnl)}</span><span className={s.kpiLabel}>Unrealized PnL</span></div>
             <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(trading.today?.profit_factor)}</span><span className={s.kpiLabel}>Profit factor</span></div>
           </div>
         </section>
@@ -449,7 +477,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                     <td><strong>{t.symbol}</strong></td>
                     <td>{t.side}</td>
                     <td>{t.volume}</td>
-                    <td style={{ color: t.pnl > 0 ? '#027a48' : t.pnl < 0 ? '#b42318' : undefined }}>{t.pnl}</td>
+                    <td style={{ color: t.pnl > 0 ? '#027a48' : t.pnl < 0 ? '#b42318' : undefined }}>{formatAmount(t.pnl)}</td>
                     <td><span className={`${s.badge} ${badgeClass(t.status, s)}`}>{t.status}</span></td>
                   </tr>
                 ))}
@@ -482,7 +510,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                   <td>{p.price_current ?? p.current_price ?? '—'}</td>
                   <td>{p.sl ?? '—'}</td>
                   <td>{p.tp ?? '—'}</td>
-                  <td style={{ color: pnl == null ? undefined : pnl > 0 ? '#027a48' : pnl < 0 ? '#b42318' : undefined }}>{pnl == null ? '—' : pnl}</td>
+                  <td style={{ color: pnl == null ? undefined : pnl > 0 ? '#027a48' : pnl < 0 ? '#b42318' : undefined }}>{formatAmount(pnl)}</td>
                 </tr>
                 );
               })}
@@ -504,9 +532,11 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
             <div className={s.kpi}><span className={s.kpiValue}>{nullableValue(market.regime?.label)}</span><span className={s.kpiLabel}>{market.regime?.confidence == null ? 'Regime' : `Regime (${Math.round(market.regime.confidence * 100)}%)`}</span></div>
           </div>
           <h3>Sessions</h3>
-          <table className={s.table}><tbody>
+          <table className={s.table}>
+            <thead><tr><th>Session</th><th>Status</th></tr></thead>
+            <tbody>
             {market.sessions?.length ? market.sessions.map((sess: any) => (
-              <tr key={sess.name}><td>{sess.name}</td><td><span className={`${s.badge} ${badgeClass(sess.status === 'open' ? 'OPEN' : sess.status.toUpperCase(), s)}`}>{sess.status}</span></td></tr>
+              <tr key={sess.name}><td>{sess.name}</td><td><span className={`${s.badge} ${badgeClass(sess.status === 'open' ? 'OPEN' : sess.status, s)}`}>{sess.status ?? '—'}</span></td></tr>
             )) : (
               <tr><td>—</td><td>Tidak ada data sesi.</td></tr>
             )}
@@ -556,8 +586,8 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                   <td>{a.type}</td>
                   <td><span className={`${s.badge} ${badgeClass(a.status, s)}`}>{a.status}</span></td>
                   <td>{a.priority}</td>
-                  <td>{a.last_active}</td>
-                  <td>{a.error_count > 0 ? <span className={`${s.badge} ${s.warning}`}>{a.error_count}</span> : '0'}</td>
+                  <td>{a.last_active ?? '—'}</td>
+                  <td>{(a.error_count ?? a.errorCount ?? 0) > 0 ? <span className={`${s.badge} ${s.warning}`}>{a.error_count ?? a.errorCount}</span> : '0'}</td>
                 </tr>
               ))}
             </tbody>
@@ -588,9 +618,12 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                 <td>{t.assignee}</td>
                 <td><span className={`${s.badge} ${badgeClass(t.status, s)}`}>{t.status}</span></td>
                 <td>{t.priority}</td>
-                <td>{t.duration_ms}ms</td>
+                <td>{t.duration_ms == null ? '—' : `${t.duration_ms}ms`}</td>
               </tr>
             ))}
+            {(!tasks.tasks || tasks.tasks.length === 0) && (
+              <tr><td colSpan={6}>Tidak ada task berjalan.</td></tr>
+            )}
           </tbody>
         </table>
       </section>
@@ -602,22 +635,28 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
     return (
       <section className={s.card}>
         <h2>Decision Explorer</h2>
-        <table className={s.table}>
-          <thead><tr><th>ID</th><th>Type</th><th>Symbol</th><th>Verdict</th><th>Confidence</th><th>Committee</th><th>Rationale</th></tr></thead>
-          <tbody>
-            {decisions.decisions?.map((d: any) => (
-              <tr key={d.id}>
-                <td className={s.mono}>{d.id}</td>
-                <td>{d.type}</td>
-                <td><strong>{d.symbol}</strong></td>
-                <td><span className={`${s.badge} ${badgeClass(d.verdict, s)}`}>{d.verdict}</span></td>
-                <td>{Math.round(d.confidence * 100)}%</td>
-                <td>{d.committee}</td>
-                <td>{d.rationale}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className={s.tableWrapper}>
+          <table className={s.table}>
+            <thead><tr><th>ID</th><th>Event</th><th>Verdict</th><th>Status</th><th>Risk</th><th>Confidence</th><th>Summary</th><th>Waktu</th></tr></thead>
+            <tbody>
+              {decisions.decisions?.map((d: any) => (
+                <tr key={d.decision_id ?? d.event_id}>
+                  <td className={s.mono}>{d.decision_id ?? '—'}</td>
+                  <td>{d.event_type ?? '—'}</td>
+                  <td><span className={`${s.badge} ${badgeClass(d.decision, s)}`}>{d.decision ?? '—'}</span></td>
+                  <td>{d.status ?? '—'}</td>
+                  <td>{d.risk_approved ? <span className={`${s.badge} ${s.success}`}>APPROVED</span> : <span className={`${s.badge} ${s.muted}`}>{d.risk_reason || 'REJECTED'}</span>}</td>
+                  <td>{d.confidence == null ? '—' : `${Math.round(d.confidence * 100)}%`}</td>
+                  <td>{d.summary ?? '—'}</td>
+                  <td>{formatEpoch(d.recorded_at)}</td>
+                </tr>
+              ))}
+              {(!decisions.decisions || decisions.decisions.length === 0) && (
+                <tr><td colSpan={8}>Tidak ada decision tercatat.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
     );
   }
@@ -640,7 +679,9 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
         </section>
         <section className={s.card}>
           <h2>Safety Controls</h2>
-          <table className={s.table}><tbody>
+          <table className={s.table}>
+            <thead><tr><th>Control</th><th>Status</th></tr></thead>
+            <tbody>
             <tr><td>Risk gate</td><td>{flagBadge(health.risk_gate?.safe, s, 'SAFE', 'UNSAFE')}</td></tr>
             <tr><td>Daily loss limit</td><td>{flagBadge(health.risk_gate?.flags?.daily_loss_ok, s, 'OK', 'BREACH')}</td></tr>
             <tr><td>Drawdown</td><td>{flagBadge(health.risk_gate?.flags?.drawdown_ok, s, 'OK', 'BREACH')}</td></tr>
@@ -713,13 +754,13 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
             {health.components?.map((c: any) => (
               <tr key={c.name}>
                 <td><strong>{c.name}</strong></td>
-                <td><span className={`${s.badge} ${badgeClass(c.status.toUpperCase(), s)}`}>{c.status}</span></td>
+                <td><span className={`${s.badge} ${badgeClass(c.status, s)}`}>{c.status ?? '—'}</span></td>
                 <td>{c.detail}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <div className={s.mono} style={{ marginTop: 10 }}>Checked at: {health.checked_at}</div>
+        {health.checked_at && <div className={s.mono} style={{ marginTop: 10 }}>Checked at: {health.checked_at}</div>}
       </section>
     );
   }
@@ -730,16 +771,19 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
       <div className={s.grid}>
         {committee.traces?.map((tr: any) => (
           <section className={s.card} key={tr.decision_id}>
-            <h2>Decision {tr.decision_id} — {tr.symbol}</h2>
+            <h2>Decision {tr.decision_id}{tr.symbol ? ` — ${tr.symbol}` : ''}</h2>
             {tr.rounds?.map((r: any, i: number) => (
               <div className={s.traceRound} key={i}>
-                <div className={s.traceSpeaker}>Round {r.round} · {r.speaker} <span className={`${s.badge} ${s.info}`}>{r.stance}</span> <span className={s.mono}>{Math.round(r.confidence * 100)}%</span></div>
-                <div className={s.traceText}>{r.argument}</div>
+                <div className={s.traceSpeaker}>Tahap {r.stage ?? i + 1} <span className={`${s.badge} ${badgeClass(r.status, s)}`}>{r.status ?? '—'}</span></div>
+                <div className={s.traceText}>{r.detail ?? '—'}</div>
               </div>
             ))}
-            <h3>Final: <span className={`${s.badge} ${badgeClass(tr.final?.verdict, s)}`}>{tr.final?.verdict}</span> ({Math.round((tr.final?.confidence || 0) * 100)}%)</h3>
+            <h3>Final: <span className={`${s.badge} ${badgeClass(tr.final?.verdict, s)}`}>{tr.final?.verdict ?? '—'}</span>{tr.final?.confidence != null ? ` (${Math.round(tr.final.confidence * 100)}%)` : ''}</h3>
           </section>
         ))}
+        {(!committee.traces || committee.traces.length === 0) && (
+          <div className={s.empty}>Belum ada trace komite.</div>
+        )}
       </div>
     );
   }
@@ -751,11 +795,13 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
         <h2>Telegram Integration Status</h2>
         <div className={s.kpiRow}>
           <div className={s.kpi}><span className={s.kpiValue}>{telegram.connected ? 'Connected' : 'Offline'}</span><span className={s.kpiLabel}>Status</span></div>
-          <div className={s.kpi}><span className={s.kpiValue}>{telegram.bot_username}</span><span className={s.kpiLabel}>Bot</span></div>
-          <div className={s.kpi}><span className={s.kpiValue}>{telegram.messages_today}</span><span className={s.kpiLabel}>Messages today</span></div>
+          <div className={s.kpi}><span className={s.kpiValue}>{telegram.bot_username ?? '—'}</span><span className={s.kpiLabel}>Bot</span></div>
+          <div className={s.kpi}><span className={s.kpiValue}>{telegram.allowlist_size ?? '—'}</span><span className={s.kpiLabel}>Chat diizinkan</span></div>
         </div>
         <h3>Commands</h3>
-        <table className={s.table}><tbody>
+        <table className={s.table}>
+          <thead><tr><th>Command</th><th>Status</th></tr></thead>
+          <tbody>
           {telegram.commands?.map((c: string) => (
             <tr key={c}><td className={s.mono}>{c}</td><td><span className={`${s.badge} ${s.success}`}>available</span></td></tr>
           ))}
@@ -784,7 +830,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
               {providers.providers?.map((p: any) => (
                 <tr key={p.name}>
                   <td><strong>{p.name}</strong></td>
-                  <td><span className={`${s.badge} ${badgeClass(p.status.toUpperCase(), s)}`}>{p.status}</span></td>
+                  <td><span className={`${s.badge} ${badgeClass(p.status, s)}`}>{p.status ?? '—'}</span></td>
                   <td>{p.models_available}</td>
                   <td>{p.priority}</td>
                   <td>{p.calls_today}</td>
@@ -792,7 +838,11 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
               ))}
             </tbody>
           </table>
-          <div className={s.mono} style={{ marginTop: 10 }}>Budget: {providers.budget?.tokens_used}/{providers.budget?.tokens_limit} tokens · ${providers.budget?.cost_today}</div>
+          {providers.budget ? (
+            <div className={s.mono} style={{ marginTop: 10 }}>Budget: {providers.budget.tokens_used}/{providers.budget.tokens_limit} tokens · ${providers.budget.cost_today}</div>
+          ) : (
+            <div className={s.mono} style={{ marginTop: 10 }}>Budget: — (belum dilaporkan router)</div>
+          )}
         </section>
       </div>
     );
