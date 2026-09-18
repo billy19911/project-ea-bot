@@ -69,6 +69,15 @@ def _score_to_level(score: float) -> str:
     return "CRITICAL"
 
 
+#: Supervisor-facing key for each specialist report (stable contract).
+_REPORT_KEYS: dict[str, str] = {
+    "AccountRiskAnalyst": "account_risk",
+    "PositionRiskAnalyst": "position_risk",
+    "PortfolioRiskAnalyst": "portfolio_risk",
+    "DrawdownAnalyst": "drawdown",
+}
+
+
 class AccountRiskAnalyst(BaseAgent):
     """Account-level risk analyst (margin, equity, daily loss)."""
 
@@ -293,13 +302,32 @@ class RiskDepartment:
 
 
 class RiskLead(BaseAgent):
-    """Risk Intelligence Department Lead (advisory only)."""
+    """Risk Intelligence Department Lead (advisory only).
+
+    Registered as ``agent_type="department_lead"`` so the Supervisor detects
+    it (EPIC 01) and delegates risk events to it.  ``analyze`` returns a
+    Supervisor-compatible dict; :meth:`synthesize` keeps the legacy committee
+    API intact.  This agent is advisory only — it can never veto a trade,
+    bypass a limit, or reach MT5.
+    """
+
+    #: Event families routed to the risk committee.
+    RISK_EVENT_PREFIXES = (
+        "RISK_",
+        "DRAWDOWN_",
+        "EXPOSURE_",
+        "LIQUIDITY_",
+        "MARGIN_",
+        "CORRELATION_",
+        "PORTFOLIO_",
+    )
 
     def __init__(self):
         super().__init__(
-            name="Risk Lead",
-            agent_type="lead",
-            description="Leads risk intelligence analysis (advisory)",
+            name="risk_lead",
+            agent_type="department_lead",
+            description="Leads the risk intelligence department (advisory only)",
+            role="department_lead",
             permissions=["ANALYZE_RISK"],
             priority=AgentPriority.HIGH,
         )
@@ -348,18 +376,223 @@ class RiskLead(BaseAgent):
             recommendations=all_recommendations,
         )
 
-    def can_handle(self, task_type: str) -> bool:
-        return task_type == "risk_analysis"
+    def can_handle(self, event_type: str, context: dict[str, Any] | None = None) -> bool:
+        """Accept risk event families; keep the legacy ``risk_analysis`` task."""
+        if event_type == "risk_analysis":
+            return True
+        return any(event_type.startswith(prefix) for prefix in self.RISK_EVENT_PREFIXES)
+
+    @staticmethod
+    def _as_number(value: Any) -> float | None:
+        """Coerce a value to float; non-numeric input fails closed to None."""
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
+
+    def _coerce_risk_data(self, context: dict[str, Any]) -> dict[str, Any] | None:
+        """Best-effort extraction of risk data from a supervisor context.
+
+        Accepts ``{"risk_data": {...}}`` or a flat context with
+        ``account``/``positions`` fields.  Malformed values are dropped and
+        ``None`` is returned when no usable risk data remains (fail-closed).
+        """
+        if not isinstance(context, dict):
+            return None
+
+        source: dict[str, Any] = {}
+        raw = context.get("risk_data")
+        if isinstance(raw, dict):
+            source.update(raw)
+        else:
+            account = context.get("account")
+            if isinstance(account, dict):
+                source["balance"] = account.get("balance")
+                source["equity"] = account.get("equity")
+                margin = account.get("used_margin", account.get("margin_used"))
+                if margin is not None:
+                    source["margin_used"] = margin
+                if account.get("free_margin") is not None:
+                    source["free_margin"] = account.get("free_margin")
+
+            for key in (
+                "balance",
+                "equity",
+                "margin_used",
+                "free_margin",
+                "daily_loss",
+                "positions",
+                "total_open_lots",
+                "symbols",
+                "correlation_matrix",
+                "net_exposure_usd",
+                "current_drawdown_pct",
+                "max_drawdown_pct",
+                "peak_equity",
+                "current_equity",
+            ):
+                if key not in source and context.get(key) is not None:
+                    source[key] = context[key]
+
+        numeric_fields = (
+            "balance",
+            "equity",
+            "margin_used",
+            "free_margin",
+            "daily_loss",
+            "total_open_lots",
+            "net_exposure_usd",
+            "current_drawdown_pct",
+            "max_drawdown_pct",
+            "peak_equity",
+            "current_equity",
+        )
+        cleaned: dict[str, Any] = {}
+        for key in numeric_fields:
+            number = self._as_number(source.get(key))
+            if number is not None:
+                cleaned[key] = number
+
+        positions = source.get("positions")
+        if isinstance(positions, list) and all(isinstance(p, dict) for p in positions):
+            cleaned["positions"] = positions
+
+        symbols = source.get("symbols")
+        if isinstance(symbols, list):
+            cleaned["symbols"] = [s for s in symbols if isinstance(s, str)]
+
+        correlation = source.get("correlation_matrix")
+        if isinstance(correlation, dict):
+            cleaned["correlation_matrix"] = {
+                str(key): float(value)
+                for key, value in correlation.items()
+                if self._as_number(value) is not None
+            }
+
+        # Derive current drawdown from peak/current equity when absent.
+        if (
+            "current_drawdown_pct" not in cleaned
+            and "peak_equity" in cleaned
+            and "current_equity" in cleaned
+            and cleaned["peak_equity"] > 0
+        ):
+            peak = cleaned["peak_equity"]
+            trough = cleaned["current_equity"]
+            cleaned["current_drawdown_pct"] = max(0.0, (peak - trough) / peak * 100.0)
+
+        has_numbers = any(key in cleaned for key in numeric_fields)
+        has_portfolio = bool(cleaned.get("symbols")) or bool(cleaned.get("correlation_matrix"))
+        has_positions = bool(cleaned.get("positions"))
+        if not (has_numbers or has_portfolio or has_positions):
+            return None
+        return cleaned
+
+    def analyze(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Run the advisory risk committee and return a Supervisor dict.
+
+        The deterministic RiskGate keeps sole authority over hard limits;
+        this method only produces advisory evidence (never a veto).  Missing
+        or malformed input fails closed to NEUTRAL instead of raising.
+        """
+        risk_data = self._coerce_risk_data(context if isinstance(context, dict) else {})
+
+        if not risk_data:
+            return {
+                "agent": self.name,
+                "role": "department_lead",
+                "department": "risk",
+                "signal": "NEUTRAL",
+                "confidence": 0.0,
+                "reasons": ["No risk data available for analysis (fail-closed NEUTRAL)"],
+                "specialist_results": {},
+                "advisory": True,
+                "overall_risk": "UNKNOWN",
+                "risk_score": None,
+                "recommendations": [],
+            }
+
+        if not self.department:
+            self.create_department()
+
+        specialist_results: dict[str, dict[str, Any]] = {}
+        reports: list[RiskAssessmentReport] = []
+        warnings: list[str] = []
+        for specialist in self.department.specialists:
+            key = _REPORT_KEYS.get(type(specialist).__name__, type(specialist).__name__)
+            try:
+                report = specialist.analyze(risk_data)
+            except Exception as exc:  # defensive boundary around specialists
+                specialist_results[key] = {
+                    "agent": key,
+                    "status": "ERROR",
+                    "risk_level": "UNKNOWN",
+                    "score": 0.0,
+                    "evidence": f"Specialist failed: {exc}",
+                    "warnings": [],
+                }
+                continue
+            reports.append(report)
+            warnings.extend(report.warnings)
+            specialist_results[key] = {
+                "agent": key,
+                "status": "OK",
+                "risk_level": report.risk_level,
+                "score": report.score,
+                "evidence": report.evidence,
+                "warnings": report.warnings,
+            }
+
+        scores = [r.score for r in reports]
+        avg_score = sum(scores) / len(scores) if scores else 0.0
+        overall_risk = _score_to_level(avg_score)
+
+        if avg_score < 0.25:
+            signal = "RISK_ON"
+            confidence = round(min(1.0, 1.0 - avg_score), 4)
+            recommendations = ["Proceed with normal sizing"]
+        elif avg_score < 0.5:
+            signal = "NEUTRAL"
+            confidence = 0.5
+            recommendations = ["Reduce position size by 25%"]
+        elif avg_score < 0.75:
+            signal = "RISK_OFF"
+            confidence = round(min(1.0, avg_score), 4)
+            recommendations = [
+                "Reduce position size by 50%",
+                "No new entries until risk lowers",
+            ]
+        else:
+            signal = "RISK_OFF"
+            confidence = round(min(1.0, avg_score), 4)
+            recommendations = [
+                "Halt new entries immediately",
+                "Consider closing worst positions",
+            ]
+
+        reasons = [
+            f"Risk committee aggregated {len(reports)} specialist report(s)",
+            f"Aggregate risk score {avg_score:.3f} → {overall_risk}",
+        ]
+        reasons.extend(f"warning: {warning}" for warning in warnings[:5])
+
+        return {
+            "agent": self.name,
+            "role": "department_lead",
+            "department": "risk",
+            "signal": signal,
+            "confidence": confidence,
+            "reasons": reasons,
+            "specialist_results": specialist_results,
+            "advisory": True,
+            "overall_risk": overall_risk,
+            "risk_score": round(avg_score, 4),
+            "recommendations": recommendations,
+        }
 
     def execute(self, task):
         return {"status": "ok"}
 
-    def analyze(self, data: dict[str, Any]) -> RiskAssessmentReport:
-        """BaseAgent abstract method implementation."""
-        decision = self.synthesize(data)
-        return RiskAssessmentReport(
-            analyst="RiskLead",
-            risk_level=decision.overall_risk,
-            score=decision.score,
-            evidence=(f"Consensus from {len(decision.reports)} specialists"),
-        )
+    def to_dict(self) -> dict[str, Any]:
+        """Include department identity in standard agent metadata."""
+        result = super().to_dict()
+        result.update({"department": "risk", "role": "department_lead"})
+        return result

@@ -28,6 +28,7 @@ from .orchestration.endpoints import router as orchestration_router
 from .orchestration.runtime import get_runtime
 from .reports.endpoints import router as reports_router
 from .research.endpoints import router as research_router
+from .risk.intelligence import RiskLead
 from .strategy.endpoints import register_live_strategy
 from .strategy.endpoints import router as strategy_router
 from .system.endpoints import router as system_router
@@ -52,6 +53,11 @@ def register_default_agents() -> list[str]:
     The ``MarketLead`` department lead is registered last: the Supervisor
     delegates market events to registered department leads first (EPIC 01),
     so the market department answers through its regime-weighted committee.
+
+    ``RiskLead`` is the advisory risk department lead (EPIC 05): risk events
+    (``RISK_``, ``DRAWDOWN_``, ``MARGIN_``, …) route to its committee for
+    advisory evidence. The deterministic Risk Gate remains the sole authority
+    over hard limits — RiskLead can never veto, bypass, or reach MT5.
     """
     default_agents = [
         TechnicalAnalystAgent(),
@@ -61,6 +67,7 @@ def register_default_agents() -> list[str]:
         NewsSentimentAgent(),
         FundamentalAnalystAgent(),
         MarketLead(),
+        RiskLead(),
     ]
     added: list[str] = []
     for agent in default_agents:

@@ -21,8 +21,9 @@ from risk.intelligence import (
 def test_risk_lead_initialization():
     """RiskLead must have proper attributes and permissions."""
     lead = RiskLead()
-    assert lead.name == "Risk Lead"
-    assert lead.agent_type == "lead"
+    assert lead.name == "risk_lead"
+    assert lead.agent_type == "department_lead"
+    assert lead.role == "department_lead"
     assert "ANALYZE_RISK" in lead.permissions
     assert "SEND_TO_MT5" not in lead.permissions  # Must not have MT5 access
 
