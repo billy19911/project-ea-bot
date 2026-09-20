@@ -349,7 +349,7 @@ export default function ControlPlanePage() {
 
       {notice && <div className={styles.notice}>{notice}</div>}
         {!hasToken && (
-          <div className={styles.notice} style={{ background: '#fffaeb', borderColor: '#fedf89', color: '#b54708' }}>
+          <div className={styles.notice} style={{ background: 'var(--warning-soft)', borderColor: 'var(--warning-border)', color: 'var(--warning)' }}>
             Belum ada token — data di bawah akan kosong. Buka{' '}
             <a href="/login" style={{ color: 'inherit', fontWeight: 600 }}>halaman Masuk</a> untuk
             menyiapkan token.
@@ -361,7 +361,7 @@ export default function ControlPlanePage() {
               Cycle OK · decision <strong>{cycle.decision}</strong> · status <strong>{cycle.status}</strong> · trace <code className={styles.mono}>{cycle.traceId}</code>
             </div>
           ) : (
-            <div className={styles.notice} style={{ background: '#fef3f2', borderColor: '#fecdca', color: '#b42318' }}>
+            <div className={styles.notice} style={{ background: 'var(--danger-soft)', borderColor: 'var(--danger-border)', color: 'var(--danger)' }}>
               Cycle gagal: {cycle.message}
             </div>
           )
@@ -482,7 +482,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                     <td><strong>{t.symbol}</strong></td>
                     <td>{t.side}</td>
                     <td>{t.volume}</td>
-                    <td style={{ color: t.pnl > 0 ? '#027a48' : t.pnl < 0 ? '#b42318' : undefined }}>{formatAmount(t.pnl)}</td>
+                    <td style={{ color: t.pnl > 0 ? 'var(--success)' : t.pnl < 0 ? 'var(--danger)' : undefined }}>{formatAmount(t.pnl)}</td>
                     <td><span className={`${s.badge} ${badgeClass(t.status, s)}`}>{t.status}</span></td>
                   </tr>
                 ))}
@@ -515,7 +515,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                   <td>{p.price_current ?? p.current_price ?? '—'}</td>
                   <td>{p.sl ?? '—'}</td>
                   <td>{p.tp ?? '—'}</td>
-                  <td style={{ color: pnl == null ? undefined : pnl > 0 ? '#027a48' : pnl < 0 ? '#b42318' : undefined }}>{formatAmount(pnl)}</td>
+                  <td style={{ color: pnl == null ? undefined : pnl > 0 ? 'var(--success)' : pnl < 0 ? 'var(--danger)' : undefined }}>{formatAmount(pnl)}</td>
                 </tr>
                 );
               })}
@@ -556,7 +556,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                 <tr key={sym.symbol}>
                   <td><strong>{sym.symbol}</strong></td>
                   <td>{sym.price ?? '—'}</td>
-                  <td style={{ color: sym.change_pct == null ? undefined : sym.change_pct > 0 ? '#027a48' : '#b42318' }}>{sym.change_pct == null ? '—' : `${sym.change_pct}%`}</td>
+                  <td style={{ color: sym.change_pct == null ? undefined : sym.change_pct > 0 ? 'var(--success)' : 'var(--danger)' }}>{sym.change_pct == null ? '—' : `${sym.change_pct}%`}</td>
                   <td>{sym.spread ?? '—'}</td>
                   <td>{sym.volatility == null ? '—' : <span className={`${s.badge} ${sym.volatility === 'HIGH' ? s.danger : sym.volatility === 'MEDIUM' ? s.warning : s.muted}`}>{sym.volatility}</span>}</td>
                 </tr>
@@ -930,7 +930,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                   <td>{h.hour}:00</td>
                   <td>{h.trades}</td>
                   <td>{nullablePercent(h.win_rate)}</td>
-                  <td style={{ color: h.avg_pnl > 0 ? '#027a48' : '#b42318' }}>{h.avg_pnl}</td>
+                  <td style={{ color: h.avg_pnl > 0 ? 'var(--success)' : 'var(--danger)' }}>{h.avg_pnl}</td>
                 </tr>
               ))}
               {(!learning.by_hour || learning.by_hour.length === 0) && (
@@ -949,7 +949,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                   <td><strong>{r.regime}</strong></td>
                   <td>{r.trades}</td>
                   <td>{nullablePercent(r.win_rate)}</td>
-                  <td style={{ color: r.avg_pnl > 0 ? '#027a48' : '#b42318' }}>{r.avg_pnl}</td>
+                  <td style={{ color: r.avg_pnl > 0 ? 'var(--success)' : 'var(--danger)' }}>{r.avg_pnl}</td>
                 </tr>
               ))}
               {(!learning.by_regime || learning.by_regime.length === 0) && (
@@ -1222,7 +1222,7 @@ function TerminalPanel({
         </span>
       </div>
       {list.some((t) => t.running && t.account == null) && (
-        <div className={s.mono} style={{ marginTop: 8, color: '#667085' }}>
+        <div className={s.mono} style={{ marginTop: 8, color: 'var(--text-muted)' }}>
           Terminal yang berjalan tapi kolom akun masih —: klik <strong>Cek akun</strong> untuk membacanya (read-only).
         </div>
       )}

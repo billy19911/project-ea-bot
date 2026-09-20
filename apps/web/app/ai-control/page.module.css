@@ -7,7 +7,7 @@
 }
 
 .card {
-  background: white;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 18px;
@@ -340,14 +340,14 @@
   border: 1px solid var(--border-strong);
   border-radius: 9px;
   padding: 9px 10px;
-  background: white;
+  background: var(--surface);
   color: var(--text);
   min-width: 140px;
 }
 
 .advisorRun {
   background: var(--primary);
-  color: var(--surface);
+  color: #fff;
   padding: 10px 14px;
   border-radius: 10px;
   font-weight: 700;

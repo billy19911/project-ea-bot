@@ -57,7 +57,7 @@
 .tabs {
   display: flex;
   gap: 6px;
-  background: white;
+  background: var(--surface);
   border: 1px solid var(--border);
   padding: 6px;
   border-radius: 12px;
@@ -73,7 +73,7 @@
 
 .tabs .tabActive {
   background: var(--text);
-  color: var(--surface);
+  color: #fff;
 }
 
 .sectionHead {
@@ -88,7 +88,7 @@
 
 .primary {
   background: var(--primary);
-  color: var(--surface);
+  color: #fff;
   padding: 10px 14px;
   border-radius: 10px;
   font-weight: 700;
@@ -99,7 +99,7 @@
 }
 
 .toolbar {
-  background: white;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 10px;
@@ -115,7 +115,7 @@
   border: 1px solid var(--border-strong);
   border-radius: 9px;
   padding: 9px 10px;
-  background: white;
+  background: var(--surface);
   color: var(--text);
 }
 
@@ -126,7 +126,7 @@
 .tableCard,
 .card,
 .formCard {
-  background: white;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
 }

@@ -46,7 +46,7 @@
 }
 
 .kpiCard {
-  background: white;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px;
@@ -67,7 +67,7 @@
 
 /* ── Card ── */
 .card {
-  background: white;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 18px;
@@ -141,7 +141,7 @@
 }
 
 /* Severity */
-.severityCritical { background: #d92d2010; color: var(--danger); border: 1px solid #d92d2040; }
+.severityCritical { background: var(--danger-soft); color: var(--danger); border: 1px solid var(--danger-border); }
 .severityHigh { background: var(--danger-soft); color: var(--danger); }
 .severityMedium { background: var(--warning-soft); color: var(--warning); }
 .severityLow { background: var(--neutral-muted); color: var(--text-secondary); }
@@ -335,7 +335,7 @@
 
 .retryBtn:hover {
   background: var(--danger);
-  color: var(--surface);
+  color: #fff;
 }
 
 /* ── Controls ── */

@@ -32,7 +32,7 @@
 
 .tab:disabled { opacity: 0.55; cursor: not-allowed; }
 
-.tabActive { background: var(--primary); border-color: var(--primary); color: var(--surface); }
+.tabActive { background: var(--primary); border-color: var(--primary); color: #fff; }
 
 /* Ide #4: navigasi bergrup — baris grup (kategori) di atas baris tab. */
 .groupBar {
