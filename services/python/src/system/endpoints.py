@@ -21,6 +21,8 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from ..audit import get_shared_audit_log
+from ..execution.intents import get_intent
 from ..llm.registry import ModelRegistry
 from ..observability.metrics import MetricsRegistry
 from ..observability.sampler import get_trend_sampler
@@ -42,6 +44,23 @@ async def certify() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Execution intent state (Phase 34 – durable execution lifecycle)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/execution/intent/{intent_id}", summary="Get durable execution intent state (Phase 34)"
+)
+async def execution_intent_state(intent_id: str) -> dict:
+    """Return the stored intent record and current lifecycle state."""
+    try:
+        record = get_intent(intent_id)
+        return {"intent": record.to_dict(), "source": "live"}
+    except KeyError:
+        return {"error": f"Intent {intent_id} not found", "source": "unavailable"}
+
+
+# ---------------------------------------------------------------------------
 # Process-wide read-only state
 # ---------------------------------------------------------------------------
 #
@@ -50,7 +69,7 @@ async def certify() -> dict:
 # accumulates. They are intentionally read-only from the HTTP surface.
 
 _model_registry: ModelRegistry = ModelRegistry()
-_audit_log: ProtectedAuditLog = ProtectedAuditLog()
+_audit_log: ProtectedAuditLog = get_shared_audit_log()
 _metrics_registry: MetricsRegistry = MetricsRegistry()
 
 

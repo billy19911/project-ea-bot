@@ -147,8 +147,17 @@ class ReconciliationRunner:
             return None
 
         self._last_ok = not report.has_critical()
+        # Record audit entry for this reconciliation run
+        from ..audit import get_shared_audit_log
+
+        audit = get_shared_audit_log()
+        audit.append(
+            actor="reconciliation",
+            action="run",
+            target="reconciliation",
+            details=report.to_dict() if report else {},
+        )
         self._history.append(report)
-        return report
 
     # ------------------------------------------------------------------
     # History / summary

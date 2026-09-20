@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from .state_machine import OrderState, get_order, set_order
+
 logger = logging.getLogger(__name__)
 
 # Valid order types accepted by the execution engine
@@ -319,11 +321,19 @@ class ExecutionEngine:
                 position_opened=None,
             )
 
+        # Durable execution lifecycle (Phase 34): seed the order state machine.
+        set_order(request.idempotency_key, OrderState.INTENT_CREATED)
+
         # Pre-flight order validation
         is_valid, validation_errors = self.validate_order(request)
         if not is_valid:
             error_str = "; ".join(validation_errors)
             logger.warning("Order validation failed: %s", error_str)
+            set_order(
+                request.idempotency_key,
+                OrderState.UNKNOWN,
+                extra={"rejected": True, "reason": error_str},
+            )
             return ExecutionResult(
                 success=False,
                 ticket=None,
@@ -334,6 +344,8 @@ class ExecutionEngine:
             )
 
         # Record pending state
+        set_order(request.idempotency_key, OrderState.RISK_APPROVED)
+        set_order(request.idempotency_key, OrderState.SUBMITTING)
         self._record_pending(request.idempotency_key)
 
         retries = 0
@@ -346,12 +358,22 @@ class ExecutionEngine:
                     send_res = self._send_to_mt5(request)
                     if send_res.get("success"):
                         ticket = send_res.get("ticket")
+                        set_order(request.idempotency_key, OrderState.SUBMITTED, {"ticket": ticket})
+                        set_order(request.idempotency_key, OrderState.ACKNOWLEDGED)
                         confirmed = self.confirm_execution(ticket)
+                        if confirmed:
+                            set_order(request.idempotency_key, OrderState.FILLED)
+                            set_order(request.idempotency_key, OrderState.POSITION_CONFIRMED)
 
                         # Sync position state after execution
                         pos_summary = self.sync_position(request.symbol)
 
+                        # Cleanup and final state handling
                         self._clear_pending(request.idempotency_key)
+                        # If unknown state after retries, keep as UNKNOWN for later query
+                        final_state = get_order(request.idempotency_key).get("state")
+                        if final_state == OrderState.UNKNOWN.value:
+                            set_order(request.idempotency_key, OrderState.UNKNOWN)
                         success_result = ExecutionResult(
                             success=True,
                             ticket=ticket,
