@@ -1,54 +1,141 @@
-/* ---------------------------------------------------------------------------
- * Design tokens — single source of truth untuk warna, spacing, radius, shadow
- * dan type scale (UI/UX Redesign F1, 2026-09-17).
+/* ===========================================================================
+ * XYNN — Trading Command Center · Design System v2
+ * ---------------------------------------------------------------------------
+ * Art direction: precise, industrial, nocturnal. An instrument you trust —
+ * warm charcoal on a hairline grid, a single signal-amber accent, and a bone-
+ * paper light theme. All colours are semantic tokens; components must never
+ * hard-code hex. Numerics use JetBrains Mono with tabular figures.
  *
- * Aturan: komponen mengacu ke token semantik (--text, --danger, ...), bukan
- * hex langsung. Kalau butuh warna baru, tambahkan token di sini — jangan
- * bikin hex baru di CSS module.
- * ------------------------------------------------------------------------- */
+ * Two themes: `:root` / [data-theme="light"] = bone paper; [data-theme="dark"]
+ * = warm charcoal (default). No fluff shadows — 1px hairlines do the work.
+ * ========================================================================= */
 
-/* Light theme = default (:root). Dark theme overrides live under
- * [data-theme="dark"] on <html>. The previous version also applied the dark
- * block to :root, which made light mode impossible — fixed. */
 :root,
 [data-theme='light'] {
   color-scheme: light;
 
-  /* Surface & teks */
-  --bg: #f5f7fb;
-  --surface: #ffffff;
-  --surface-muted: #f8fafc;
-  --surface-3: #f2f4f7;
-  --neutral-muted: #f2f4f7;
-  --border: #e4e7ec;
-  --border-strong: #d0d5dd;
-  --text: #172033;
-  --text-secondary: #475467;
-  --text-muted: #667085;
+  /* --- Surfaces: bone paper, warm not clinical ---------------------------- */
+  --bg: #f2efe9;
+  --bg-grid: rgba(28, 25, 20, 0.045);
+  --surface: #fbfaf7;
+  --surface-muted: #f4f1ea;
+  --surface-3: #ece7dd;
+  --neutral-muted: #eae5da;
+  --border: #ddd6c8;
+  --border-strong: #c9c0ad;
 
-  /* Brand & status */
-  --primary: #1f6feb;
-  --primary-hover: #1a5fd0;
-  --primary-soft: #e8f0fe;
-  --success: #067647;
-  --success-soft: #ecfdf3;
-  --success-border: #abefc6;
-  --warning: #b54708;
-  --warning-soft: #fffaeb;
-  --warning-border: #fedf89;
-  --danger: #b42318;
-  --danger-soft: #fef3f2;
-  --danger-border: #fecdca;
-  --info: #1f6feb;
-  --neutral: #667085;
+  /* --- Ink ---------------------------------------------------------------- */
+  --text: #1c1913;
+  --text-secondary: #4a4438;
+  --text-muted: #857c6b;
 
-  /* Konteks akun MT5 (dipakai badge DEMO/LIVE) */
-  --live: #d92d20;
-  --live-soft: #fef3f2;
-  --demo: #067647;
-  --demo-soft: #ecfdf3;
+  /* --- Accents: one signal amber + status hues ---------------------------- */
+  --primary: #9a5b12;
+  --primary-hover: #7d490c;
+  --primary-soft: rgba(154, 91, 18, 0.1);
+  --accent: #c2410c;
+  /* Ink that sits ON the primary fill (dark ink reads on amber). */
+  --on-primary: #fbfaf7;
 
-  /* Spacing scale (basis 4px) */
+  --success: #2f6b3a;
+  --success-soft: rgba(47, 107, 58, 0.1);
+  --success-border: rgba(47, 107, 58, 0.32);
+
+  --warning: #9a6a0a;
+  --warning-soft: rgba(154, 106, 10, 0.1);
+  --warning-border: rgba(154, 106, 10, 0.32);
+
+  --danger: #a01b12;
+  --danger-soft: rgba(160, 27, 18, 0.09);
+  --danger-border: rgba(160, 27, 18, 0.3);
+
+  --info: #2b5a86;
+  --neutral: #857c6b;
+
+  --live: #a01b12;
+  --live-soft: rgba(160, 27, 18, 0.09);
+  --demo: #2f6b3a;
+  --demo-soft: rgba(47, 107, 58, 0.1);
+
+  /* --- Sidebar: darker rail even in light theme --------------------------- */
+  --sidebar-bg: #201d17;
+  --sidebar-text: #e8e2d4;
+  --sidebar-muted: #9a907c;
+  --sidebar-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-accent: #e0a45c;
+
+  --grid-line: rgba(28, 25, 20, 0.05);
+  --grain-opacity: 0.028;
+
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* --- Surfaces: warm charcoal, layered ----------------------------------- */
+  --bg: #0d0c0a;
+  --bg-grid: rgba(255, 255, 255, 0.02);
+  --surface: #16130f;
+  --surface-muted: #1c1813;
+  --surface-3: #221d16;
+  --neutral-muted: #221d16;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.15);
+
+  /* --- Ink ---------------------------------------------------------------- */
+  --text: #ece7dd;
+  --text-secondary: #b8b0a0;
+  --text-muted: #7f7768;
+
+  /* --- Accents: signal amber dominant ------------------------------------- */
+  --primary: #e0a45c;
+  --primary-hover: #f0b877;
+  --primary-soft: rgba(224, 164, 92, 0.12);
+  --accent: #f97316;
+  --on-primary: #17130c;
+
+  --success: #6bbf7b;
+  --success-soft: rgba(107, 191, 123, 0.13);
+  --success-border: rgba(107, 191, 123, 0.32);
+
+  --warning: #e0a45c;
+  --warning-soft: rgba(224, 164, 92, 0.13);
+  --warning-border: rgba(224, 164, 92, 0.32);
+
+  --danger: #e5645a;
+  --danger-soft: rgba(229, 100, 90, 0.13);
+  --danger-border: rgba(229, 100, 90, 0.34);
+
+  --info: #7fb0e0;
+  --neutral: #7f7768;
+
+  --live: #e5645a;
+  --live-soft: rgba(229, 100, 90, 0.13);
+  --demo: #6bbf7b;
+  --demo-soft: rgba(107, 191, 123, 0.13);
+
+  /* --- Sidebar ------------------------------------------------------------ */
+  --sidebar-bg: #0a0907;
+  --sidebar-text: #ddd6c8;
+  --sidebar-muted: #7f7768;
+  --sidebar-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+  --sidebar-accent: #e0a45c;
+
+  --grid-line: rgba(255, 255, 255, 0.022);
+  --grain-opacity: 0.04;
+}
+
+/* ---- Scale, radius, motion (shared across themes) ------------------------ */
+:root {
+  /* Layout */
+  --rail: 252px;
+  --rail-collapsed: 68px;
+
+  /* Spacing scale — 4px base */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -56,105 +143,39 @@
   --sp-5: 20px;
   --sp-6: 24px;
   --sp-7: 32px;
-  --sp-8: 40px;
+  --sp-8: 48px;
 
-  /* Radius */
-  --r-sm: 6px;
-  --r-md: 8px;
-  --r-lg: 12px;
+  /* Radius — tighter, more instrument-like */
+  --r-xs: 3px;
+  --r-sm: 5px;
+  --r-md: 7px;
+  --r-lg: 10px;
   --r-full: 999px;
 
-  /* Shadow */
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
-  --shadow-md: 0 4px 12px rgba(16, 24, 40, 0.08);
+  /* Hairline-forward shadows (depth is carried by borders, not blur) */
+  --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.18);
+  --shadow-md: 0 6px 20px -8px rgba(0, 0, 0, 0.55);
+  --shadow-pop: 0 18px 44px -18px rgba(0, 0, 0, 0.7);
 
-  /* Type scale */
+  /* Motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+
+  /* Type scale (display + mono share it) */
+  --fs-2xs: 10px;
   --fs-xs: 11px;
   --fs-sm: 12px;
   --fs-md: 13px;
   --fs-lg: 15px;
-  --fs-xl: 20px;
+  --fs-xl: 18px;
   --fs-2xl: 26px;
-
-  /* Sidebar (dipakai AppShell) — light: panel tipis, bukan hitam */
-  --sidebar-bg: #ffffff;
-  --sidebar-text: #172033;
-  --sidebar-muted: #667085;
-  --sidebar-hover: rgba(16, 24, 40, 0.04);
-  --sidebar-border: #e4e7ec;
-  --sidebar-accent: #1f6feb;
-
-  --font-mono: ui-monospace, SFMono-Regular, "Geist Mono", Menlo, Consolas, monospace;
+  --fs-3xl: 34px;
 }
 
-/* Dark-mode overrides -------------------------------------------------------
- * Xynn Command Center default = dark (PRD §78). Dipilih lewat atribut
- * [data-theme="dark"] pada <html> supaya tidak bergantung prefers-color-scheme. */
-[data-theme='dark'] {
-  color-scheme: dark;
-
-  /* Surface & text */
-  --bg: #09090b;
-  --surface: #111318;
-  --surface-muted: #151820;
-  --surface-3: #1a1e27;
-  --neutral-muted: #1a1e27;
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
-
-  --text: #e5e7eb;
-  --text-secondary: #cbd5e1;
-  --text-muted: #9ca3af;
-
-  /* Brand & status (PRD §5.1 semantic colors) */
-  --primary: #3b82f6;
-  --primary-hover: #2563eb;
-  --primary-soft: rgba(59, 130, 246, 0.12);
-  --success: #10b981;
-  --success-soft: rgba(16, 185, 129, 0.12);
-  --success-border: rgba(16, 185, 129, 0.35);
-  --warning: #f59e0b;
-  --warning-soft: rgba(245, 158, 11, 0.12);
-  --warning-border: rgba(245, 158, 11, 0.35);
-  --danger: #ef4444;
-  --danger-soft: rgba(239, 68, 68, 0.12);
-  --danger-border: rgba(239, 68, 68, 0.35);
-  --info: #3b82f6;
-  --neutral: #6b7280;
-
-  /* Konteks akun MT5 (badge DEMO/LIVE) */
-  --live: #ef4444;
-  --live-soft: rgba(239, 68, 68, 0.12);
-  --demo: #10b981;
-  --demo-soft: rgba(16, 185, 129, 0.12);
-
-  /* Sidebar (dipakai AppShell) */
-  --sidebar-bg: #0c0e13;
-  --sidebar-text: #d8dee9;
-  --sidebar-muted: #98a2b3;
-  --sidebar-hover: rgba(255, 255, 255, 0.06);
-  --sidebar-border: rgba(255, 255, 255, 0.08);
-  --sidebar-accent: #6ea8fe;
-
-  /* Shadow (PRD §5.4: border dulu, shadow halus saja) */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
-}
-
-/* Reset minimal ----------------------------------------------------------- */
-
-/* Respect user motion preferences (PRD §133). */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
-  }
-}
-
+/* ---------------------------------------------------------------------------
+ * Reset + base
+ * ------------------------------------------------------------------------- */
 
 * {
   box-sizing: border-box;
@@ -164,14 +185,51 @@ html,
 body {
   margin: 0;
   padding: 0;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  font-family: var(--font-display);
   color: var(--text);
   background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
-/* Elemen-level defaults (masih dipakai konten halaman) -------------------- */
+/* Atmosphere: a faint engineering grid + film grain so large surfaces feel
+ * physical instead of flat. Both are token-driven so they swap per theme. */
+body {
+  background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+  background-size: 32px 32px, 32px 32px;
+  background-attachment: fixed;
+}
+
+/* Grain overlay (no image asset — a tiny inline SVG turbulence). */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Numbers never jitter — the whole point of a trading UI. */
+.mono,
+code,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.015em;
+  margin: 0;
+}
 
 small,
 td small {
@@ -182,6 +240,11 @@ td small {
 p {
   color: var(--text-secondary);
   font-size: var(--fs-md);
+  line-height: 1.6;
+}
+
+a {
+  color: inherit;
 }
 
 button {
@@ -189,6 +252,7 @@ button {
   background: transparent;
   font: inherit;
   cursor: pointer;
+  color: inherit;
 }
 
 label {
@@ -196,8 +260,10 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   font: inherit;
+  color: inherit;
 }
 
 table {
@@ -209,24 +275,139 @@ td {
   text-align: left;
 }
 
-/* Catatan F1: selector kelas lama (span.formTitle-p, span.registry-span,
- * div.resultList-p, dst.) dihapus — kelas itu tidak pernah ada di JSX mana pun
- * karena CSS module menghasilkan nama ter-hash (mis. page_formTitle__FHCXW).
- * Aturan `strong { display: block }` juga dihapus: itu memecah teks inline
- * (mis. "decision <strong>…</strong> · status") menjadi baris terpisah. */
+/* Custom focus ring — visible, on-brand, never the browser default. */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
 
-/* ── TrendChart (UI/UX ide #8) ───────────────────────────────────────────────
- * SVG inline, nol dependency. Titik null digambar sebagai celah — bukan nol. */
+::selection {
+  background: var(--primary-soft);
+  color: var(--text);
+}
+
+/* Scrollbars — slim, theme-aware. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--r-full);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Shared utility primitives used by pages
+ * ------------------------------------------------------------------------- */
+
+/* Section eyebrow / kicker */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Card */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+
+/* Status pill */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.pill-ok {
+  background: var(--success-soft);
+  border-color: var(--success-border);
+  color: var(--success);
+}
+.pill-warn {
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--warning);
+}
+.pill-danger {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+.pill-neutral {
+  background: var(--neutral-muted);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------------------
+ * Theme toggle
+ * ------------------------------------------------------------------------- */
+.themeToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.themeToggle:hover {
+  background: var(--surface-muted);
+  color: var(--primary);
+  border-color: var(--border-strong);
+}
+
+/* ---------------------------------------------------------------------------
+ * Charts (TrendChart / PriceChart) — unchanged tokens, retuned ink
+ * ------------------------------------------------------------------------- */
 .trendChart {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
+  gap: var(--sp-2);
   padding: var(--sp-3);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface);
 }
-
 .trendChartHead {
   display: flex;
   align-items: baseline;
@@ -234,46 +415,28 @@ td {
   gap: var(--sp-2);
   flex-wrap: wrap;
 }
-
 .trendChartLabel {
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 600;
   color: var(--text);
 }
-
 .trendChartMeta {
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
 }
-
 .trendUp { color: var(--success); }
 .trendDown { color: var(--danger); }
-
-.trendChart svg {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-.trendGrid {
-  stroke: var(--border);
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
-}
-
-.trendGapDot {
-  fill: var(--warning);
-}
-
+.trendChart svg { display: block; width: 100%; height: auto; }
+.trendGrid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3; }
+.trendGapDot { fill: var(--warning); }
 .trendChartAxis {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
   color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
 }
-
 .trendChartEmpty {
   display: flex;
   align-items: center;
@@ -282,27 +445,19 @@ td {
   padding: var(--sp-3);
   border: 1px dashed var(--border-strong);
   border-radius: var(--r-md);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   text-align: center;
 }
 
-/* ── PriceChart (Fase 1 "Pasar") ──────────────────────────────────────────
-   Chart candlestick SVG inline; nol dependency. Warna mengikuti token
-   semantik; garis indikator warm-up = putus (bukan nilai 0 palsu). */
 .priceChartWrap {
   position: relative;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--surface);
   padding: 10px 12px 6px;
 }
-.priceChartSvg {
-  display: block;
-  width: 100%;
-  height: auto;
-  user-select: none;
-}
+.priceChartSvg { display: block; width: 100%; height: auto; user-select: none; }
 .priceChartEmpty {
   display: flex;
   flex-direction: column;
@@ -310,25 +465,23 @@ td {
   align-items: flex-start;
   padding: 22px 16px;
   border: 1px dashed var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--surface-muted);
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 .priceChartEmpty strong { color: var(--text-secondary); }
 
-/* Grid & sumbu */
 .pcGrid { stroke: var(--border); stroke-width: 1; }
 .pcZeroLine { stroke: var(--border-strong); stroke-width: 1; }
 .pcAxisLabel {
   fill: var(--text-muted);
   font-size: 10.5px;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
 }
 .pcTimeLabel { fill: var(--text-muted); font-size: 10.5px; }
 .pcPanelTitle { fill: var(--text-secondary); font-size: 10.5px; font-weight: 600; }
 
-/* Candle */
 .pcWick { stroke: currentColor; }
 .pcBody { fill: currentColor; }
 .pcUp { color: var(--success); }
@@ -336,7 +489,6 @@ td {
 .pcUpText { color: var(--success); }
 .pcDownText { color: var(--danger); }
 
-/* Overlay indikator */
 .pcEmaFast { stroke: var(--primary); stroke-width: 1.6; }
 .pcEmaSlow { stroke: var(--warning); stroke-width: 1.6; }
 .pcBbEdge { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 3 3; }
@@ -350,13 +502,8 @@ td {
 .pcHistDown { fill: var(--danger); opacity: 0.55; }
 .pcCrosshair { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
 
-/* Garis level nyata (Fase 2): entry / SL / TP */
 .pcLevelLine { stroke-width: 1.4; stroke-dasharray: 6 3; }
-.pcLevelLabel {
-  font-size: 10.5px;
-  font-weight: 600;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-}
+.pcLevelLabel { font-size: 10.5px; font-weight: 600; font-family: var(--font-mono); }
 .pcLevelEntry .pcLevelLine { stroke: var(--text-secondary); }
 .pcLevelEntry .pcLevelLabel { fill: var(--text-secondary); }
 .pcLevelStop .pcLevelLine { stroke: var(--danger); }
@@ -364,18 +511,17 @@ td {
 .pcLevelTarget .pcLevelLine { stroke: var(--success); }
 .pcLevelTarget .pcLevelLabel { fill: var(--success); }
 
-/* Tooltip */
 .pcTooltip {
   position: absolute;
   top: 14px;
   left: 20px;
   pointer-events: none;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 4px 14px rgba(16, 24, 40, 0.08);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-md);
   padding: 8px 10px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   min-width: 168px;
 }
@@ -384,34 +530,7 @@ td {
   display: grid;
   grid-template-columns: auto auto;
   gap: 1px 10px;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
 }
 .pcTtGrid b { color: var(--text); font-weight: 600; text-align: right; }
-.pcTtInd { margin-top: 4px; font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
-
-
-/* ---------------------------------------------------------------------------
- * Theme toggle (dark/light) � dipakai AppShell topbar.
- * ------------------------------------------------------------------------- */
-.themeToggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-.themeToggle:hover {
-  background: var(--surface-muted);
-  color: var(--text);
-  border-color: var(--border-strong);
-}
-.themeToggle:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
+.pcTtInd { margin-top: 4px; font-family: var(--font-mono); }

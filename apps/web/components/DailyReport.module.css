@@ -47,7 +47,7 @@
 .rangeActive {
   background: var(--text);
   border-color: var(--text);
-  color: #fff;
+  color: var(--on-primary);
 }
 
 .accountLine {

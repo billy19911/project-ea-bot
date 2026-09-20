@@ -160,6 +160,12 @@ class NewsSentimentAgent(BaseAgent):
                 reasoning.append("Critical impact event(s) in calendar")
             if not data.news_items and not data.economic_events:
                 reasoning.append("No news items available for analysis")
+
+            # Historical pattern memory (PRD §43/§54): add evidence-backed
+            # reasoning from similar past events. Advisory only.
+            pattern_notes = self._pattern_reasoning(data, context)
+            reasoning.extend(pattern_notes)
+
             metrics = {
                 "news_count": len(data.news_items),
                 "events_count": len(data.economic_events),
@@ -167,6 +173,7 @@ class NewsSentimentAgent(BaseAgent):
                 "avg_sentiment": round(avg_sentiment, 6),
                 "weighted_impact": round(weighted_impact, 6),
                 "has_critical": 1.0 if has_critical else 0.0,
+                "pattern_notes": float(len(pattern_notes)),
             }
             return {
                 "agent": self.name,
@@ -183,6 +190,37 @@ class NewsSentimentAgent(BaseAgent):
                 "reasoning": [f"Invalid sentiment input: {exc}"],
                 "metrics": {},
             }
+
+    @staticmethod
+    def _pattern_reasoning(data: "NewsSentimentInput", context: dict[str, Any]) -> list[str]:
+        """Return evidence-backed reasoning lines from pattern memory.
+
+        Fail-safe: a memory problem never breaks analysis. Returns [] when no
+        pattern memory is available or there are no matching events.
+        """
+        notes: list[str] = []
+        try:
+            from ...market.news_patterns import get_news_pattern_memory
+
+            memory = get_news_pattern_memory()
+            seen: set[str] = set()
+            for ev in data.economic_events:
+                title = str(ev.get("title", ev.get("headline", "")))
+                country = str(ev.get("country", ""))
+                if not title:
+                    continue
+                line = memory.reasoning_for(title, country)
+                if line and line not in seen:
+                    seen.add(line)
+                    notes.append(line)
+            for item in data.news_items:
+                line = memory.reasoning_for(item.headline, "XX")
+                if line and line not in seen:
+                    seen.add(line)
+                    notes.append(line)
+        except Exception:  # noqa: BLE001 - memory must never break analysis
+            return notes
+        return notes
 
 
 NewsSentiment = NewsSentimentAgent

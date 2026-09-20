@@ -4,8 +4,15 @@
 // require a Bearer token. The token is stored in localStorage under the
 // `ea-bot-token` key; the /login page is the supported way to fill it
 // (POST /auth/token in dev), replacing the old manual DevTools paste.
-
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+//
+// Transport: the browser calls the *web* origin via the `/ea-api/*` rewrite
+// (see next.config.mjs), which proxies to the Node control-plane API. This
+// keeps the Node API port configurable at runtime without rebuilding the web
+// bundle and avoids CORS. NEXT_PUBLIC_API_URL is only used in local dev when
+// the rewrite is not active (e.g. `next dev` without the backend).
+export const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== 'undefined' ? `${window.location.origin}/ea-api` : '/ea-api');
 
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;

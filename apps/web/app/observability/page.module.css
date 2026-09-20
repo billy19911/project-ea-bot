@@ -335,7 +335,7 @@
 
 .retryBtn:hover {
   background: var(--danger);
-  color: #fff;
+  color: var(--on-primary);
 }
 
 /* ── Controls ── */

@@ -1,9 +1,24 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Space_Grotesk, JetBrains_Mono } from 'next/font/google';
 import { ThemeProvider } from '../lib/theme';
 import './globals.css';
 
-const inter = Inter({ subsets: ['latin'] });
+// Display/label face: Space Grotesk — a tighter, more technical grotesque than
+// Inter; gives the command center a distinct instrument-panel character.
+const display = Space_Grotesk({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-display',
+  display: 'swap',
+});
+
+// Data face: JetBrains Mono — tabular figures for prices, PnL and ticket IDs.
+const mono = JetBrains_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-mono',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'Xynn — Trading Command Center',
@@ -15,14 +30,14 @@ export const metadata: Metadata = {
 const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('ea-theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.setAttribute('data-theme',t);document.documentElement.style.colorScheme=t;}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  // Default theme = dark (PRD §78); user may switch to light. The attribute is
-  // set by the inline script below before hydration; ThemeProvider syncs to it.
+  // Default theme = dark; user may switch to light. The attribute is set by the
+  // inline script below before hydration; ThemeProvider syncs to it.
   return (
     <html lang="en" data-theme="dark" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body className={inter.className}>
+      <body className={`${display.variable} ${mono.variable}`}>
         <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>

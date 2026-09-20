@@ -169,3 +169,79 @@ async def market_summary(symbol: str = Query(default="XAUUSD")) -> dict:
         "top_positive": [item.get("headline") for item in positive],
         "top_negative": [item.get("headline") for item in negative],
     }
+
+
+@router.get("/upcoming")
+async def market_upcoming(
+    currency: str = Query(default="USD", description="Currency filter (USD = US)"),
+    limit: int = Query(default=15, ge=1, le=100),
+) -> dict:
+    """Return UPCOMING economic events (future only), soonest first.
+
+    The news page uses this for the "akan datang" (upcoming) panel — filtered to
+    USD/US by default. Events with an unparseable date are kept at the end so a
+    bad feed never hides real upcoming data.
+    """
+    from datetime import datetime, timezone
+
+    provider = get_news_feed_provider()
+    events = provider.fetch_calendar()
+
+    cur = currency.upper()
+    if cur not in ("ALL", ""):
+        events = [e for e in events if e.country.upper() == cur]
+
+    now = datetime.now(timezone.utc)
+
+    def _parse(ts: str):
+        try:
+            return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+
+    upcoming = []
+    for e in events:
+        dt = _parse(e.date)
+        if dt is None:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        if dt >= now:
+            upcoming.append((dt, e))
+
+    upcoming.sort(key=lambda pair: pair[0])
+    items = []
+    for dt, e in upcoming[:limit]:
+        d = e.to_dict()
+        d["datetime_utc"] = dt.astimezone(timezone.utc).isoformat()
+        items.append(d)
+
+    return {
+        "status": "ok",
+        "count": len(items),
+        "currency": currency,
+        "events": items,
+    }
+
+
+@router.get("/patterns")
+async def market_news_patterns(
+    event_key: str = Query(default="", description="Filter to one event key"),
+    min_samples: int = Query(default=0, ge=0, le=1000),
+) -> dict:
+    """Return learned news patterns from historical outcomes (PRD §43/§54).
+
+    Advisory: these inform the news agent's reasoning, never an order directly.
+    """
+    from .news_patterns import get_news_pattern_memory
+
+    memory = get_news_pattern_memory()
+    if min_samples:
+        memory.min_samples = min_samples
+    patterns = memory.patterns(event_key=event_key or None)
+    return {
+        "status": "ok",
+        "count": len(patterns),
+        "min_samples": memory.min_samples,
+        "patterns": [p.to_dict() for p in patterns],
+    }

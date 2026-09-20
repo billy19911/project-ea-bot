@@ -1,14 +1,11 @@
-/* AppShell — kerangka tunggal dashboard (UI/UX F2).
- *
- * Semua ukuran/warna mengacu ke design token di globals.css; tidak ada hex
- * baru di sini kecuali varian di atas latar gelap sidebar yang memang tidak
- * punya padanan terang (mis. teks hijau muda untuk badge DEMO).
- */
+/* AppShell — instrument-panel frame.
+ * Warm-charcoal rail, hairline dividers, mono numerics. Mobile = off-canvas
+ * drawer with scrim. All colours via tokens. */
 
 .shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: var(--rail) 1fr;
   background: var(--bg);
 }
 
@@ -21,10 +18,11 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-6);
-  padding: var(--sp-6) var(--sp-4);
+  padding: var(--sp-5) var(--sp-4);
   background: var(--sidebar-bg);
   color: var(--sidebar-text);
   overflow-y: auto;
+  border-right: 1px solid var(--sidebar-border);
 }
 
 .brand {
@@ -36,36 +34,39 @@
 }
 
 .brandMark {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   flex-shrink: 0;
   display: grid;
   place-items: center;
   background: var(--primary);
-  color: #fff;
-  border-radius: 10px;
+  color: #14110c;
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
   font-size: var(--fs-md);
-  font-weight: 800;
-  letter-spacing: 0.02em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .brand div {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
 
 .brand strong {
   color: var(--sidebar-text);
   font-size: var(--fs-lg);
-  letter-spacing: 0.01em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .brand small {
   color: var(--sidebar-muted);
-  font-size: var(--fs-xs);
-  letter-spacing: 0.08em;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.14em;
 }
 
 /* Navigasi ----------------------------------------------------------------- */
@@ -79,16 +80,16 @@
 .navGroup {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .navLabel {
-  padding: 0 12px;
-  margin-bottom: var(--sp-1);
+  padding: 0 10px 6px;
   color: var(--sidebar-muted);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
@@ -97,29 +98,23 @@
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 9px 12px;
-  border-radius: var(--r-md);
+  padding: 8px 11px;
+  border-radius: var(--r-sm);
   color: var(--sidebar-text);
   font-size: var(--fs-md);
+  font-weight: 500;
   text-decoration: none;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
 .navItem:hover {
   background: var(--sidebar-hover);
-  color: var(--sidebar-text);
+  color: #fff;
 }
 
-.navItem:focus-visible {
-  outline: 2px solid var(--sidebar-accent);
-  outline-offset: 2px;
-}
-
-/* Item aktif: tint biru lembut + pill aksen di tepi kiri — blok biru penuh
-   terlalu berat dan membuat sidebar terlihat seperti deretan tombol besar. */
 .navActive,
 .navActive:hover {
-  background: var(--primary-soft);
+  background: var(--sidebar-hover);
   color: var(--sidebar-accent);
   font-weight: 600;
 }
@@ -127,19 +122,19 @@
 .navActive::before {
   content: '';
   position: absolute;
-  left: 0;
+  left: -16px;
   top: 50%;
   transform: translateY(-50%);
   width: 3px;
-  height: 18px;
-  border-radius: var(--r-full);
+  height: 20px;
+  border-radius: 0 var(--r-full) var(--r-full) 0;
   background: var(--sidebar-accent);
 }
 
 .icon {
   flex-shrink: 0;
-  opacity: 0.9;
-  transition: color 120ms ease, opacity 120ms ease;
+  opacity: 0.85;
+  transition: color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
 }
 
 .navActive .icon {
@@ -147,7 +142,7 @@
   opacity: 1;
 }
 
-/* Footer: status terminal + akun (read-only) ------------------------------- */
+/* Footer: terminal + account status ---------------------------------------- */
 
 .footer {
   margin-top: auto;
@@ -171,21 +166,6 @@
   min-width: 0;
 }
 
-.dot {
-  width: 8px;
-  height: 8px;
-  flex-shrink: 0;
-  border-radius: var(--r-full);
-}
-
-.dotOn {
-  background: var(--success);
-}
-
-.dotOff {
-  background: var(--sidebar-muted);
-}
-
 .accountName {
   min-width: 0;
   overflow: hidden;
@@ -199,12 +179,13 @@
 .armed {
   flex-shrink: 0;
   padding: 2px 6px;
-  border-radius: var(--r-full);
+  border-radius: var(--r-xs);
   background: var(--live-soft);
   color: var(--live);
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
 }
 
 .accountMeta {
@@ -213,11 +194,10 @@
   justify-content: space-between;
   gap: var(--sp-2);
   color: var(--sidebar-muted);
+  font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
 
-/* Nama server bisa panjang (mis. HFMarketsGlobal-Live15) — potong dengan
-   ellipsis alih-alih wrap ke dua baris yang terlihat berantakan. */
 .accountMeta > span:first-child {
   min-width: 0;
   overflow: hidden;
@@ -228,8 +208,9 @@
 .modeBadge {
   flex-shrink: 0;
   padding: 2px 6px;
-  border-radius: var(--r-full);
-  font-size: 10px;
+  border-radius: var(--r-xs);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
   font-weight: 700;
   letter-spacing: 0.06em;
 }
@@ -254,10 +235,11 @@
 
 .accountHint code {
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   background: var(--sidebar-hover);
   color: var(--sidebar-text);
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
 }
 
 .logoutBtn {
@@ -266,15 +248,15 @@
   justify-content: center;
   padding: 7px 10px;
   border: 1px solid var(--sidebar-border);
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--sidebar-muted);
-  font-family: inherit;
   font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.02em;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 
 .logoutBtn:hover {
@@ -283,111 +265,90 @@
   color: var(--sidebar-text);
 }
 
-.logoutBtn:focus-visible {
-  outline: 2px solid var(--sidebar-accent);
-  outline-offset: 2px;
-}
-
 /* Konten ------------------------------------------------------------------- */
 
 .main {
   min-width: 0;
-  padding: 28px 32px 40px;
+  padding: var(--sp-7) var(--sp-7) var(--sp-8);
+  position: relative;
+  z-index: 2;
 }
 
 .topbar {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--sp-4);
-  margin-bottom: var(--sp-5);
+  margin-bottom: var(--sp-6);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbarText {
+  min-width: 0;
 }
 
 .eyebrow {
+  font-family: var(--font-mono);
   color: var(--text-muted);
   font-size: var(--fs-xs);
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .topbar h1 {
-  margin: var(--sp-1) 0 0;
+  margin: 5px 0 0;
   color: var(--text);
-  font-size: 24px;
+  font-size: var(--fs-2xl);
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 
 .actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-2);
   flex-shrink: 0;
 }
 
-/* Responsif ----------------------------------------------------------------- */
+/* Mobile controls — hidden on desktop --------------------------------------- */
 
-@media (max-width: 920px) {
-  .shell {
-    grid-template-columns: 1fr;
-  }
+.menuBtn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
 
-  .topbar {
-    flex-wrap: wrap;
-  }
+.menuBtn:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
 
-  .actions {
-    flex-wrap: wrap;
-    flex-shrink: 1;
-    width: 100%;
-  }
+.drawerClose {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  border: 1px solid var(--sidebar-border);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--sidebar-muted);
+  cursor: pointer;
+}
 
-  .sidebar {
-    position: static;
-    height: auto;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--sp-4);
-    padding: var(--sp-4);
-  }
-
-  .brand {
-    padding-bottom: 0;
-    border-bottom: 0;
-  }
-
-  .nav {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: var(--sp-3);
-  }
-
-  .navGroup {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--sp-1);
-  }
-
-  .navLabel {
-    display: none;
-  }
-
-  .navItem {
-    padding: 7px 12px;
-  }
-
-  .footer {
-    width: 100%;
-    margin-top: 0;
-    padding-top: var(--sp-3);
-  }
-
-  .main {
-    padding: 18px;
-  }
+.scrim {
+  display: none;
 }
 
 .loginLink {
@@ -399,4 +360,110 @@
 
 .loginLink:hover {
   text-decoration: underline;
+}
+
+/* Responsif ----------------------------------------------------------------- */
+
+@media (max-width: 920px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 60;
+    width: min(280px, 84vw);
+    height: 100dvh;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: var(--sp-5);
+    padding: var(--sp-5) var(--sp-4);
+    transform: translateX(-100%);
+    transition: transform var(--dur) var(--ease);
+    box-shadow: var(--shadow-pop);
+    overflow-y: auto;
+  }
+
+  .sidebarOpen {
+    transform: translateX(0);
+  }
+
+  .scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur) var(--ease);
+  }
+
+  .scrimOpen {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .menuBtn {
+    display: inline-flex;
+  }
+
+  .drawerClose {
+    display: inline-flex;
+  }
+
+  .navItem {
+    padding: 11px 12px;
+    font-size: var(--fs-lg);
+  }
+
+  .footer {
+    margin-top: auto;
+  }
+
+  .topbar {
+    gap: var(--sp-3);
+  }
+
+  .topbarText {
+    flex: 1;
+  }
+
+  .topbar h1 {
+    font-size: var(--fs-xl);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .actions {
+    justify-content: flex-end;
+  }
+
+  .hideOnMobile {
+    display: none !important;
+  }
+
+  .main {
+    padding: var(--sp-4) var(--sp-4) var(--sp-7);
+  }
+}
+
+@media (max-width: 480px) {
+  .main {
+    padding: var(--sp-3) var(--sp-3) var(--sp-7);
+  }
+
+  .topbar {
+    margin-bottom: var(--sp-4);
+    padding-bottom: var(--sp-3);
+  }
+
+  .topbar h1 {
+    font-size: var(--fs-lg);
+  }
 }

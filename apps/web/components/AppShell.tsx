@@ -152,6 +152,13 @@ export default function AppShell({
       return false;
     }
   });
+  // Mobile drawer state (independent from desktop collapse).
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Close the mobile drawer whenever the route changes.
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [pathname]);
 
   // Persist collapsed state
   useEffect(() => {
@@ -265,13 +272,29 @@ export default function AppShell({
 
   return (
     <div className={styles.shell} data-collapsed={collapsed}>
-      <aside className={styles.sidebar}>
+      {/* Mobile scrim — tap to close the drawer. */}
+      <div
+        className={`${styles.scrim} ${drawerOpen ? styles.scrimOpen : ''}`}
+        onClick={() => setDrawerOpen(false)}
+        aria-hidden="true"
+      />
+      <aside className={`${styles.sidebar} ${drawerOpen ? styles.sidebarOpen : ''}`}>
         <div className={styles.brand}>
           <span className={styles.brandMark}>EA</span>
           <div>
             <strong>EA BOT</strong>
             <small>TRADING COMMAND</small>
           </div>
+          <button
+            type="button"
+            className={styles.drawerClose}
+            onClick={() => setDrawerOpen(false)}
+            aria-label="Close menu"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
         </div>
 
         <nav className={styles.nav}>
@@ -284,6 +307,7 @@ export default function AppShell({
                   href={item.href}
                   className={`${styles.navItem} ${activeKey === item.key ? styles.navActive : ''}`}
                   aria-current={activeKey === item.key ? 'page' : undefined}
+                  onClick={() => setDrawerOpen(false)}
                 >
                   <Icon name={item.icon as IconName} />
                   <span>{item.label}</span>
@@ -355,14 +379,23 @@ export default function AppShell({
 
       <main className={styles.main}>
         <header className={styles.topbar}>
-          <div>
+          <button
+            type="button"
+            className={styles.menuBtn}
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Open menu"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M3 6h18M3 12h18M3 18h18" />
+            </svg>
+          </button>
+          <div className={styles.topbarText}>
             <div className={styles.eyebrow}>{eyebrow}</div>
             <h1>{title}</h1>
           </div>
           <div className={styles.actions}>
-            {actions}
+            <span className={styles.hideOnMobile}>{actions}</span>
             <ThemeToggle />
-            {/* Environment badge for the whole app */}
             <EnvironmentBadge environment={toEnvironment(account?.mode)} />
           </div>
         </header>

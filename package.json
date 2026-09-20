@@ -18,6 +18,7 @@
     "config:validate": "node config-validate.js",
     "up": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-all.ps1",
     "down": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-all.ps1",
+    "restart": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restart-all.ps1",
     "status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/status.ps1",
     "token": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/get-token.ps1"
   },

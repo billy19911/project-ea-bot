@@ -347,7 +347,7 @@
 
 .advisorRun {
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
   padding: 10px 14px;
   border-radius: 10px;
   font-weight: 700;

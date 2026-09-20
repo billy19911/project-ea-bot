@@ -1,4 +1,4 @@
-/* Halaman Masuk (ide #3) — memakai design tokens F1, nol dependency baru. */
+/* Halaman Masuk — instrument-bezel card on an atmosphere background. */
 
 .wrap {
   min-height: 100vh;
@@ -6,17 +6,31 @@
   align-items: center;
   justify-content: center;
   padding: var(--sp-6);
-  background: var(--bg);
+  position: relative;
+  z-index: 2;
 }
 
 .card {
+  position: relative;
   width: 100%;
-  max-width: 420px;
+  max-width: 400px;
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-pop);
   padding: var(--sp-7);
+  overflow: hidden;
+}
+
+/* Bezel accent line. */
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--primary), transparent 70%);
 }
 
 .brand {
@@ -30,30 +44,36 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: var(--r-md);
   background: var(--primary);
-  color: #fff;
+  color: #17130c;
+  font-family: var(--font-mono);
   font-weight: 700;
   font-size: var(--fs-md);
 }
 
 .brand strong {
   display: block;
-  font-size: var(--fs-md);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: 0.02em;
   color: var(--text);
 }
 
 .brand small {
-  font-size: var(--fs-xs);
-  letter-spacing: 0.06em;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.14em;
   color: var(--text-muted);
 }
 
 .title {
   margin: 0 0 var(--sp-2);
-  font-size: var(--fs-xl);
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--text);
 }
 
@@ -61,6 +81,7 @@
   margin: 0 0 var(--sp-5);
   font-size: var(--fs-md);
   color: var(--text-secondary);
+  line-height: 1.6;
 }
 
 .form {
@@ -70,19 +91,24 @@
 }
 
 .label {
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .input {
   width: 100%;
-  padding: var(--sp-2) var(--sp-3);
+  padding: 10px var(--sp-3);
   border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
+  font-family: var(--font-mono);
   font-size: var(--fs-md);
   color: var(--text);
-  background: var(--surface);
+  background: var(--surface-muted);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
 
 .input:focus {
@@ -94,12 +120,14 @@
 .primary {
   margin-top: var(--sp-2);
   width: 100%;
-  padding: var(--sp-2) var(--sp-4);
+  padding: 11px var(--sp-4);
   border-radius: var(--r-md);
   background: var(--primary);
-  color: #fff;
+  color: #17130c;
   font-size: var(--fs-md);
-  font-weight: 600;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
 }
 
 .primary:hover:not(:disabled) {
@@ -108,19 +136,21 @@
 
 .primary:disabled,
 .secondary:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .secondary {
   width: 100%;
-  padding: var(--sp-2) var(--sp-4);
+  padding: 11px var(--sp-4);
   border-radius: var(--r-md);
   border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--text);
   font-size: var(--fs-md);
   font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
 }
 
 .secondary:hover:not(:disabled) {
@@ -143,7 +173,10 @@
   gap: var(--sp-3);
   margin: var(--sp-5) 0;
   color: var(--text-muted);
-  font-size: var(--fs-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .divider::before,
@@ -156,18 +189,19 @@
 
 .hint {
   margin: var(--sp-4) 0 0;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
   color: var(--text-muted);
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .hint code,
 .sub code {
   background: var(--surface-muted);
   border: 1px solid var(--border);
-  border-radius: var(--r-sm);
+  border-radius: var(--r-xs);
   padding: 1px 5px;
-  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
 }
 
 .error {
@@ -178,4 +212,19 @@
   border: 1px solid var(--danger-border);
   color: var(--danger);
   font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+@media (max-width: 480px) {
+  .wrap {
+    padding: var(--sp-3);
+  }
+
+  .card {
+    padding: var(--sp-5);
+  }
+
+  .title {
+    font-size: var(--fs-xl);
+  }
 }

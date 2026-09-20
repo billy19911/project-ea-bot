@@ -1,5 +1,6 @@
-/* Shared Ops-style layout — dipakai halaman baru Phase 36-56.
- * Semua warna via token semantik supaya otomatis mengikuti tema dark/light. */
+/* Shared Ops layout — instrument-panel cards, hairline tables, mono numerics.
+ * Used by the Phase 36-56 pages. All colour via semantic tokens so it tracks
+ * the dark/light theme automatically. */
 
 .wrap {
   display: flex;
@@ -7,50 +8,70 @@
   gap: var(--sp-5);
 }
 
+/* KPI grid ---------------------------------------------------------------- */
+
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: var(--sp-4);
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--sp-3);
 }
 
 .card {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-sm);
-  padding: var(--sp-4) var(--sp-5);
+  padding: var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
+  gap: 6px;
+  overflow: hidden;
+}
+
+/* A hairline accent bar on the top edge — a nod to instrument bezels. */
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--primary), transparent 60%);
+  opacity: 0.5;
 }
 
 .cardLabel {
+  font-family: var(--font-mono);
   font-size: var(--fs-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-weight: 500;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 
 .cardValue {
-  font-size: 22px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xl);
   font-weight: 700;
   color: var(--text);
   font-variant-numeric: tabular-nums;
-  line-height: 1.1;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
   word-break: break-word;
 }
 
 .cardHint {
   font-size: var(--fs-xs);
   color: var(--text-muted);
+  line-height: 1.5;
 }
+
+/* Panel ------------------------------------------------------------------- */
 
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 
@@ -59,15 +80,16 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
+  padding: 11px var(--sp-4);
   border-bottom: 1px solid var(--border);
   background: var(--surface-muted);
 }
 
 .panelTitle {
-  font-size: var(--fs-sm);
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
@@ -76,19 +98,22 @@
   padding: var(--sp-4);
 }
 
+/* Table ------------------------------------------------------------------- */
+
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
 }
 
 .table th {
   text-align: left;
-  padding: 8px 12px;
-  font-size: 11px;
-  font-weight: 600;
+  padding: 9px var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
   color: var(--text-muted);
   background: var(--surface-muted);
   border-bottom: 1px solid var(--border);
@@ -96,9 +121,18 @@
 }
 
 .table td {
-  padding: 8px 12px;
+  padding: 9px var(--sp-3);
   border-bottom: 1px solid var(--border);
   color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.table tbody tr {
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.table tbody tr:hover {
+  background: var(--surface-muted);
 }
 
 .table tbody tr:last-child td {
@@ -117,17 +151,19 @@
   font-size: var(--fs-md);
 }
 
-/* Status pills ------------------------------------------------------------ */
+/* Pills ------------------------------------------------------------------- */
 
 .pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 2px 9px;
+  gap: 5px;
+  padding: 2px 8px;
   border-radius: var(--r-full);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   border: 1px solid transparent;
 }
 
@@ -150,7 +186,7 @@
 }
 
 .pillNeutral {
-  background: var(--surface-muted);
+  background: var(--neutral-muted);
   border-color: var(--border);
   color: var(--text-muted);
 }
@@ -162,24 +198,24 @@
   align-items: center;
   gap: 6px;
   padding: 7px 13px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
   background: var(--surface);
   color: var(--text);
-  font-family: inherit;
   font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 
 .btn:hover:not(:disabled) {
   background: var(--surface-muted);
-  border-color: var(--border-strong);
+  border-color: var(--text-muted);
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -195,7 +231,7 @@
 .btnPrimary {
   background: var(--primary);
   border-color: var(--primary);
-  color: #fff;
+  color: #17130c;
 }
 
 .btnPrimary:hover:not(:disabled) {
@@ -217,4 +253,59 @@
   color: var(--danger);
   border-radius: var(--r-md);
   font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+/* Responsif --------------------------------------------------------------- */
+
+@media (max-width: 920px) {
+  .wrap {
+    gap: var(--sp-4);
+  }
+
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: var(--sp-2);
+  }
+
+  .card {
+    padding: var(--sp-3);
+  }
+
+  .cardValue {
+    font-size: var(--fs-xl);
+  }
+
+  .panelHead {
+    padding: var(--sp-3);
+    flex-wrap: wrap;
+  }
+
+  .panelBody {
+    padding: var(--sp-3);
+  }
+
+  .panel {
+    overflow-x: auto;
+  }
+
+  .table {
+    min-width: 540px;
+  }
+}
+
+@media (max-width: 480px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .cardValue {
+    font-size: var(--fs-lg);
+  }
+
+  .table th,
+  .table td {
+    padding: 7px 9px;
+    font-size: var(--fs-xs);
+  }
 }

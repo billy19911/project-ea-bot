@@ -710,6 +710,80 @@ app.get('/market/symbol-spec', async (req, res) => {
   await sendProxy(res, `/market/symbol-spec?symbol=${encodeURIComponent(symbol)}`, undefined, req);
 });
 
+// News & economic calendar (proxied from Python). The news page needs both the
+// headline feed and the upcoming economic calendar (e.g. USD / US events).
+app.get('/market/news', async (req, res) => {
+  const log = (req as any).log;
+  const limit = Number(req.query.limit) || 20;
+  const source = String(req.query.source || 'all');
+  log.info({ source, limit }, 'market.news');
+  await sendProxy(
+    res,
+    `/market/news?limit=${limit}&source=${encodeURIComponent(source)}`,
+    undefined,
+    req,
+  );
+});
+
+app.get('/market/calendar', async (req, res) => {
+  const log = (req as any).log;
+  const currency = String(req.query.currency || 'USD');
+  const impact = String(req.query.impact || 'all');
+  const limit = Number(req.query.limit) || 30;
+  log.info({ currency, impact }, 'market.calendar');
+  await sendProxy(
+    res,
+    `/market/calendar?currency=${encodeURIComponent(currency)}&impact=${encodeURIComponent(impact)}&limit=${limit}`,
+    undefined,
+    req,
+  );
+});
+
+app.get('/market/sentiment', async (req, res) => {
+  const log = (req as any).log;
+  const symbol = String(req.query.symbol || 'XAUUSD');
+  log.info({ symbol }, 'market.sentiment');
+  await sendProxy(res, `/market/sentiment?symbol=${encodeURIComponent(symbol)}`, undefined, req);
+});
+
+app.get('/market/summary', async (req, res) => {
+  const log = (req as any).log;
+  const symbol = String(req.query.symbol || 'XAUUSD');
+  log.info({ symbol }, 'market.summary');
+  await sendProxy(res, `/market/summary?symbol=${encodeURIComponent(symbol)}`, undefined, req);
+});
+
+app.post('/market/refresh', authenticate, async (req, res) => {
+  await sendPostProxy(res, '/market/refresh', req, req.body ?? {});
+});
+
+// Upcoming economic events (future only) — USD/US by default.
+app.get('/market/upcoming', async (req, res) => {
+  const log = (req as any).log;
+  const currency = String(req.query.currency || 'USD');
+  const limit = Number(req.query.limit) || 15;
+  log.info({ currency, limit }, 'market.upcoming');
+  await sendProxy(
+    res,
+    `/market/upcoming?currency=${encodeURIComponent(currency)}&limit=${limit}`,
+    undefined,
+    req,
+  );
+});
+
+// Learned news patterns from historical outcomes (advisory).
+app.get('/market/patterns', async (req, res) => {
+  const log = (req as any).log;
+  const eventKey = String(req.query.event_key || '');
+  log.info({ eventKey }, 'market.patterns');
+  await sendProxy(
+    res,
+    `/market/patterns?event_key=${encodeURIComponent(eventKey)}`,
+    undefined,
+    req,
+  );
+});
+
 app.get('/trading/overview', async (req, res) => {
   const log = (req as any).log;
   log.info('trading.overview');
