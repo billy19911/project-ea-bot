@@ -255,7 +255,17 @@ class TechnicalAnalystAgent(BaseAgent):
         return event_type in self.DEFAULT_EVENT_TYPES
 
     def analyze(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Analyse detected events and produce a technical assessment."""
+        """Analyse detected events into a structured, evidence-weighted view.
+
+        Sharpened reasoning (v2):
+
+        * each event carries an **evidence weight** (trend > momentum > extreme);
+        * a **conflict** is flagged when bullish and bearish evidence coexist;
+        * **regime** (from ``market_state``) moderates the read — e.g. an
+          oscillator extreme is discounted in a strong trend;
+        * historical **pattern memory** nudges confidence (±0.15 max) and adds
+          an evidence-backed reasoning line — advisory only.
+        """
         events = context.get("detected_events", [])
         market_state = context.get("market_state")
 
@@ -269,48 +279,129 @@ class TechnicalAnalystAgent(BaseAgent):
                 "signal": signal,
                 "confidence": confidence,
                 "reasons": ["No events to analyse"],
+                "event_count": 0,
             }
 
-        # Use event type for proper comparison
-        bullish_count = sum(
-            1
-            for e in events
-            if e.event_type.value.startswith("TREND_BULLISH")
-            or e.event_type.value.startswith("MOMENTUM_BULLISH")
-            or e.event_type == "BREAKOUT"
-        )
-        bearish_count = sum(
-            1
-            for e in events
-            if e.event_type.value.startswith("TREND_BEARISH")
-            or e.event_type.value.startswith("MOMENTUM_BEARISH")
-            or e.event_type == "BREAKDOWN"
-        )
+        # --- Weighted evidence scoring -----------------------------------
+        # Trend evidence is the strongest signal; momentum supports it; raw
+        # overbought/oversold extremes are the weakest (and often contrarian).
+        bull_score = 0.0
+        bear_score = 0.0
+        bull_ev: list[str] = []
+        bear_ev: list[str] = []
+        for e in events:
+            et = e.event_type.value
+            if et.startswith("TREND_BULLISH") or et == "BREAKOUT":
+                bull_score += 1.0
+                bull_ev.append(et)
+            elif et.startswith("TREND_BEARISH") or et == "BREAKDOWN":
+                bear_score += 1.0
+                bear_ev.append(et)
+            elif et.startswith("MOMENTUM_BULLISH") or et == "EMA_CROSSOVER":
+                bull_score += 0.6
+                bull_ev.append(et)
+            elif et.startswith("MOMENTUM_BEARISH") or et == "MACD_CROSSOVER":
+                bear_score += 0.6
+                bear_ev.append(et)
+            elif et in ("RSI_OVERSOLD", "STOCH_OVERSOLD"):
+                # Oversold leans bullish but only weakly (can be a falling knife).
+                bull_score += 0.3
+                bull_ev.append(et)
+            elif et in ("RSI_OVERBOUGHT", "STOCH_OVERBOUGHT"):
+                bear_score += 0.3
+                bear_ev.append(et)
 
-        if bullish_count > bearish_count:
+        total = bull_score + bear_score
+        net = bull_score - bear_score
+
+        # --- Regime moderation -------------------------------------------
+        regime = "unknown"
+        trend_strength = 0.0
+        if market_state is not None:
+            regime = self._regime_of(market_state)
+            try:
+                trend_strength = float(getattr(market_state, "adx_value", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                trend_strength = 0.0
+            # In a strong trend, discount weak counter-trend oscillator reads.
+            if trend_strength >= 25 and regime.startswith("trend"):
+                if regime == "trend_up" and bear_score and bear_score < bull_score:
+                    bear_score *= 0.5
+                elif regime == "trend_down" and bull_score and bull_score < bear_score:
+                    bull_score *= 0.5
+                net = bull_score - bear_score
+                total = bull_score + bear_score
+                reasons.append(
+                    f"Strong {regime.replace('trend_', '')} trend (ADX {trend_strength:.0f}) — "
+                    "counter-trend reads discounted"
+                )
+
+        # --- Decide + conflict detection ---------------------------------
+        conflict = bull_score > 0 and bear_score > 0 and abs(net) < 0.5 * max(total, 1e-9)
+        if net > 0:
             signal = "BULLISH"
-            confidence = min(0.5 + bullish_count * 0.1, 0.95)
-            reasons.append(f"Bullish events dominate ({bullish_count} vs {bearish_count})")
-        elif bearish_count > bullish_count:
+        elif net < 0:
             signal = "BEARISH"
-            confidence = min(0.5 + bearish_count * 0.1, 0.95)
-            reasons.append(f"Bearish events dominate ({bearish_count} vs {bullish_count})")
-        else:
-            reasons.append("Events are balanced")
 
-        if market_state and market_state.trend_direction:
-            reasons.append(f"Trend: {market_state.trend_direction}")
+        if total > 0:
+            # Confidence scales with how decisive the evidence split is.
+            dominance = abs(net) / total  # 0..1
+            confidence = min(0.5 + dominance * 0.45, 0.95)
+
+        if conflict:
+            confidence *= 0.6
             reasons.append(
-                f"ADX: {market_state.adx_value:.1f}" if market_state.adx_value else "ADX: N/A"
+                f"Conflicting evidence (bull {bull_score:.1f} vs bear {bear_score:.1f}) — "
+                "reduced conviction"
             )
+        if bull_ev:
+            reasons.append(f"Bullish evidence: {', '.join(sorted(set(bull_ev)))}")
+        if bear_ev:
+            reasons.append(f"Bearish evidence: {', '.join(sorted(set(bear_ev)))}")
+
+        # --- Pattern memory (advisory) -----------------------------------
+        try:
+            from .agent_memory import get_agent_memory
+
+            memory = get_agent_memory()
+            adjusted, note = memory.adjust_confidence(self.name, regime, confidence)
+            if note:
+                reasons.append(note)
+            confidence = adjusted
+        except Exception:  # noqa: BLE001 - memory must never break analysis
+            pass
+
+        if market_state is not None:
+            reasons.append(f"Regime: {regime}")
+            if trend_strength:
+                reasons.append(f"ADX: {trend_strength:.1f}")
 
         return {
             "agent": self.name,
             "signal": signal,
-            "confidence": confidence,
+            "confidence": round(confidence, 4),
             "reasons": reasons,
+            "regime": regime,
+            "conflict": conflict,
+            "evidence": {
+                "bull_score": round(bull_score, 3),
+                "bear_score": round(bear_score, 3),
+                "net": round(net, 3),
+            },
             "event_count": len(events),
         }
+
+    @staticmethod
+    def _regime_of(market_state: Any) -> str:
+        """Derive a coarse regime label from a market_state object."""
+        direction = str(getattr(market_state, "trend_direction", "") or "").lower()
+        if "up" in direction or "bull" in direction:
+            return "trend_up"
+        if "down" in direction or "bear" in direction:
+            return "trend_down"
+        if direction in ("range", "ranging", "sideways"):
+            return "range"
+        return "unknown"
 
 
 class FundamentalAnalystAgent(BaseAgent):
