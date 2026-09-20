@@ -67,6 +67,26 @@ async def get_economic_calendar(
     }
 
 
+@router.get("/health")
+async def market_data_health(
+    symbol: str = Query(default="XAUUSD", description="Symbol to check health")
+) -> dict:
+    """Return market data health for *symbol* (Phase 32)."""
+    from .health import compute_market_data_health
+
+    return compute_market_data_health(symbol)
+
+
+@router.get("/symbol-spec")
+async def get_symbol_spec_endpoint(
+    symbol: str = Query(default="XAUUSD", description="Symbol to query"),
+) -> dict:
+    """Return the full broker SymbolSpec for *symbol* (Phase 33)."""
+    from .symbol_spec import get_symbol_spec as _get_spec
+
+    return _get_spec(symbol)
+
+
 @router.get("/sentiment")
 async def get_market_sentiment(
     symbol: str = Query(default="XAUUSD", description="Trading symbol"),
@@ -117,4 +137,35 @@ async def refresh_news_feed() -> dict:
         "news_count": len(news),
         "events_count": len(events),
         "message": "News feed refreshed",
+    }
+
+
+@router.get("/summary")
+async def market_summary(symbol: str = Query(default="XAUUSD")) -> dict:
+    """Return concise news summary for a symbol.
+    Includes avg sentiment, high‑impact event count, and top positive/negative headlines.
+    """
+    provider = get_news_feed_provider()
+    context = provider.get_news_context(symbol=symbol)
+    sentiment_data = context.get("sentiment", {})
+    news_items = sentiment_data.get("news_items", [])
+    events = sentiment_data.get("economic_events", [])
+    # avg sentiment
+    avg_sentiment = (
+        sum(item.get("sentiment", 0) for item in news_items) / len(news_items)
+        if news_items
+        else 0.0
+    )
+    # high impact events
+    high_imp = sum(1 for e in events if e.get("impact", "").upper() in ("HIGH", "CRITICAL"))
+    # top headlines
+    positive = sorted(news_items, key=lambda x: x.get("sentiment", 0), reverse=True)[:3]
+    negative = sorted(news_items, key=lambda x: x.get("sentiment", 0))[:3]
+    return {
+        "status": "ok",
+        "symbol": symbol,
+        "avg_sentiment": round(avg_sentiment, 3),
+        "high_impact_events": high_imp,
+        "top_positive": [item.get("headline") for item in positive],
+        "top_negative": [item.get("headline") for item in negative],
     }

@@ -1,0 +1,6 @@
+{
+  "llm_advisor_enabled": 0,
+  "scheduler_poll_interval": 1.0,
+  "supervisor_token_budget": 11000,
+  "trend_sample_interval": 15.0
+}

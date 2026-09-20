@@ -26,12 +26,20 @@ from ..observability.metrics import MetricsRegistry
 from ..observability.sampler import get_trend_sampler
 from ..orchestration.runtime import get_runtime
 from ..security.audit_log import ProtectedAuditLog
+from ..system.certification import run_certification
 from ..system.settings_store import get_settings_store
 from ..telegram.notifier import get_gateway
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["system"])
+
+
+@router.get("/certify", summary="System certification baseline checks")
+async def certify() -> dict:
+    """Run all Phase‑31 baseline checks and return a list of component status dicts."""
+    return {"components": run_certification()}
+
 
 # ---------------------------------------------------------------------------
 # Process-wide read-only state

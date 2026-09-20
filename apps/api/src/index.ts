@@ -588,6 +588,29 @@ app.get('/system/overview', async (req, res) => {
   res.json(payload);
 });
 
+// Phase 31: system certification baseline checks (proxied from Python).
+app.get('/certify', async (req, res) => {
+  const log = (req as any).log;
+  log.info('system.certify');
+  await sendProxy(res, '/certify', undefined, req);
+});
+
+// Phase 32: market data health / stale protection (proxied from Python).
+app.get('/market/health', async (req, res) => {
+  const log = (req as any).log;
+  const symbol = String(req.query.symbol || 'XAUUSD');
+  log.info({ symbol }, 'market.health');
+  await sendProxy(res, `/market/health?symbol=${encodeURIComponent(symbol)}`, undefined, req);
+});
+
+// Phase 33: full broker symbol specification (proxied from Python).
+app.get('/market/symbol-spec', async (req, res) => {
+  const log = (req as any).log;
+  const symbol = String(req.query.symbol || 'XAUUSD');
+  log.info({ symbol }, 'market.symbol_spec');
+  await sendProxy(res, `/market/symbol-spec?symbol=${encodeURIComponent(symbol)}`, undefined, req);
+});
+
 app.get('/trading/overview', async (req, res) => {
   const log = (req as any).log;
   log.info('trading.overview');
