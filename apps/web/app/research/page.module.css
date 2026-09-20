@@ -1,0 +1,323 @@
+.resultCount {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.sectionHead,
+.toolbar,
+.inline,
+.formFooter {
+  display: flex;
+  align-items: center;
+}
+
+.sectionHead,
+.toolbar,
+.formFooter {
+  justify-content: space-between;
+}
+
+.sectionHead h2,
+.formTitle h2,
+.card h3 {
+  margin: 0;
+}
+
+.sectionHead h2,
+.formTitle h2 {
+  font-size: 18px;
+}
+
+.inline {
+  gap: 10px;
+}
+
+.badge {
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.notice {
+  border: 1px solid var(--success-border);
+  background: var(--success-soft);
+  color: var(--success);
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 14px;
+  font-size: 14px;
+}
+
+.pageBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  background: white;
+  border: 1px solid var(--border);
+  padding: 6px;
+  border-radius: 12px;
+  width: fit-content;
+}
+
+.tabs button {
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--text-secondary);
+}
+
+.tabs .tabActive {
+  background: var(--text);
+  color: var(--surface);
+}
+
+.sectionHead {
+  gap: 16px;
+}
+
+.sectionHead div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.primary {
+  background: var(--primary);
+  color: var(--surface);
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+.primary:hover {
+  background: var(--primary-hover);
+}
+
+.toolbar {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  gap: 10px;
+}
+
+.toolbar input,
+.toolbar select,
+.field input,
+.field select,
+.card input,
+.card select {
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  padding: 9px 10px;
+  background: white;
+  color: var(--text);
+}
+
+.toolbar input {
+  flex: 1;
+}
+
+.tableCard,
+.card,
+.formCard {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.tableCard {
+  overflow: hidden;
+}
+
+.tableCard table {
+  width: 100%;
+  font-size: 13px;
+}
+
+.tableCard th,
+.tableCard td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.tableCard th {
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tableCard td strong {
+  display: block;
+}
+
+.tableCard td small {
+  margin-top: 3px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 5px 8px;
+}
+
+.success {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.muted {
+  background: var(--neutral-muted);
+  color: var(--text-secondary);
+}
+
+.positive {
+  color: var(--success);
+  font-weight: 700;
+}
+
+.negative {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.card,
+.formCard {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card label,
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.inline label {
+  flex: 1;
+}
+
+.metrics,
+.formGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.metrics {
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+}
+
+.metrics div {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.metrics div small {
+  display: block;
+  color: var(--text-muted);
+}
+
+.metrics div strong {
+  font-size: 20px;
+}
+
+.formCard {
+  grid-template-columns: 260px 1fr;
+  gap: 24px;
+}
+
+.formTitle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.formGrid {
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+}
+
+.registry {
+  grid-column: span 2;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.formFooter {
+  margin-top: 12px;
+}
+
+@media (max-width: 920px) {
+
+  .formCard,
+  .formGrid,
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .registry {
+    grid-column: auto;
+  }
+
+  .sectionHead,
+  .toolbar,
+  .formFooter {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .tableCard {
+    overflow-x: auto;
+  }
+}
+
+/* Ide #7: umpan balik jujur pada halaman Pengaturan. */
+.noticeError {
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: var(--fs-sm);
+  margin-bottom: var(--sp-4);
+}
+
+.mutedText {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  margin: 0;
+}
+
+.fieldHint {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.fieldHint code {
+  background: var(--neutral-muted);
+  border-radius: 4px;
+  padding: 1px 4px;
+}

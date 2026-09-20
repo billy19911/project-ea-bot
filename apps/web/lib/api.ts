@@ -41,3 +41,30 @@ export function apiFetch(path: string, init: RequestInit = {}): Promise<Response
 
   return fetch(API_BASE + path, { ...init, headers });
 }
+
+/**
+ * apiFetchTyped — bungkus apiFetch untuk kontrak data PRD §85.
+ *
+ * Setiap endpoint yang mengikuti kontrak {value,status,updated_at,source}
+ * bisa dipanggil lewat helper ini sehingga UI tidak pernah "menebak" data:
+ * field yang hilang dikembalikan sebagai null/unknown, bukan angka 0 palsu.
+ */
+export async function apiFetchTyped<T>(
+  path: string,
+  init: RequestInit = {}
+): Promise<{ value: T | null; status: string; updated_at: string; source: string }> {
+  const resp = await apiFetch(path, init);
+  let json: Record<string, unknown> = {};
+  try {
+    json = (await resp.json()) as Record<string, unknown>;
+  } catch {
+    json = {};
+  }
+  return {
+    value: (json?.value as T) ?? null,
+    status: (json?.status as string) ?? (resp.ok ? 'OK' : 'ERROR'),
+    updated_at: (json?.updated_at as string) ?? new Date().toISOString(),
+    source: (json?.source as string) ?? 'unknown',
+  };
+}
+

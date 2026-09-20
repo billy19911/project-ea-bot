@@ -78,7 +78,79 @@
   --sidebar-accent: #6ea8fe;
 }
 
+/* Dark-mode overrides -------------------------------------------------------
+ * Xynn Command Center default = dark (PRD §78). Kita paksa dark lewat atribut
+ * [data-theme="dark"] pada <html> supaya tidak bergantung prefers-color-scheme,
+ * plus dukung media query sebagai fallback. */
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Surface & text */
+  --bg: #09090b;
+  --surface: #111318;
+  --surface-muted: #151820;
+  --surface-3: #1a1e27;
+  --neutral-muted: #1a1e27;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  --text: #e5e7eb;
+  --text-secondary: #cbd5e1;
+  --text-muted: #9ca3af;
+
+  /* Brand & status (PRD §5.1 semantic colors) */
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --primary-soft: rgba(59, 130, 246, 0.12);
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.12);
+  --success-border: rgba(16, 185, 129, 0.35);
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.12);
+  --warning-border: rgba(245, 158, 11, 0.35);
+  --danger: #ef4444;
+  --danger-soft: rgba(239, 68, 68, 0.12);
+  --danger-border: rgba(239, 68, 68, 0.35);
+  --info: #3b82f6;
+  --neutral: #6b7280;
+
+  /* Konteks akun MT5 (badge DEMO/LIVE) */
+  --live: #ef4444;
+  --live-soft: rgba(239, 68, 68, 0.12);
+  --demo: #10b981;
+  --demo-soft: rgba(16, 185, 129, 0.12);
+
+  /* Sidebar (dipakai AppShell) */
+  --sidebar-bg: #0c0e13;
+  --sidebar-text: #d8dee9;
+  --sidebar-muted: #98a2b3;
+  --sidebar-hover: rgba(255, 255, 255, 0.06);
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-accent: #6ea8fe;
+
+  /* Shadow (PRD §5.4: border dulu, shadow halus saja) */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
+
+  /* Mono untuk angka trading (PRD §5.2) */
+  --font-mono: ui-monospace, SFMono-Regular, "Geist Mono", Menlo, Consolas, monospace;
+}
+
 /* Reset minimal ----------------------------------------------------------- */
+
+/* Respect user motion preferences (PRD §133). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 
 * {
   box-sizing: border-box;

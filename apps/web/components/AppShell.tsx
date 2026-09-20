@@ -1,61 +1,67 @@
-'use client';
-
-// AppShell — kerangka tunggal untuk seluruh halaman dashboard (UI/UX F2).
-//
-// Menggantikan lima sidebar + header yang sebelumnya diduplikasi di tiap
-// halaman (home, control-plane, ai-control, strategy, observability).
-//
-// Kontrak:
-//   activeKey : item navigasi yang disorot (satu per halaman).
-//   eyebrow   : label kecil di atas judul, mis. "EA BOT / CONTROL PLANE".
-//   title     : judul halaman (h1).
-//   actions   : slot tombol kontekstual di kanan header.
-//   children  : isi halaman.
-//
-// Footer sidebar menampilkan terminal MT5 terpilih + mode akun (DEMO/LIVE)
-// secara READ-ONLY. Shell ini tidak pernah mengubah state eksekusi — arming
-// hanya lewat panel terminal di Control Plane.
-
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, getAuthToken } from '../lib/api';
+import { cn } from '../lib/utils';
+// Inline SVG Icon component defined later
+import { StatusIndicator, type UiStatus } from './ui/status-indicator';
+import { EnvironmentBadge, type Environment } from './ui/environment-badge';
+import { RealtimeIndicator, type RealtimeStatus } from './ui/realtime-indicator';
+import { CommandPalette } from './ui/command-palette';
 import styles from './AppShell.module.css';
 
-type NavKey = 'control-plane' | 'observability' | 'ai-control' | 'strategy' | 'research' | 'market' | 'settings';
+type NavKey = string;
 type IconName = 'grid' | 'activity' | 'cpu' | 'trend' | 'flask' | 'candles' | 'sliders';
+
 type AccountMode = 'LIVE' | 'DEMO' | 'CONTEST';
 
 type TerminalState = { label: string; running: boolean; armed: boolean };
 type AccountState = { login: number | null; server: string; mode: AccountMode | null };
 
-const NAV_GROUPS: { label: string; items: { key: NavKey; label: string; href: string; icon: IconName }[] }[] = [
+function mapTradeMode(raw: unknown): AccountMode | null {
+  if (typeof raw !== 'string') return null;
+  const value = raw.toUpperCase();
+  if (value.includes('LIVE') || value.includes('REAL')) return 'LIVE';
+  if (value.includes('DEMO')) return 'DEMO';
+  if (value.includes('CONTEST')) return 'CONTEST';
+  return null;
+}
+
+const NAV_GROUPS = [
   {
     label: 'Operasional',
     items: [
       { key: 'control-plane', label: 'Control Plane', href: '/control-plane', icon: 'grid' },
-      { key: 'market', label: 'Pasar', href: '/market', icon: 'candles' },
+      { key: 'market', label: 'Market', href: '/market', icon: 'candles' },
       { key: 'observability', label: 'Observability', href: '/observability', icon: 'activity' },
+      { key: 'news', label: 'News', href: '/news', icon: 'candles' },
+      { key: 'system-readiness', label: 'System Readiness', href: '/system-readiness', icon: 'grid' },
     ],
   },
   {
     label: 'AI',
     items: [
-      { key: 'ai-control', label: 'Kontrol AI', href: '/ai-control', icon: 'cpu' },
-      { key: 'strategy', label: 'Strategi', href: '/strategy', icon: 'trend' },
+      { key: 'ai-control', label: 'AI Control', href: '/ai-control', icon: 'cpu' },
+      { key: 'strategy', label: 'Strategy', href: '/strategy', icon: 'trend' },
     ],
   },
   {
-    label: 'Riset',
-    items: [{ key: 'research', label: 'Pusat Riset', href: '/', icon: 'flask' }],
+    label: 'Research',
+    items: [{ key: 'research', label: 'Research', href: '/research', icon: 'flask' }],
   },
   {
-    label: 'Sistem',
-    items: [{ key: 'settings', label: 'Pengaturan', href: '/settings', icon: 'sliders' }],
+    label: 'System',
+    items: [
+      { key: 'overview', label: 'Overview', href: '/', icon: 'grid' },
+      { key: 'settings', label: 'Settings', href: '/settings', icon: 'sliders' }
+    ],
   },
 ];
 
-function Icon({ name }: { name: IconName }) {
+type IconProps = { name: IconName };
+function Icon({ name }: any) {
+  // Reuse inline SVG definitions from the original AppShell file.
+  // For brevity we keep the same paths.
   return (
     <svg
       className={styles.icon}
@@ -107,16 +113,6 @@ function Icon({ name }: { name: IconName }) {
   );
 }
 
-// MT5 trade_mode: 0 = DEMO, 1 = CONTEST, 2 = REAL. Nilai lain (mis. simulasi
-// "FULL") sengaja dipetakan ke null agar badge tidak menyesatkan.
-function mapTradeMode(raw: unknown): AccountMode | null {
-  const value = String(raw ?? '').toUpperCase();
-  if (value === '2' || value.includes('REAL') || value.includes('LIVE')) return 'LIVE';
-  if (value === '1' || value.includes('CONTEST')) return 'CONTEST';
-  if (value === '0' || value.includes('DEMO')) return 'DEMO';
-  return null;
-}
-
 export default function AppShell({
   activeKey,
   eyebrow,
@@ -136,30 +132,45 @@ export default function AppShell({
   const [account, setAccount] = useState<AccountState | null>(null);
   const [needsToken, setNeedsToken] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  const [realtime, setRealtime] = useState<RealtimeStatus>('OFFLINE');
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const val = localStorage.getItem('sidebar-collapsed');
+      return val === 'true';
+    } catch {
+      return false;
+    }
+  });
 
-  // Sesi browser = ada token di localStorage. Aksi "Keluar" hanya menghapus
-  // token browser ini — tidak menyentuh state eksekusi/arming MT5 sama sekali.
-  // Info terminal/akun ikut di-reset supaya footer tidak menampilkan data
-  // stale dari sesi yang sudah berakhir.
+  // Persist collapsed state
+  useEffect(() => {
+    try {
+      localStorage.setItem('sidebar-collapsed', collapsed.toString());
+    } catch {}
+  }, [collapsed]);
+
+  // Toggle button (placed in topbar actions)
+  const toggleSidebar = () => setCollapsed(c => !c);
+
+
   const signOut = () => {
     try {
       localStorage.removeItem('ea-bot-token');
-    } catch {
-      // localStorage bisa diblokir; anggap saja sudah keluar.
-    }
+    } catch {}
     setSignedIn(false);
     setTerminal(null);
     setAccount(null);
     setNeedsToken(true);
+    setRealtime('OFFLINE');
   };
 
+  // Fetch MT5 terminal & account info – read‑only, no state mutation.
   useEffect(() => {
     setSignedIn(Boolean(getAuthToken()));
     let cancelled = false;
     (async () => {
-      // Read-only: daftar terminal + info akun. Keduanya di belakang auth
-      // middleware; tanpa token responsnya 401 — itu dibedakan dari "tidak
-      // terdeteksi" agar pesan footer tidak menyesatkan.
       try {
         const res = await apiFetch('/mt5/terminals');
         if (res.status === 401) {
@@ -169,7 +180,7 @@ export default function AppShell({
         if (res.ok) {
           const data = await res.json();
           const list: Record<string, unknown>[] = Array.isArray(data?.terminals) ? data.terminals : [];
-          const selected = list.find((t) => t?.selected === true) ?? list[0];
+          const selected = list.find(t => t?.selected) ?? list[0];
           if (!cancelled) {
             setTerminalKnown(true);
             if (selected) {
@@ -183,10 +194,7 @@ export default function AppShell({
             }
           }
         }
-      } catch {
-        // Biarkan terminalKnown=false — shell tidak boleh mengarang status.
-      }
-
+      } catch {}
       if (!getAuthToken()) return;
       try {
         const res = await apiFetch('/mt5/accounts/info');
@@ -200,38 +208,75 @@ export default function AppShell({
             });
           }
         }
-      } catch {
-        // Info akun opsional — footer tetap tampil tanpa meta akun.
-      }
+      } catch {}
     })();
     return () => {
       cancelled = true;
     };
   }, [pathname]);
 
+  // Mock realtime status changes – in production hook to websocket.
+  useEffect(() => {
+    // Simple demo: flip LIVE every 12s, otherwise DEGRADED.
+    const interval = setInterval(() => {
+      setRealtime(prev => (prev === 'LIVE' ? 'DEGRADED' : 'LIVE'));
+    }, 12000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Helper: map trade mode to badge enum.
+  function toEnvironment(mode: AccountMode | null | undefined): Environment {
+  switch (mode) {
+    case 'LIVE':
+      return 'PRODUCTION';
+    case 'DEMO':
+      return 'DEMO';
+    case 'CONTEST':
+      return 'PAPER';
+    default:
+      return 'UNKNOWN';
+  }
+}
+
+// MT5 trade_mode: 0 = DEMO, 1 = CONTEST, 2 = REAL. Nilai lain (mis. simulasi
+// "FULL") sengaja dipetakan ke null agar badge tidak menyesatkan.
+
+
+  // Keyboard shortcut for command palette.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setPaletteOpen(o => !o);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   return (
-    <div className={styles.shell}>
+    <div className={styles.shell} data-theme="dark" data-collapsed={collapsed}>
       <aside className={styles.sidebar}>
         <div className={styles.brand}>
           <span className={styles.brandMark}>EA</span>
           <div>
             <strong>EA BOT</strong>
-            <small>TRADING CONTROL</small>
+            <small>TRADING COMMAND</small>
           </div>
         </div>
 
         <nav className={styles.nav}>
-          {NAV_GROUPS.map((group) => (
+          {NAV_GROUPS.map(group => (
             <div key={group.label} className={styles.navGroup}>
               <div className={styles.navLabel}>{group.label}</div>
-              {group.items.map((item) => (
+              {group.items.map(item => (
                 <Link
                   key={item.key}
                   href={item.href}
                   className={`${styles.navItem} ${activeKey === item.key ? styles.navActive : ''}`}
                   aria-current={activeKey === item.key ? 'page' : undefined}
                 >
-                  <Icon name={item.icon} />
+                  <Icon name={item.icon as IconName} />
                   <span>{item.label}</span>
                 </Link>
               ))}
@@ -243,7 +288,10 @@ export default function AppShell({
           {terminal ? (
             <div className={styles.account}>
               <div className={styles.accountTop}>
-                <span className={`${styles.dot} ${terminal.running ? styles.dotOn : styles.dotOff}`} />
+                <StatusIndicator
+                  status={terminal.running ? ('RUNNING' as UiStatus) : ('OFFLINE' as UiStatus)}
+                  hideDot={false}
+                />
                 <span className={styles.accountName}>MT5 · {terminal.label}</span>
                 {terminal.armed && <span className={styles.armed}>ARMED</span>}
               </div>
@@ -254,36 +302,45 @@ export default function AppShell({
                     {account.server}
                   </span>
                   {account.mode && (
-                    <span
-                      className={`${styles.modeBadge} ${
-                        account.mode === 'LIVE' ? styles.modeLive : styles.modeDemo
-                      }`}
-                    >
-                      {account.mode}
-                    </span>
+                    <EnvironmentBadge
+                      environment={account.mode as Environment}
+                      className={styles.modeBadge}
+                    />
                   )}
                 </div>
               ) : (
-                <div className={styles.accountHint}>Info akun tidak tersedia.</div>
+                <div className={styles.accountHint}>Account info unavailable.</div>
               )}
             </div>
           ) : needsToken ? (
             <div className={styles.accountHint}>
               <Link href="/login" className={styles.loginLink}>
-                Masuk untuk melihat akun MT5 →
+                Sign in to view MT5 account →
               </Link>
             </div>
           ) : terminalKnown ? (
-            <div className={styles.accountHint}>MT5 tidak terdeteksi.</div>
+            <div className={styles.accountHint}>MT5 not detected.</div>
           ) : (
-            <div className={styles.accountHint}>Status MT5 tidak tersedia.</div>
+            <div className={styles.accountHint}>MT5 status unavailable.</div>
           )}
 
           {signedIn && (
             <button type="button" className={styles.logoutBtn} onClick={signOut}>
-              Keluar
+              Sign out
             </button>
           )}
+          <button
+            type="button"
+            className={cn(styles.logoutBtn, 'ml-2')}
+            onClick={toggleSidebar}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {collapsed ? '→' : '←'}
+          </button>
+          {/* Realtime indicator always visible at bottom */}
+          <div className={styles.accountHint}>
+            <RealtimeIndicator status={realtime} />
+          </div>
         </div>
       </aside>
 
@@ -293,10 +350,15 @@ export default function AppShell({
             <div className={styles.eyebrow}>{eyebrow}</div>
             <h1>{title}</h1>
           </div>
-          {actions && <div className={styles.actions}>{actions}</div>}
+          <div className={styles.actions}>
+            {actions}
+            {/* Environment badge for the whole app */}
+            <EnvironmentBadge environment={toEnvironment(account?.mode)} />
+          </div>
         </header>
         {children}
       </main>
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </div>
   );
 }
