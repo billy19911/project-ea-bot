@@ -354,10 +354,18 @@ app.get('/ai-control/status', async (req, res) => {
     ? healthData.agents.map((a: any) => ({
         name: a.name,
         type: a.agent_type ?? a.type ?? 'agent',
-        status: 'active',
-        priority: typeof a.priority === 'number' ? a.priority : 50,
-        lastActive: undefined,
-        errorCount: 0,
+        // REAL runtime status derived from activity (idle until it has run).
+        status: typeof a.status === 'string' ? a.status : 'idle',
+        // Priority is the agent's routing priority (a real field, though the
+        // analyst tier shares one value); activity metrics are the meaningful
+        // per-agent signal.
+        priority: typeof a.priority === 'number' ? a.priority : null,
+        invocations: typeof a.invocations === 'number' ? a.invocations : 0,
+        errors: typeof a.errors === 'number' ? a.errors : 0,
+        errorRate: typeof a.error_rate === 'number' ? a.error_rate : 0,
+        avgConfidence: typeof a.avg_confidence === 'number' ? a.avg_confidence : null,
+        lastActive: a.last_active ?? null,
+        signalCounts: a.signal_counts ?? {},
       }))
     : [];
 

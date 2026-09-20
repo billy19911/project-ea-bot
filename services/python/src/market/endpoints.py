@@ -30,7 +30,17 @@ async def get_market_news(
     if source.lower() != "all":
         news = [n for n in news if source.lower() in n.source.lower()]
 
-    items = [n.to_dict() for n in news[:limit]]
+    from .news_keypoints import extract_key_points
+
+    items = []
+    for n in news[:limit]:
+        d = n.to_dict()
+        d["key_points"] = extract_key_points(
+            d.get("headline", ""),
+            sentiment=float(d.get("sentiment", 0.0)),
+            impact=str(d.get("impact", "LOW")),
+        ).to_dict()
+        items.append(d)
     avg_sentiment = sum(n["sentiment"] for n in items) / len(items) if items else 0.0
 
     return {
@@ -57,7 +67,19 @@ async def get_economic_calendar(
     if impact.lower() != "all":
         events = [e for e in events if e.impact.lower() == impact.lower()]
 
-    items = [e.to_dict() for e in events[:limit]]
+    from .news_keypoints import extract_key_points
+
+    items = []
+    for e in events[:limit]:
+        d = e.to_dict()
+        d["key_points"] = extract_key_points(
+            d.get("title", ""),
+            impact=str(d.get("impact", "LOW")),
+            country=str(d.get("country", "")),
+            forecast=str(d.get("forecast", "")),
+            previous=str(d.get("previous", "")),
+        ).to_dict()
+        items.append(d)
 
     return {
         "status": "ok",
@@ -210,10 +232,19 @@ async def market_upcoming(
             upcoming.append((dt, e))
 
     upcoming.sort(key=lambda pair: pair[0])
+    from .news_keypoints import extract_key_points
+
     items = []
     for dt, e in upcoming[:limit]:
         d = e.to_dict()
         d["datetime_utc"] = dt.astimezone(timezone.utc).isoformat()
+        d["key_points"] = extract_key_points(
+            d.get("title", ""),
+            impact=str(d.get("impact", "LOW")),
+            country=str(d.get("country", "")),
+            forecast=str(d.get("forecast", "")),
+            previous=str(d.get("previous", "")),
+        ).to_dict()
         items.append(d)
 
     return {

@@ -79,9 +79,11 @@ def test_create_experiment_registers_real_strategy_version():
     from src.research.endpoints import get_research_engine
 
     engine = get_research_engine()
-    assert engine.get_strategy_version("ema-4-12") is not None
+    # Version key encodes the full parameter grid.
+    version_key = "ema-4-12-atr14-sl2.0-rr2.0"
+    assert engine.get_strategy_version(version_key) is not None
     assert engine.get_experiment(exp_id) is not None
-    # Same parameter pair reuses the version key (no duplicate).
+    # Same parameter grid reuses the version key (no duplicate).
     _create_experiment(4, 12)
     assert len(engine.list_experiments()) == 2
 

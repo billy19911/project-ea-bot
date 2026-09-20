@@ -22,6 +22,17 @@ from .base import AgentCapability, AgentPriority, BaseAgent
 
 logger = logging.getLogger(__name__)
 
+
+def _record_activity(name: str, signal: str, confidence: float, error: bool = False) -> None:
+    """Best-effort record of one agent run for realtime metrics (fail-safe)."""
+    try:
+        from .activity import get_activity_tracker
+
+        get_activity_tracker().record(name, signal, confidence, error=error)
+    except Exception:  # noqa: BLE001 - metrics must never break the pipeline
+        pass
+
+
 # ── Default routing table ────────────────────────────────────────────────────
 # Keys are event-type substrings; values are agent names (registered in registry).
 # The supervisor matches an incoming event against this table and dispatches to
@@ -363,6 +374,14 @@ class SupervisorAgent(BaseAgent):
                         "confidence": 0.0,
                         "reasons": [f"Error running agent: {exc}"],
                     }
+                    _record_activity(agent_name, "NEUTRAL", 0.0, error=True)
+                else:
+                    _record_activity(
+                        agent_name,
+                        str(result.get("signal", "NEUTRAL")),
+                        float(result.get("confidence", 0.0) or 0.0),
+                        error=False,
+                    )
                 return agent_name, result, True
             # Fallback: agent not registered
             result = {

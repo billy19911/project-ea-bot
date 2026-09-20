@@ -534,3 +534,81 @@ td {
 }
 .pcTtGrid b { color: var(--text); font-weight: 600; text-align: right; }
 .pcTtInd { margin-top: 4px; font-family: var(--font-mono); }
+
+/* ---------------------------------------------------------------------------
+ * Pagination
+ * ------------------------------------------------------------------------- */
+.ea-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+.ea-pagination__info {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.ea-pagination__controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ea-pagination__size {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  margin-right: 6px;
+  cursor: pointer;
+}
+.ea-pagination__btn {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.ea-pagination__btn:hover:not(:disabled) {
+  background: var(--surface-muted);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.ea-pagination__btn.is-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+  font-weight: 700;
+}
+.ea-pagination__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ea-pagination__ellipsis {
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+@media (max-width: 480px) {
+  .ea-pagination {
+    padding: var(--sp-3);
+  }
+  .ea-pagination__btn {
+    min-width: 28px;
+    height: 28px;
+  }
+}

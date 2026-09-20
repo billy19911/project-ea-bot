@@ -1,61 +1,10 @@
-/* Halaman Berita & Kalender — responsif, token semantik (dark/light). */
+/* Halaman Kalender Ekonomi USD — tab harian + tabel + detail key points.
+ * Responsif + token semantik (dark/light). */
 
 .wrap {
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
-}
-
-.controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--sp-3);
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-}
-
-.controlGroup {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 120px;
-}
-
-.ctlLabel {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.select {
-  padding: 8px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.refresh {
-  margin-left: auto;
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface-muted);
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.refresh:hover {
-  border-color: var(--border-strong);
 }
 
 .error {
@@ -64,16 +13,69 @@
   background: var(--danger-soft);
   color: var(--danger);
   border-radius: var(--r-md);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
-/* Panel ------------------------------------------------------------------- */
+/* Day tabs ---------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: var(--sp-2);
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 8px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.tab:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.tabActive {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+}
+
+.tabCount {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: var(--r-full);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+.tabActive .tabCount {
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--on-primary);
+}
+
+/* Panel + table ----------------------------------------------------------- */
 
 .panel {
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--surface);
-  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 
@@ -81,228 +83,188 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--sp-2);
-  padding: 10px 14px;
+  gap: var(--sp-3);
+  padding: 11px var(--sp-4);
   border-bottom: 1px solid var(--border);
   background: var(--surface-muted);
 }
 
 .panelTitle {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
 
-.panelHint {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.empty {
-  padding: 18px 14px;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-/* Kalender ---------------------------------------------------------------- */
-
-.eventList {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.eventRow {
-  display: flex;
-  gap: var(--sp-3);
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-}
-
-.eventRow:last-child {
-  border-bottom: none;
-}
-
-.eventWhen {
-  flex: 0 0 140px;
-  font-size: 12px;
+.sortBtn {
+  padding: 6px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-xs);
   font-weight: 600;
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
+  cursor: pointer;
 }
 
-.eventBody {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.sortBtn:hover {
+  background: var(--surface-muted);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.table th {
+  text-align: left;
+  padding: 9px var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 10px var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+.row {
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.row:hover {
+  background: var(--surface-muted);
+}
+
+.rowOpen {
+  background: var(--surface-muted);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .eventTitle {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
   color: var(--text);
+  font-weight: 600;
 }
 
-.eventMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  font-size: 11.5px;
+.chevron {
   color: var(--text-muted);
+  font-size: 10px;
+  width: 10px;
 }
 
 .countryTag {
+  display: inline-block;
   padding: 1px 6px;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-xs);
   background: var(--primary-soft);
   color: var(--primary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
   font-weight: 700;
 }
 
-/* Pola -------------------------------------------------------------------- */
-
-.patternGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--sp-3);
-  padding: 14px;
+.empty {
+  padding: 22px var(--sp-4);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--fs-md);
 }
 
-.patternCard {
+/* Detail row (expanded) --------------------------------------------------- */
+
+.detailRow td {
+  background: var(--surface-3);
+  padding: 0;
+}
+
+.keyPoints {
+  padding: var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface-muted);
+  gap: var(--sp-3);
+  border-left: 2px solid var(--primary);
 }
 
-.patternKey {
-  font-size: 12.5px;
-  font-weight: 700;
+.kpSummary {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.kpGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-5);
+}
+
+.kpBlock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kpLabel {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.kpValue {
+  font-size: var(--fs-sm);
+  font-weight: 600;
   color: var(--text);
   font-family: var(--font-mono);
 }
 
-.patternBias {
-  display: flex;
-  gap: 6px;
-}
-
-.patternMeta {
-  font-size: 11.5px;
-  color: var(--text-muted);
-}
-
-/* Ringkasan --------------------------------------------------------------- */
-
-.summaryBox {
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-}
-
-.summaryHead {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  margin-bottom: 10px;
-}
-
-.summaryHead h3 {
+.kpList {
   margin: 0;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.summaryStats {
-  display: flex;
-  gap: var(--sp-5);
-}
-
-.stat {
+  padding-left: 18px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
-.statLabel {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-}
-
-.statValue {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Headline ---------------------------------------------------------------- */
-
-.newsList {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: var(--sp-3);
-}
-
-.card {
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-}
-
-.card h4 {
-  margin: 0 0 8px;
-  font-size: 13.5px;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--text);
-}
-
-.cardMeta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  font-size: 11.5px;
-  color: var(--text-muted);
-}
-
-.sourceTag {
-  font-weight: 600;
+.kpList li {
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
+  line-height: 1.5;
 }
 
-.sentimentText {
-  font-variant-numeric: tabular-nums;
-}
-
-/* Pills -------------------------------------------------------------------- */
+/* Pills ------------------------------------------------------------------- */
 
 .pill {
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
   border-radius: var(--r-full);
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   border: 1px solid transparent;
 }
 
@@ -333,40 +295,25 @@
 /* Responsif --------------------------------------------------------------- */
 
 @media (max-width: 920px) {
-  .controls {
-    gap: var(--sp-2);
+  .panel {
+    overflow-x: auto;
   }
 
-  .refresh {
-    margin-left: 0;
-    width: 100%;
+  .table {
+    min-width: 620px;
   }
 
-  .eventRow {
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .eventWhen {
-    flex: none;
-  }
-
-  .patternGrid {
-    grid-template-columns: 1fr 1fr;
-    padding: 12px;
-  }
-
-  .newsList {
-    grid-template-columns: 1fr;
+  .tab {
+    padding: 7px 11px;
   }
 }
 
 @media (max-width: 480px) {
-  .patternGrid {
-    grid-template-columns: 1fr;
+  .table {
+    min-width: 540px;
   }
 
-  .controlGroup {
-    flex: 1 1 100%;
+  .keyPoints {
+    padding: var(--sp-3);
   }
 }

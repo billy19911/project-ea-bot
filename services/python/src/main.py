@@ -304,6 +304,18 @@ async def health_check() -> dict:
 
     agents = [a.to_dict() for a in agent_registry.list()]
 
+    # Merge REAL runtime activity (invocations, last_active, signals, avg
+    # confidence) so the AI Control page shows live metrics instead of the
+    # shared priority enum that reads like a dummy column.
+    try:
+        from .agents.activity import get_activity_tracker
+
+        activity = get_activity_tracker().snapshot()
+        for entry in agents:
+            entry.update(activity.get(entry.get("name", ""), {}))
+    except Exception:  # noqa: BLE001 - health must never fail on metrics
+        pass
+
     return {
         "status": "ok",
         "environment": settings.environment,

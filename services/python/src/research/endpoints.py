@@ -47,10 +47,18 @@ _RUNS: dict[str, dict[str, Any]] = {}
 
 
 class ExperimentCreate(BaseModel):
-    """Parameters for a new experiment (EMA crossover overrides)."""
+    """Parameters for a new experiment (strategy parameter grid).
+
+    The engine's EMA-crossover simulation honours all of these; the UI exposes
+    them so a strategy can be swept, not just the EMA pair.
+    """
 
     fast_ema_period: int = Field(default=3, ge=1, le=200)
     slow_ema_period: int = Field(default=8, ge=2, le=400)
+    atr_period: int = Field(default=14, ge=2, le=100)
+    atr_stop_multiplier: float = Field(default=2.0, gt=0, le=10)
+    reward_risk_ratio: float = Field(default=2.0, gt=0, le=10)
+    label: str = Field(default="", max_length=80)
 
 
 class BacktestRequest(BaseModel):
@@ -239,7 +247,7 @@ def list_experiments() -> dict[str, Any]:
 
 @router.post("/experiments")
 def create_experiment(payload: ExperimentCreate) -> dict[str, Any]:
-    """Create an experiment for one EMA parameter pair (real strategy version)."""
+    """Create an experiment across the full strategy parameter grid."""
     engine = get_research_engine()
     fast = int(payload.fast_ema_period)
     slow = int(payload.slow_ema_period)
@@ -248,13 +256,25 @@ def create_experiment(payload: ExperimentCreate) -> dict[str, Any]:
             status_code=400,
             detail="slow_ema_period harus lebih besar dari fast_ema_period.",
         )
+    params = {
+        "fast_ema_period": fast,
+        "slow_ema_period": slow,
+        "atr_period": int(payload.atr_period),
+        "atr_stop_multiplier": float(payload.atr_stop_multiplier),
+        "reward_risk_ratio": float(payload.reward_risk_ratio),
+    }
     baseline_id = _ensure_baseline(engine)
-    version_key = f"ema-{fast}-{slow}"
+    # Version key encodes the full grid so distinct configs never collide.
+    version_key = (
+        f"ema-{fast}-{slow}-atr{params['atr_period']}"
+        f"-sl{params['atr_stop_multiplier']}-rr{params['reward_risk_ratio']}"
+    )
     if engine.get_strategy_version(version_key) is None:
         engine.create_strategy_version(
             version_key,
-            {"fast_ema_period": fast, "slow_ema_period": slow},
-            f"EMA {fast}/{slow}.",
+            params,
+            payload.label
+            or f"EMA {fast}/{slow} · ATR{params['atr_period']} · RR{params['reward_risk_ratio']}",
         )
     experiment = engine.create_experiment(baseline_id, version_key, {})
     return {"ok": True, "experiment": _experiment_row(engine, experiment)}

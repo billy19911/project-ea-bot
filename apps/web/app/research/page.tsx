@@ -106,6 +106,9 @@ export default function Home() {
   // Create-experiment form
   const [fast, setFast] = useState('3');
   const [slow, setSlow] = useState('8');
+  const [atrPeriod, setAtrPeriod] = useState('14');
+  const [atrStop, setAtrStop] = useState('2');
+  const [rewardRisk, setRewardRisk] = useState('2');
 
   // Backtest form
   const [selectedId, setSelectedId] = useState('');
@@ -166,6 +169,9 @@ export default function Home() {
         body: JSON.stringify({
           fast_ema_period: Number(fast) || 3,
           slow_ema_period: Number(slow) || 8,
+          atr_period: Number(atrPeriod) || 14,
+          atr_stop_multiplier: Number(atrStop) || 2,
+          reward_risk_ratio: Number(rewardRisk) || 2,
         }),
       });
       const data = await res.json();
@@ -174,7 +180,9 @@ export default function Home() {
         return;
       }
       setError('');
-      flash(`Eksperimen dibuat: EMA ${fast}/${slow}. Jalankan backtest di tab Backtest.`);
+      flash(
+        `Eksperimen dibuat: EMA ${fast}/${slow} · ATR ${atrPeriod} · RR ${rewardRisk}. Jalankan backtest di tab Backtest.`,
+      );
       await refresh();
     } finally {
       setBusy(false);
@@ -313,6 +321,38 @@ export default function Home() {
                     max={400}
                     value={slow}
                     onChange={(e) => setSlow(e.target.value)}
+                  />
+                </label>
+                <label className={styles.field}>
+                  ATR periode
+                  <input
+                    type="number"
+                    min={2}
+                    max={100}
+                    value={atrPeriod}
+                    onChange={(e) => setAtrPeriod(e.target.value)}
+                  />
+                </label>
+                <label className={styles.field}>
+                  ATR × stop
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={10}
+                    step={0.1}
+                    value={atrStop}
+                    onChange={(e) => setAtrStop(e.target.value)}
+                  />
+                </label>
+                <label className={styles.field}>
+                  Reward:Risk
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={10}
+                    step={0.1}
+                    value={rewardRisk}
+                    onChange={(e) => setRewardRisk(e.target.value)}
                   />
                 </label>
                 <button className={styles.primary} onClick={createExperiment} disabled={busy}>
