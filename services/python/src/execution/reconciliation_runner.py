@@ -147,17 +147,23 @@ class ReconciliationRunner:
             return None
 
         self._last_ok = not report.has_critical()
-        # Record audit entry for this reconciliation run
-        from ..audit import get_shared_audit_log
+        # Record audit entry for this reconciliation run (best-effort).
+        try:
+            try:
+                from ..audit import get_shared_audit_log
+            except ImportError:  # imported as top-level ``execution.*``
+                from audit import get_shared_audit_log
 
-        audit = get_shared_audit_log()
-        audit.append(
-            actor="reconciliation",
-            action="run",
-            target="reconciliation",
-            details=report.to_dict() if report else {},
-        )
+            get_shared_audit_log().append(
+                actor="reconciliation",
+                action="run",
+                target="reconciliation",
+                details=report.to_dict() if report else {},
+            )
+        except Exception as exc:  # audit must never break the loop
+            logger.debug("Reconciliation audit entry skipped: %s", exc)
         self._history.append(report)
+        return report
 
     # ------------------------------------------------------------------
     # History / summary

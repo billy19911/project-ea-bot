@@ -112,7 +112,10 @@ async def reconciliation_run() -> dict[str, Any]:
     runtime = get_runtime()
     report = runtime._reconciliation_runner.run_once()
     try:
-        from ..audit import get_shared_audit_log
+        try:
+            from src.audit import get_shared_audit_log
+        except ImportError:
+            from audit import get_shared_audit_log
 
         get_shared_audit_log().append(
             actor="reconciliation",
