@@ -34,6 +34,7 @@ from .risk.intelligence import RiskLead
 from .strategy.endpoints import register_live_strategy
 from .strategy.endpoints import router as strategy_router
 from .system.endpoints import router as system_router
+from .system.v2_endpoints import router as v2_router
 from .trading.endpoints import router as trading_router
 from .trading.events import router as events_router
 
@@ -279,6 +280,7 @@ app.include_router(trading_router)
 app.include_router(events_router)
 app.include_router(orchestration_router)
 app.include_router(system_router)
+app.include_router(v2_router)
 app.include_router(strategy_router)
 app.include_router(reports_router)
 app.include_router(research_router)
