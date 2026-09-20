@@ -186,6 +186,9 @@ class MonteCarloRunner:
         """
         if not bars:
             return MonteCarloResult(status="INSUFFICIENT_DATA")
+        if len(bars) < 10:
+            # Not enough data points for meaningful resampling/bootstrapping.
+            return MonteCarloResult(status="INSUFFICIENT_DATA")
 
         # First run a baseline backtest to obtain the *trade sequence* that we
         # will resample / bootstrap (PRD §41: trade-sequence resampling and
