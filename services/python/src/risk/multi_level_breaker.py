@@ -298,6 +298,3 @@ def level_index(level: BreakerLevel) -> int:
 
 # Convenience alias for callers that inject a condition callable.
 RecoveryCondition = Callable[[], bool]
-
-# Unused import guard for type checkers / backward-compat.
-_ = time if False else None  # noqa: F821  (placeholder to keep imports tidy)
