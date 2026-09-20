@@ -20,7 +20,13 @@ from typing import Callable, List, Optional
 
 from .backtest_v2 import Bar, CostModel, RealisticBacktester
 
-__all__ = ["MonteCarloResult", "MonteCarloRunner"]
+__all__ = [
+    "MonteCarloResult",
+    "MonteCarloRunner",
+    "ParameterSensitivity",
+    "SensitivityPoint",
+    "classify_status",
+]
 
 
 @dataclass
@@ -254,3 +260,162 @@ class MonteCarloRunner:
             raw_returns=agg_returns,
             raw_drawdowns=agg_drawdowns,
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 41c — Parameter sensitivity (cliff-edge detection)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SensitivityPoint:
+    """A single perturbed parameter evaluation."""
+
+    parameter: str
+    delta_pct: int  # -20, -10, +10, +20
+    value: float
+    metric: float
+
+    def to_dict(self) -> dict:
+        return {
+            "parameter": self.parameter,
+            "delta_pct": self.delta_pct,
+            "value": self.value,
+            "metric": self.metric,
+        }
+
+
+@dataclass
+class ParameterSensitivity:
+    """Result of a parameter-sensitivity sweep (PRD §41c).
+
+    The goal is NOT to find the "best" parameter set but to detect a **cliff
+    edge**: a strategy that only works within one narrow parameter band.
+    """
+
+    baseline_metric: float = 0.0
+    points: List[SensitivityPoint] = field(default_factory=list)
+    cliff_edge: bool = False
+    worst_drop_pct: float = 0.0
+    ratios: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {
+            "baseline_metric": self.baseline_metric,
+            "deltas": [-20, -10, 10, 20],
+            "points": [p.to_dict() for p in self.points],
+            "cliff_edge": self.cliff_edge,
+            "worst_drop_pct": self.worst_drop_pct,
+            "ratios": self.ratios,
+        }
+
+
+def _run_metric(evaluate: Callable[[dict], float], params: dict) -> float:
+    try:
+        return float(evaluate(dict(params)))
+    except Exception:  # pragma: no cover - defensive; a bad param means no edge
+        return float("nan")
+
+
+def parameter_sensitivity(
+    evaluate: Callable[[dict], float],
+    baseline_params: dict,
+    deltas_pct: tuple = (-20, -10, 10, 20),
+    cliff_drop_pct: float = 40.0,
+) -> ParameterSensitivity:
+    """Evaluate *evaluate* at baseline and at ±10% / ±20% per parameter.
+
+    ``evaluate`` receives a parameter dict and returns a scalar metric (e.g.
+    expectancy or net return).  A *cliff edge* is flagged when any single
+    variation's metric drops by more than ``cliff_drop_pct`` relative to the
+    baseline — i.e. a small parameter change breaks the strategy.
+
+    This is a deterministic rule, never an LLM judgement (PRD §41).
+    """
+    baseline_metric = _run_metric(evaluate, baseline_params)
+    points: List[SensitivityPoint] = []
+    ratios: dict = {}
+    worst_drop = 0.0
+    cliff = False
+
+    for name, base_value in baseline_params.items():
+        if not isinstance(base_value, (int, float)) or base_value == 0:
+            continue
+        for delta in deltas_pct:
+            varied = dict(baseline_params)
+            try:
+                varied[name] = base_value * (1.0 + delta / 100.0)
+            except TypeError:
+                continue
+            metric = _run_metric(evaluate, varied)
+            points.append(
+                SensitivityPoint(parameter=name, delta_pct=delta, value=varied[name], metric=metric)
+            )
+            key = f"{name}{'+' if delta > 0 else ''}{delta}%"
+            ratios[key] = metric
+            if baseline_metric and baseline_metric > 0 and metric == metric:  # not NaN
+                drop = (baseline_metric - metric) / baseline_metric * 100.0
+                worst_drop = max(worst_drop, drop)
+
+    if worst_drop >= cliff_drop_pct:
+        cliff = True
+
+    return ParameterSensitivity(
+        baseline_metric=baseline_metric,
+        points=points,
+        cliff_edge=cliff,
+        worst_drop_pct=worst_drop,
+        ratios=ratios,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 41c — Rule engine (deterministic status classification)
+# ---------------------------------------------------------------------------
+
+# Thresholds for the rule engine (tunable, deterministic).
+MIN_TRADES_FOR_CONFIDENCE = 30
+MIN_SIMS_FOR_CONFIDENCE = 100
+SEVERE_DRAWDOWN_PCT = 20.0
+MAX_ACCEPTABLE_SEVERE_DD_PROB = 0.20
+
+
+def classify_status(
+    monte_carlo: MonteCarloResult,
+    sensitivity: Optional[ParameterSensitivity] = None,
+    num_trades: int = 0,
+) -> tuple:
+    """Deterministic rule engine → ``(status, reasons)``.
+
+    Statuses (PRD §41): ``ROBUST`` / ``FRAGILE`` / ``INSUFFICIENT_DATA`` /
+    ``FAILED``. The decision is a pure function of the metrics — no LLM is
+    involved anywhere in this path.
+    """
+    reasons: List[str] = []
+
+    if num_trades < MIN_TRADES_FOR_CONFIDENCE or monte_carlo.raw_returns == []:
+        return (
+            "INSUFFICIENT_DATA",
+            [f"only {num_trades} trades — need >= {MIN_TRADES_FOR_CONFIDENCE}"],
+        )
+
+    if monte_carlo.median_return < 0:
+        reasons.append(f"median return negative ({monte_carlo.median_return:.2f})")
+        return "FAILED", reasons
+
+    fragile = False
+    if monte_carlo.perc5_return < 0:
+        fragile = True
+        reasons.append(f"5th-percentile return negative ({monte_carlo.perc5_return:.2f})")
+    if monte_carlo.prob_severe_dd > MAX_ACCEPTABLE_SEVERE_DD_PROB:
+        fragile = True
+        reasons.append(f"P(severe drawdown) too high ({monte_carlo.prob_severe_dd:.2%})")
+    if sensitivity is not None and sensitivity.cliff_edge:
+        fragile = True
+        reasons.append(f"cliff edge detected (worst drop {sensitivity.worst_drop_pct:.1f}%)")
+
+    if fragile:
+        return "FRAGILE", reasons
+
+    reasons.append("all robustness checks passed")
+    return "ROBUST", reasons
