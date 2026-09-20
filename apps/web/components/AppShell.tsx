@@ -36,13 +36,17 @@ const NAV_GROUPS = [
       { key: 'market', label: 'Market', href: '/market', icon: 'candles' },
       { key: 'observability', label: 'Observability', href: '/observability', icon: 'activity' },
       { key: 'news', label: 'News', href: '/news', icon: 'candles' },
-      { key: 'system-readiness', label: 'System Readiness', href: '/system-readiness', icon: 'grid' },
+      { key: 'circuit-breaker', label: 'Circuit Breaker', href: '/circuit-breaker', icon: 'activity' },
+      { key: 'incidents', label: 'Incidents', href: '/incidents', icon: 'activity' },
+      { key: 'execution-quality', label: 'Execution Quality', href: '/execution-quality', icon: 'trend' },
+      { key: 'slo', label: 'System SLO', href: '/slo', icon: 'activity' },
     ],
   },
   {
     label: 'AI',
     items: [
       { key: 'ai-control', label: 'AI Control', href: '/ai-control', icon: 'cpu' },
+      { key: 'models', label: 'Models', href: '/models', icon: 'cpu' },
       { key: 'strategy', label: 'Strategy', href: '/strategy', icon: 'trend' },
     ],
   },
@@ -54,7 +58,11 @@ const NAV_GROUPS = [
     label: 'System',
     items: [
       { key: 'overview', label: 'Overview', href: '/', icon: 'grid' },
-      { key: 'settings', label: 'Settings', href: '/settings', icon: 'sliders' }
+      { key: 'environment', label: 'Environment', href: '/environment', icon: 'sliders' },
+      { key: 'accounts', label: 'Accounts', href: '/accounts', icon: 'grid' },
+      { key: 'certification', label: 'Certification', href: '/certification', icon: 'grid' },
+      { key: 'system-readiness', label: 'System Readiness', href: '/system-readiness', icon: 'grid' },
+      { key: 'settings', label: 'Settings', href: '/settings', icon: 'sliders' },
     ],
   },
 ];
