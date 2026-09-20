@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
+import { ThemeProvider } from '../lib/theme';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -9,12 +10,21 @@ export const metadata: Metadata = {
   description: 'Xynn Autonomous Trading Command Center',
 };
 
+// Blocking script: apply the saved theme (or OS preference) before first paint
+// so there is no flash of the wrong theme. Keep this tiny and dependency-free.
+const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('ea-theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.setAttribute('data-theme',t);document.documentElement.style.colorScheme=t;}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  // Default tema = dark (PRD §78). Atribut data-theme dibaca token di
-  // globals.css; bahasa UI = English (PRD §107).
+  // Default theme = dark (PRD §78); user may switch to light. The attribute is
+  // set by the inline script below before hydration; ThemeProvider syncs to it.
   return (
-    <html lang="en" data-theme="dark">
-      <body className={inter.className}>{children}</body>
+    <html lang="en" data-theme="dark" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
+      <body className={inter.className}>
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
     </html>
   );
 }

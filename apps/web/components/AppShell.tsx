@@ -8,6 +8,7 @@ import { StatusIndicator, type UiStatus } from './ui/status-indicator';
 import { EnvironmentBadge, type Environment } from './ui/environment-badge';
 import { RealtimeIndicator, type RealtimeStatus } from './ui/realtime-indicator';
 import { CommandPalette } from './ui/command-palette';
+import { ThemeToggle } from './ui/theme-toggle';
 import styles from './AppShell.module.css';
 
 type NavKey = string;
@@ -255,7 +256,7 @@ export default function AppShell({
   }, []);
 
   return (
-    <div className={styles.shell} data-theme="dark" data-collapsed={collapsed}>
+    <div className={styles.shell} data-collapsed={collapsed}>
       <aside className={styles.sidebar}>
         <div className={styles.brand}>
           <span className={styles.brandMark}>EA</span>
@@ -352,6 +353,7 @@ export default function AppShell({
           </div>
           <div className={styles.actions}>
             {actions}
+            <ThemeToggle />
             {/* Environment badge for the whole app */}
             <EnvironmentBadge environment={toEnvironment(account?.mode)} />
           </div>

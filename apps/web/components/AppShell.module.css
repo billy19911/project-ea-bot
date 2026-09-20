@@ -57,7 +57,7 @@
 }
 
 .brand strong {
-  color: #fff;
+  color: var(--sidebar-text);
   font-size: var(--fs-lg);
   letter-spacing: 0.01em;
 }
@@ -107,7 +107,7 @@
 
 .navItem:hover {
   background: var(--sidebar-hover);
-  color: #fff;
+  color: var(--sidebar-text);
 }
 
 .navItem:focus-visible {
@@ -119,8 +119,8 @@
    terlalu berat dan membuat sidebar terlihat seperti deretan tombol besar. */
 .navActive,
 .navActive:hover {
-  background: rgba(31, 111, 235, 0.18);
-  color: #fff;
+  background: var(--primary-soft);
+  color: var(--sidebar-accent);
   font-weight: 600;
 }
 
@@ -179,7 +179,7 @@
 }
 
 .dotOn {
-  background: #32d583;
+  background: var(--success);
 }
 
 .dotOff {
@@ -200,8 +200,8 @@
   flex-shrink: 0;
   padding: 2px 6px;
   border-radius: var(--r-full);
-  background: rgba(217, 45, 32, 0.18);
-  color: #fda29b;
+  background: var(--live-soft);
+  color: var(--live);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -235,15 +235,15 @@
 }
 
 .modeLive {
-  background: rgba(217, 45, 32, 0.16);
-  border: 1px solid rgba(217, 45, 32, 0.4);
-  color: #fda29b;
+  background: var(--live-soft);
+  border: 1px solid var(--live);
+  color: var(--live);
 }
 
 .modeDemo {
-  background: rgba(6, 118, 71, 0.2);
-  border: 1px solid rgba(6, 118, 71, 0.45);
-  color: #75e0a7;
+  background: var(--demo-soft);
+  border: 1px solid var(--demo);
+  color: var(--demo);
 }
 
 .accountHint {
@@ -255,7 +255,7 @@
 .accountHint code {
   padding: 1px 4px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--sidebar-hover);
   color: var(--sidebar-text);
   font-size: 10px;
 }
@@ -279,8 +279,8 @@
 
 .logoutBtn:hover {
   background: var(--sidebar-hover);
-  border-color: rgba(255, 255, 255, 0.18);
-  color: #fff;
+  border-color: var(--border-strong);
+  color: var(--sidebar-text);
 }
 
 .logoutBtn:focus-visible {

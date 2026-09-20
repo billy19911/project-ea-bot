@@ -7,13 +7,18 @@
  * bikin hex baru di CSS module.
  * ------------------------------------------------------------------------- */
 
-:root {
+/* Light theme = default (:root). Dark theme overrides live under
+ * [data-theme="dark"] on <html>. The previous version also applied the dark
+ * block to :root, which made light mode impossible — fixed. */
+:root,
+[data-theme='light'] {
   color-scheme: light;
 
   /* Surface & teks */
   --bg: #f5f7fb;
   --surface: #ffffff;
   --surface-muted: #f8fafc;
+  --surface-3: #f2f4f7;
   --neutral-muted: #f2f4f7;
   --border: #e4e7ec;
   --border-strong: #d0d5dd;
@@ -34,6 +39,8 @@
   --danger: #b42318;
   --danger-soft: #fef3f2;
   --danger-border: #fecdca;
+  --info: #1f6feb;
+  --neutral: #667085;
 
   /* Konteks akun MT5 (dipakai badge DEMO/LIVE) */
   --live: #d92d20;
@@ -69,20 +76,20 @@
   --fs-xl: 20px;
   --fs-2xl: 26px;
 
-  /* Sidebar (dipakai AppShell) */
-  --sidebar-bg: #101828;
-  --sidebar-text: #d8dee9;
-  --sidebar-muted: #98a2b3;
-  --sidebar-hover: rgba(255, 255, 255, 0.06);
-  --sidebar-border: rgba(255, 255, 255, 0.08);
-  --sidebar-accent: #6ea8fe;
+  /* Sidebar (dipakai AppShell) — light: panel tipis, bukan hitam */
+  --sidebar-bg: #ffffff;
+  --sidebar-text: #172033;
+  --sidebar-muted: #667085;
+  --sidebar-hover: rgba(16, 24, 40, 0.04);
+  --sidebar-border: #e4e7ec;
+  --sidebar-accent: #1f6feb;
+
+  --font-mono: ui-monospace, SFMono-Regular, "Geist Mono", Menlo, Consolas, monospace;
 }
 
 /* Dark-mode overrides -------------------------------------------------------
- * Xynn Command Center default = dark (PRD §78). Kita paksa dark lewat atribut
- * [data-theme="dark"] pada <html> supaya tidak bergantung prefers-color-scheme,
- * plus dukung media query sebagai fallback. */
-:root,
+ * Xynn Command Center default = dark (PRD §78). Dipilih lewat atribut
+ * [data-theme="dark"] pada <html> supaya tidak bergantung prefers-color-scheme. */
 [data-theme='dark'] {
   color-scheme: dark;
 
@@ -132,9 +139,6 @@
   /* Shadow (PRD §5.4: border dulu, shadow halus saja) */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
-
-  /* Mono untuk angka trading (PRD §5.2) */
-  --font-mono: ui-monospace, SFMono-Regular, "Geist Mono", Menlo, Consolas, monospace;
 }
 
 /* Reset minimal ----------------------------------------------------------- */
@@ -385,3 +389,29 @@ td {
 .pcTtGrid b { color: var(--text); font-weight: 600; text-align: right; }
 .pcTtInd { margin-top: 4px; font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
 
+
+/* ---------------------------------------------------------------------------
+ * Theme toggle (dark/light) � dipakai AppShell topbar.
+ * ------------------------------------------------------------------------- */
+.themeToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.themeToggle:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.themeToggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
