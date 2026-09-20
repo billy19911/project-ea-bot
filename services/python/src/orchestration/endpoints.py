@@ -104,3 +104,22 @@ async def reconciliation_status() -> dict[str, Any]:
         "history_count": len(history),
         "source": "live",
     }
+
+
+@router.post("/reconciliation/run", summary="Force a reconciliation run (Phase 35)")
+async def reconciliation_run() -> dict[str, Any]:
+    """Trigger reconciliation immediately and audit the run (PRD_V2 §14 §35)."""
+    runtime = get_runtime()
+    report = runtime._reconciliation_runner.run_once()
+    try:
+        from ..audit import get_shared_audit_log
+
+        get_shared_audit_log().append(
+            actor="reconciliation",
+            action="manual_run",
+            target="reconciliation",
+            details=report.to_dict() if report is not None else {},
+        )
+    except Exception:  # audit must never break the endpoint
+        pass
+    return {"report": report.to_dict() if report is not None else None, "source": "live"}
