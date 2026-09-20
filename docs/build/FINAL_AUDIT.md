@@ -64,13 +64,68 @@ Total new tests added this cycle: **~194**.
 
 ## Known limitations / follow-ups (non-blocking)
 
-1. The new modules are self-contained and unit-tested but **not yet wired into
-   FastAPI routers / the web UI**. Integration (endpoints + dashboard panels)
-   is the natural next step to surface them operationally.
+1. ~~The new modules are self-contained and unit-tested but **not yet wired into
+   FastAPI routers / the web UI**.~~ **RESOLVED** — see *Integration* below.
 2. `src/research/monte_carlo.py` provides two complementary APIs
    (`MonteCarloRunner` for bars, `MonteCarloAnalyzer` for trade-PnL sequences)
    that could be consolidated in a later refactor.
-3. Node/API proxies for the new surface endpoints are not yet added.
+3. ~~Node/API proxies for the new surface endpoints are not yet added.~~
+   **RESOLVED** — see *Integration* below.
+
+## Integration (post-audit)
+
+### Backend — FastAPI `/v2` surface
+
+`services/python/src/system/v2_endpoints.py` exposes the Phase 36‑56 modules over
+HTTP (registered in `main.py`). Endpoints:
+
+| Method | Path | Phase |
+| ------ | ---- | ----- |
+| GET | `/v2/circuit-breaker` | 36 |
+| POST | `/v2/circuit-breaker/trigger` | 36 |
+| POST | `/v2/circuit-breaker/recover` | 36 |
+| POST | `/v2/recovery/run` | 37 |
+| GET | `/v2/environment` | 51 |
+| GET | `/v2/accounts` | 53 |
+| GET | `/v2/capital` | 52 |
+| GET/POST | `/v2/incidents`, `/v2/incidents/{id}/resolve` | 55 |
+| GET/POST | `/v2/slo`, `/v2/slo/sample` | 56 |
+| GET | `/v2/execution-quality` | 47 |
+| GET | `/v2/llm/telemetry`, `/v2/llm/governance` | 46 |
+| GET | `/v2/dashboard` | 49 |
+| GET | `/v2/certification/gate` | 50 |
+| GET | `/v2/research/inbox` | 54 |
+| GET | `/v2/lifecycle/{strategy}/{version}` | 44 |
+| GET | `/v2/decision/{id}/replay` | 45 |
+| GET | `/v2/performance-intelligence` | 42 |
+
+Covered by `services/python/tests/test_v2_endpoints.py` (18 tests).
+
+### API — Node proxy
+
+`apps/api/src/index.ts` proxies every `/v2/*` route to the Python service
+(read-only except explicit control actions, which require auth).
+
+### Web — UI + theme
+
+* **Theme system** (`apps/web/lib/theme.tsx` + `components/ui/theme-toggle.tsx`):
+  dark/light switch with localStorage persistence and a blocking pre-paint
+  script (no flash), honouring the OS preference on first visit.
+* **globals.css** tokens restructured so light is the `:root` default and dark
+  lives under `[data-theme="dark"]` — the previous build applied dark to `:root`,
+  which made light mode impossible.
+* **All hardcoded hex** removed from CSS modules and inline styles, replaced with
+  semantic tokens (`var(--surface)`, `var(--success)`, `var(--danger)`, …);
+  button text uses `#fff` on coloured backgrounds for correct contrast in both
+  themes.
+* **New pages** wired to the `/v2` surface: `/circuit-breaker`, `/incidents`,
+  `/models`, `/execution-quality`, `/slo`, `/environment`, `/accounts`,
+  `/certification` (grouped in the sidebar navigation).
+
+### Verification (after integration)
+
+* Python suite: **1782 passed**, 0 failed.
+* Monorepo `npm run build`: **PASS** (`✓ Compiled successfully`).
 
 ## Verification commands
 
