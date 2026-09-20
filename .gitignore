@@ -52,3 +52,12 @@ apps/web/.next/
 
 # Runtime settings yang ditulis operator dari dashboard (ide #7) — state, bukan kode.
 services/python/runtime_settings.json
+
+# Test artifacts
+temp_pytest/
+test_ea_bot.db
+
+# Keep the final audit report tracked even though /build is ignored.
+!docs/build/
+!docs/build/**
+
