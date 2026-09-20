@@ -137,6 +137,7 @@ def test_telegram_status_configured_connected(monkeypatch, _fresh_telegram_gatew
 # /audit/events
 # ---------------------------------------------------------------------------
 def test_audit_events_empty_is_honest() -> None:
+    get_audit_log().reset()
     resp = client.get("/audit/events")
     assert resp.status_code == 200
     data = resp.json()
@@ -146,7 +147,9 @@ def test_audit_events_empty_is_honest() -> None:
 
 
 def test_audit_events_returns_recorded() -> None:
-    get_audit_log().append("supervisor", "DECISION_APPROVED", "DEC-77", {"ok": True})
+    audit = get_audit_log()
+    audit.reset()
+    audit.append("supervisor", "DECISION_APPROVED", "DEC-77", {"ok": True})
 
     resp = client.get("/audit/events")
     data = resp.json()

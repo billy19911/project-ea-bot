@@ -84,6 +84,10 @@ class ProtectedAuditLog:
         self._entries.append(entry)
         return entry
 
+    def reset(self) -> None:
+        """Clear all entries – for testing only."""
+        self._entries.clear()
+
     def verify(self) -> Tuple[bool, Optional[int]]:
         """Verify the full chain. Returns ``(ok, broken_index)``."""
         prev_hash = self.GENESIS_HASH
