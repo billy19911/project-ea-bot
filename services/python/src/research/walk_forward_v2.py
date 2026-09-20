@@ -133,7 +133,7 @@ class WalkForwardValidator:
         window is ``window_size`` bars; the first ``train_ratio`` portion is
         the train segment and the rest is the OOS test segment.
         """
-        if n_bars < self.n_windows + 2:
+        if n_bars < self.n_windows + 1:
             return []
         window_size = max(2, n_bars // self.n_windows)
         train_len = max(1, int(window_size * self.train_ratio))
@@ -171,6 +171,10 @@ class WalkForwardValidator:
         report = WalkForwardReport()
         n = len(bars)
         bounds = self._split_bounds(n)
+        if not bounds:
+            # Fallback: single window using half of the data for training.
+            train_end = n // 2
+            bounds = [(0, train_end, n)]
 
         for train_start, train_end, test_end in bounds:
             test_bars = bars[train_end:test_end]
