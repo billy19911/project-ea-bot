@@ -595,6 +595,105 @@ app.get('/certify', async (req, res) => {
   await sendProxy(res, '/certify', undefined, req);
 });
 
+// ── PRD_V2 Phase 36-56 surface (proxied from Python /v2/*) ──────────────────
+// Every route below proxies REAL data from the Python service and never
+// fabricates values (PRD_V2 §25/§26/§27). Read-only unless explicitly a
+// control action (circuit-breaker, incidents, recovery).
+
+app.get('/v2/circuit-breaker', async (req, res) => {
+  await sendProxy(res, '/v2/circuit-breaker', undefined, req);
+});
+
+app.post('/v2/circuit-breaker/trigger', authenticate, async (req, res) => {
+  await sendPostProxy(res, '/v2/circuit-breaker/trigger', req, req.body ?? {});
+});
+
+app.post('/v2/circuit-breaker/recover', authenticate, async (req, res) => {
+  await sendPostProxy(res, '/v2/circuit-breaker/recover', req, req.body ?? {});
+});
+
+app.post('/v2/recovery/run', authenticate, async (req, res) => {
+  await sendPostProxy(res, '/v2/recovery/run', req, req.body ?? {});
+});
+
+app.get('/v2/environment', async (req, res) => {
+  await sendProxy(res, '/v2/environment', undefined, req);
+});
+
+app.get('/v2/accounts', async (req, res) => {
+  await sendProxy(res, '/v2/accounts', undefined, req);
+});
+
+app.get('/v2/capital', async (req, res) => {
+  await sendProxy(res, '/v2/capital', undefined, req);
+});
+
+app.get('/v2/incidents', async (req, res) => {
+  await sendProxy(res, '/v2/incidents', undefined, req);
+});
+
+app.post('/v2/incidents', authenticate, async (req, res) => {
+  await sendPostProxy(res, '/v2/incidents', req, req.body ?? {});
+});
+
+app.post('/v2/incidents/:id/resolve', authenticate, async (req, res) => {
+  const id = encodeURIComponent(String(req.params.id));
+  await sendPostProxy(res, `/v2/incidents/${id}/resolve`, req, req.body ?? {});
+});
+
+app.get('/v2/slo', async (req, res) => {
+  await sendProxy(res, '/v2/slo', undefined, req);
+});
+
+app.post('/v2/slo/sample', authenticate, async (req, res) => {
+  await sendPostProxy(res, '/v2/slo/sample', req, req.body ?? {});
+});
+
+app.get('/v2/execution-quality', async (req, res) => {
+  await sendProxy(res, '/v2/execution-quality', undefined, req);
+});
+
+app.get('/v2/llm/telemetry', async (req, res) => {
+  await sendProxy(res, '/v2/llm/telemetry', undefined, req);
+});
+
+app.get('/v2/llm/governance', async (req, res) => {
+  await sendProxy(res, '/v2/llm/governance', undefined, req);
+});
+
+app.get('/v2/dashboard', async (req, res) => {
+  await sendProxy(res, '/v2/dashboard', undefined, req);
+});
+
+app.get('/v2/certification/gate', async (req, res) => {
+  await sendProxy(res, '/v2/certification/gate', undefined, req);
+});
+
+app.get('/v2/research/inbox', async (req, res) => {
+  await sendProxy(res, '/v2/research/inbox', undefined, req);
+});
+
+app.get('/v2/lifecycle/:strategyId/:version', async (req, res) => {
+  const strategyId = encodeURIComponent(String(req.params.strategyId));
+  const version = encodeURIComponent(String(req.params.version));
+  await sendProxy(res, `/v2/lifecycle/${strategyId}/${version}`, undefined, req);
+});
+
+app.get('/v2/decision/:decisionId/replay', async (req, res) => {
+  const decisionId = encodeURIComponent(String(req.params.decisionId));
+  await sendProxy(res, `/v2/decision/${decisionId}/replay`, undefined, req);
+});
+
+app.get('/v2/performance-intelligence', async (req, res) => {
+  const dimension = String(req.query.dimension || 'hour');
+  await sendProxy(
+    res,
+    `/v2/performance-intelligence?dimension=${encodeURIComponent(dimension)}`,
+    undefined,
+    req,
+  );
+});
+
 // Phase 32: market data health / stale protection (proxied from Python).
 app.get('/market/health', async (req, res) => {
   const log = (req as any).log;
