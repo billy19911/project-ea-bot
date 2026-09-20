@@ -110,6 +110,35 @@ class MonteCarloRunner:
             ),
         )
 
+    def _resample_pnls(self, pnls: List[float]) -> List[float]:
+        """Return a random permutation of *pnls* (trade‑sequence resampling)."""
+        shuffled = pnls[:]
+        random.shuffle(shuffled)
+        return shuffled
+
+    def _equity_stats(self, pnls: List[float]) -> tuple[float, float, int]:
+        """Return (total return, max drawdown, max loss streak) for a PnL list.
+
+        Used on a resampled trade sequence to synthesise an equity curve.
+        """
+        equity = 0.0
+        peak = 0.0
+        max_dd = 0.0
+        streak = 0
+        max_streak = 0
+        for p in pnls:
+            equity += p
+            if equity > peak:
+                peak = equity
+            else:
+                max_dd = max(max_dd, peak - equity)
+            if p < 0:
+                streak += 1
+                max_streak = max(max_streak, streak)
+            else:
+                streak = 0
+        return equity, max_dd, max_streak
+
     def _run_one(
         self,
         bars: List[Bar],
@@ -158,12 +187,28 @@ class MonteCarloRunner:
         if not bars:
             return MonteCarloResult(status="INSUFFICIENT_DATA")
 
+        # First run a baseline backtest to obtain the *trade sequence* that we
+        # will resample / bootstrap (PRD §41: trade-sequence resampling and
+        # return bootstrap are required techniques).
+        baseline = RealisticBacktester(costs=self.base_costs).run(bars, signal_fn)
+        base_pnls = [t.net_pnl for t in baseline.trades]
+
         agg_returns: List[float] = []
         agg_drawdowns: List[float] = []
         max_loss_streak = 0
         failed = False
         for _ in range(self.n_sims):
             single = self._run_one(bars, signal_fn)
+
+            # Resample the baseline trade sequence and bootstrap its returns so
+            # each simulation explores a plausible ordering of outcomes.
+            if base_pnls:
+                seq = self._resample_pnls(base_pnls)
+                ret_boot, dd_boot, streak_boot = self._equity_stats(seq)
+                single.raw_returns.append(ret_boot)
+                single.raw_drawdowns.append(dd_boot)
+                max_loss_streak = max(max_loss_streak, streak_boot)
+
             if single.status == "FAILED":
                 failed = True
                 continue
