@@ -85,7 +85,19 @@ export function attachLiveStream(
   },
 ): LiveStreamHandle {
   const intervalMs = opts.intervalMs ?? 2500;
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({
+    noServer: true,
+    // Audit P2-12: echo back the client's auth subprotocol (``bearer.<token>``)
+    // so the browser accepts the handshake, without that token ever appearing
+    // in the URL/query string.
+    handleProtocols: (protocols: Set<string>) => {
+      for (const p of protocols) {
+        if (p.startsWith('bearer.')) return p;
+      }
+      const first = protocols.values().next();
+      return first.done ? false : first.value;
+    },
+  });
 
   server.on('upgrade', (req, socket, head) => {
     let pathname = '/';

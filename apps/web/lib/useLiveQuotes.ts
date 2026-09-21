@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { getLiveSocketUrl } from './api';
+import { getLiveSocketProtocols, getLiveSocketUrl } from './api';
 
 export type LiveQuote = {
   symbol: string;
@@ -88,7 +88,8 @@ export function useLiveQuotes({ symbols, positions = true, enabled = true }: Opt
 
       let ws: WebSocket;
       try {
-        ws = new WebSocket(url);
+        const protocols = getLiveSocketProtocols();
+        ws = protocols.length ? new WebSocket(url, protocols) : new WebSocket(url);
       } catch {
         scheduleReconnect();
         return;

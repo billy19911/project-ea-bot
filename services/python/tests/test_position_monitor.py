@@ -491,6 +491,11 @@ def test_event_type_enum_coverage():
         "NEWS_FLASH",
         "RISK_BREACH",
         "MARGIN_CALL",
+        # Audit P2-2: external position-change detection.
+        "SL_CHANGED",
+        "TP_CHANGED",
+        "PARTIAL_CLOSE",
+        "POSITION_DISAPPEARED",
     }
     actual_types = {et.value for et in EventType}
     assert expected_types == actual_types

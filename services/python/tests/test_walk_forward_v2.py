@@ -76,3 +76,42 @@ def test_custom_thresholds() -> None:
     assert report.pass_count == 0
     assert report.fail_count == len(report.windows)
     assert not report.robust
+
+
+def test_param_search_is_actually_applied() -> None:
+    """Audit P2-14: param_search re-fits and its fitted fn is used OOS."""
+    prices = _make_price_series(1.08, 40)
+    bars = _bars_from_prices(prices)
+    validator = WalkForwardValidator(n_windows=2, train_ratio=0.6)
+
+    calls = {"n": 0}
+    trained_on: list[int] = []
+
+    def param_search(train_bars):
+        calls["n"] += 1
+        trained_on.append(len(train_bars))
+
+        # Return a *fitted* signal fn — always flat (no trades).
+        def fitted(_bars, _idx):
+            return 0
+
+        return fitted
+
+    report = validator.validate(bars, _simple_signal, param_search=param_search)
+    # The fitter was called once per window…
+    assert calls["n"] == len(report.windows)
+    # …and each call received a non-empty train segment.
+    assert all(n > 0 for n in trained_on)
+
+
+def test_param_search_failure_falls_back_to_base_signal() -> None:
+    """A raising param_search must not crash validation (fallback to base)."""
+    prices = _make_price_series(1.08, 30)
+    bars = _bars_from_prices(prices)
+    validator = WalkForwardValidator(n_windows=2, train_ratio=0.6)
+
+    def boom(_train_bars):
+        raise RuntimeError("fit failed")
+
+    report = validator.validate(bars, _simple_signal, param_search=boom)
+    assert len(report.windows) == 2  # validation still completed

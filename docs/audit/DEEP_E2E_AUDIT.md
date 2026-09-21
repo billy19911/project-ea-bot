@@ -12,6 +12,8 @@
 > **POST-AUDIT UPDATE (same session):** The three P0 issues below were **fixed** with targeted, isolated changes plus regression tests. See §11 "P0 fixes applied". Test count went 1843 → 1860 (all green). P1/P2/P3 remain OPEN pending the fix plan.
 >
 > **SECOND UPDATE (same session):** All six **P1** issues AND the P0-3 follow-up (real reconciliation providers) were then **fixed** with isolated changes and regression tests. Test count 1860 → **1904** (all green); black/isort/flake8 clean. Remaining open: **P2/P3** only. See §12 "P1 fixes applied".
+>
+> **THIRD UPDATE (same session):** **P2-1 … P2-14** were then **fixed** (isolated changes + tests); **P2-15** (durable order-state persistence) is **DEFERRED** as low-priority and needing a DB write path. Test count 1904 → **1935** (all green); Node 46/46; web tsc/lint clean. Remaining open: **P3** only. See §13 "P2 fixes applied".
 
 ---
 
@@ -473,5 +475,37 @@ All six P1 items and the P0-3 follow-up were fixed with isolated changes + regre
 - The close→review bridge is **observation-only** — it does not close positions (closing live positions was judged out of scope and too dangerous to automate).
 - Reconciliation gate sees real data **only in MT5 live mode** (paper mode keeps no-op providers to avoid a permanent false positive from simulated positions).
 - `PYTHON_API_KEY` (P0-1) and terminal arming still require operator configuration to be effective.
+
+---
+
+## 13. P2 fixes applied (same session, third pass)
+
+P2-1 … P2-14 fixed with isolated changes + regression tests. **P2-15** (durable order-state persistence) DEFERRED (low priority; needs a DB write path). No architecture change.
+
+### Files changed / added
+| File | Change |
+|---|---|
+| `apps/web/components/AppShell.tsx` | realtime badge from real `/health` poll (P2-1) |
+| `monitoring/position_monitor.py` | `detect_position_changes` + `_contract_size`/`_account_equity`; real spec/equity (P2-2, P2-7) |
+| `orchestration/runtime.py` | supervisor policy from env; decision-graph store populated per cycle (P2-3, P2-8) |
+| `config.py` | `supervisor_routing_policy` setting (P2-3) |
+| `agents/supervisor.py` | `normalize_agent_output`; conflict-suppression gate (P2-4, P2-5) |
+| `review/trade_review.py` | outcome-independent decision quality (P2-6) |
+| `system/v2_endpoints.py` | decision store shared with runtime; performance-intelligence from real reviews (P2-8) |
+| `mt5/write_guard.py`, `agents/permissions.py` | fail-closed checks; `send_order` delegates; real-balance exposure (P2-9, P2-10) |
+| `apps/api/src/index.ts`, `middleware/websocket.ts`, `liveStream.ts` | CORS allowlist; WS token via subprotocol; `redactToken` (P2-12) |
+| `apps/web/lib/api.ts`, `lib/useLiveQuotes.ts` | `getLiveSocketProtocols`; token off query (P2-12) |
+| `research/walk_forward_v2.py` | real per-window `param_search` re-fit (P2-14) |
+| Tests | `test_position_monitor_changes.py`, `test_supervisor_policy.py`, `test_committee_conflict.py`, `test_agent_output_normalization.py`, `test_dead_endpoints.py` (new); updated `test_trade_review.py`, `test_mt5_write_guard.py`, `test_mt5_guard_integration.py`, `test_agent_permissions.py`, `test_position_monitor.py`, `test_walk_forward_v2.py`, api `security-hardening.test.cjs` |
+
+### Verification
+- Python tests: **1935 passed, 0 failed** (was 1904; +31 new).
+- Node API: **46/46**. Web: `tsc` + lint clean.
+- `black --check` clean (329 files); `isort --check` clean; `flake8` clean.
+
+### Residual / deferred
+- **P2-15** durable order-state persistence: DEFERRED (needs a DB write path; not small/isolated).
+- WS query-string token is still accepted as a fallback for compatibility, but the frontend no longer uses it.
+
 
 

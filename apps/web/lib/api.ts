@@ -33,8 +33,10 @@ export function getAuthToken(): string | null {
  *   3. Fallback to the current host with the Node API port (default 3789),
  *      matching the `/ea-api`-less WS connection used in local dev.
  *
- * The browser can only set headers on fetch, not on the WS upgrade, so the
- * token is appended as a `?token=` query parameter (validated server-side).
+ * Audit P2-12: the auth token is NOT put in the query string (it would leak
+ * into proxy/access logs). Instead it is passed as a WebSocket subprotocol via
+ * {@link getLiveSocketProtocols} (``bearer.<token>``), which browsers send in
+ * the ``Sec-WebSocket-Protocol`` header.
  */
 export function getLiveSocketUrl(): string | null {
   if (typeof window === 'undefined') return null;
@@ -54,10 +56,19 @@ export function getLiveSocketUrl(): string | null {
   }
 
   base = base.replace(/\/+$/, '');
-  const url = new URL(base + '/ws');
+  return new URL(base + '/ws').toString();
+}
+
+/**
+ * WebSocket subprotocols carrying the auth token (audit P2-12).
+ *
+ * Returns ``['bearer.<token>']`` when signed in, else an empty array. The
+ * server reads the token from ``Sec-WebSocket-Protocol`` instead of the query
+ * string so the token never appears in URLs/logs.
+ */
+export function getLiveSocketProtocols(): string[] {
   const token = getAuthToken();
-  if (token) url.searchParams.set('token', token);
-  return url.toString();
+  return token ? [`bearer.${token}`] : [];
 }
 
 export function generateTraceId(): string {

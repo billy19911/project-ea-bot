@@ -70,12 +70,19 @@ def validate_daily_loss(
 def validate_exposure(
     positions: list[dict[str, Any]],
     max_exposure_pct: float,
+    account_balance: float,
 ) -> ValidationResult:
-    """Validate total exposure does not exceed threshold."""
+    """Validate total exposure does not exceed threshold (audit P2-10).
+
+    ``account_balance`` is the REAL account balance (from account state). The
+    previous implementation assumed a fixed 10000 balance, which produced
+    fictional exposure percentages. When the balance is unknown/zero, exposure
+    cannot be computed → the check fails closed.
+    """
+    if account_balance <= 0:
+        return ValidationResult(False, "Cannot validate exposure without account balance")
     total_exposure = sum(abs(p.get("volume", 0) * p.get("price", 1.0)) for p in positions)
-    # Assume balance = 10000 for rough percentage calculation.
-    # In production, pass actual balance for exact validation.
-    exposure_pct = total_exposure / 10000.0 * 100  # simplified
+    exposure_pct = total_exposure / account_balance * 100.0
     if exposure_pct > max_exposure_pct * 100:
         msg = f"Total exposure {exposure_pct:.1%} exceeds limit " f"{max_exposure_pct:.1%}"
         return ValidationResult(False, msg)
@@ -131,18 +138,40 @@ class MT5WriteGuard:
                 "checked": ["permission"],
             }
 
-        # 2. Volume check
+        # 2. Volume check — evaluated first so an obviously invalid order is
+        # rejected without needing account context.
         volume = order.get("volume", order.get("quantity", 0))
         symbol = order.get("symbol", "EURUSD")
-        validations.append(validate_volume(symbol, volume, self.min_volume, self.max_volume))
+        volume_result = validate_volume(symbol, volume, self.min_volume, self.max_volume)
+        validations.append(volume_result)
+        if not volume_result.valid:
+            return {"valid": False, "reason": volume_result.reason, "checked": ["permission"]}
 
-        # 3. Daily loss check (requires account_state)
-        if account_state:
-            validations.append(validate_daily_loss(account_state, self.daily_loss_limit))
+        # 3. Daily loss check (audit P2-9: fail-closed — account_state required).
+        if not account_state:
+            return {
+                "valid": False,
+                "reason": "Cannot validate order without account state (daily loss).",
+                "checked": ["permission", "volume"],
+            }
+        loss_result = validate_daily_loss(account_state, self.daily_loss_limit)
+        validations.append(loss_result)
+        if not loss_result.valid:
+            return {
+                "valid": False,
+                "reason": loss_result.reason,
+                "checked": ["permission", "volume"],
+            }
 
-        # 4. Exposure check (requires positions)
-        if positions:
-            validations.append(validate_exposure(positions, self.max_exposure_pct))
+        # 4. Exposure check (audit P2-9/P2-10: fail-closed, real balance).
+        if positions is None:
+            return {
+                "valid": False,
+                "reason": "Cannot validate order without current positions (exposure).",
+                "checked": ["permission", "volume", "daily_loss"],
+            }
+        balance = float(account_state.get("balance", 0.0) or 0.0)
+        validations.append(validate_exposure(positions, self.max_exposure_pct, balance))
 
         # Combine results
         failed = [v for v in validations if not v.valid]
@@ -171,8 +200,16 @@ class MT5WriteGuard:
         self,
         agent: BaseAgent,
         order: dict[str, Any],
+        positions: Optional[list[dict[str, Any]]] = None,
+        account_state: Optional[dict[str, Any]] = None,
+        executor: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None,
     ) -> dict[str, Any]:
-        """Validate then call MT5 connector to execute the order.
+        """Validate then delegate to the MT5 connector (audit P2-9).
+
+        The guard now performs the write boundary it documents: it validates
+        (fail-closed), then calls the injected ``executor`` (defaults to the
+        module-level :func:`mt5.connector.execute_order`). It no longer returns a
+        fake success without sending.
 
         Raises:
             AgentPermissionError: if agent lacks permission.
@@ -182,9 +219,24 @@ class MT5WriteGuard:
 
         # Permission check raises AgentPermissionError on miss.
         require_permission(agent, "SEND_TO_MT5")
-        result = self.validate_order(agent, order)
+        result = self.validate_order(agent, order, positions=positions, account_state=account_state)
         if not result["valid"]:
             raise ValueError(result["reason"])
-        # Delegation to connector happens after this guard passes.
-        # The actual connector call will be added in a later EPIC.
-        return {"success": True, "order": order}
+
+        run = executor if executor is not None else self._default_executor()
+        out = run(order)
+        if isinstance(out, dict):
+            out.setdefault("checked", result["checked"])
+        return out or {
+            "success": False,
+            "order_id": None,
+            "message": "MT5 executor returned no result",
+            "checked": result["checked"],
+        }
+
+    @staticmethod
+    def _default_executor() -> Callable[[dict[str, Any]], dict[str, Any]]:
+        """Return the production connector executor (read-only-safe)."""
+        from mt5 import connector
+
+        return connector.execute_order

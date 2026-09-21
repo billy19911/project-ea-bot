@@ -179,7 +179,20 @@ def get_lifecycle_governor():
 
 
 def get_decision_store():
+    """Return the shared decision-graph store (audit P2-8).
+
+    Prefers the runtime-owned store so graphs recorded during pipeline cycles are
+    visible to the replay endpoint; falls back to a lazily-created store.
+    """
     global _decision_store
+    try:
+        from ..orchestration.runtime import get_runtime
+
+        runtime_store = getattr(get_runtime(), "decision_graphs", None)
+        if runtime_store is not None:
+            return runtime_store
+    except Exception:  # noqa: BLE001 - fall back to a local store
+        pass
     if _decision_store is None:
         from ..review.decision_graph import DecisionGraphStore
 
@@ -581,16 +594,42 @@ async def decision_replay(decision_id: str) -> dict[str, Any]:
 
 @router.get("/performance-intelligence", summary="Performance intelligence by dimension (Phase 42)")
 async def performance_intelligence(dimension: str = "hour") -> dict[str, Any]:
+    """Analyse REAL closed-trade outcomes by dimension (audit P2-8).
+
+    Rows are derived from the auto-review history (each closed trade produces a
+    ReviewRecord with a real ``pnl``). When no trades have closed yet, the
+    response is an honest ``NO_DATA`` — never fabricated.
+    """
     try:
         from ..review.performance_intelligence import PerformanceIntelligence
 
+        rows = _closed_trade_rows()
         engine = PerformanceIntelligence()
-        buckets = engine._analyze_dimension(dimension, [])
+        buckets = engine._analyze_dimension(dimension, rows)
         return {
             "value": [b.to_dict() for b in buckets],
             "dimension": dimension,
+            "trade_count": len(rows),
             "source": "live",
             "status": "OK" if buckets else "NO_DATA",
         }
     except Exception as exc:  # noqa: BLE001
         return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+
+
+def _closed_trade_rows() -> list[Any]:
+    """Build performance rows from the real auto-review history (fail-safe)."""
+    from ..review.performance_intelligence import TradeRow
+
+    rows: list[TradeRow] = []
+    try:
+        from ..review.auto_trigger import get_auto_trigger
+
+        trigger = get_auto_trigger()
+        for record in trigger.recent(limit=500):
+            review = getattr(record, "review", None)
+            pnl = float(getattr(review, "pnl", 0.0) or 0.0)
+            rows.append(TradeRow(pnl=pnl))
+    except Exception:  # noqa: BLE001 - no data is better than fake data
+        pass
+    return rows

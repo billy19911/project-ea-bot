@@ -24,6 +24,52 @@ from .synthesis import AgentSynthesizer
 logger = logging.getLogger(__name__)
 
 
+def normalize_agent_output(result: Any, agent_name: str = "") -> dict[str, Any]:
+    """Normalize a specialist's output to a consistent contract (audit P2-5).
+
+    Guarantees the keys downstream consumers rely on:
+    * ``agent``  — the agent name (backfilled when missing),
+    * ``signal`` — upper-cased signal string (default ``NEUTRAL``),
+    * ``confidence`` — a float in [0, 1],
+    * ``reasoning`` — a single human-readable string (joined from a list),
+    * ``reasons`` — a list form (mirrors ``reasoning`` for compatibility),
+    * ``evidence`` — a list (empty when the specialist provided none).
+
+    Non-dict outputs are wrapped fail-safe. This never raises.
+    """
+    if not isinstance(result, dict):
+        return {
+            "agent": agent_name,
+            "signal": "NEUTRAL",
+            "confidence": 0.0,
+            "reasoning": "",
+            "reasons": [],
+            "evidence": [],
+        }
+    out = dict(result)
+    out.setdefault("agent", agent_name)
+    out["signal"] = str(out.get("signal", "NEUTRAL") or "NEUTRAL").upper()
+    try:
+        out["confidence"] = min(1.0, max(0.0, float(out.get("confidence", 0.0) or 0.0)))
+    except (TypeError, ValueError):
+        out["confidence"] = 0.0
+    # Reconcile reasoning/reasons into both forms.
+    raw = out.get("reasoning", out.get("reasons", ""))
+    if isinstance(raw, (list, tuple)):
+        reasons = [str(r) for r in raw]
+        reasoning = "; ".join(reasons)
+    else:
+        reasoning = str(raw or "")
+        reasons = [reasoning] if reasoning else []
+    out["reasoning"] = reasoning
+    out["reasons"] = reasons
+    # Evidence is expected to be a list; coerce or default to empty.
+    evidence = out.get("evidence")
+    if not isinstance(evidence, list):
+        out["evidence"] = [] if evidence is None else [evidence]
+    return out
+
+
 def _record_activity(name: str, signal: str, confidence: float, error: bool = False) -> None:
     """Best-effort record of one agent run for realtime metrics (fail-safe)."""
     try:
@@ -145,6 +191,25 @@ class SupervisorAgent(BaseAgent):
         # the pipeline's Risk Gate has something to validate. Without this the
         # pipeline always saw ``proposal=None`` and every cycle was NO_TRADE.
         self.synthesizer = AgentSynthesizer()
+        # Audit P2-4: below this consensus confidence an unresolved committee
+        # conflict suppresses the proposal (forced WAIT/NO_TRADE).
+        self.conflict_confidence_floor: float = 0.6
+
+    @staticmethod
+    def _has_unresolved_conflict(results: dict[str, Any]) -> bool:
+        """True when any agent result flags an unresolved conflict."""
+        for out in (results or {}).values():
+            if isinstance(out, dict) and out.get("unresolved_conflict"):
+                return True
+        return False
+
+    def _is_weak_consensus(self, proposal: dict[str, Any]) -> bool:
+        """True when the proposal's confidence is below the conflict floor."""
+        try:
+            confidence = float(proposal.get("confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        return confidence < self.conflict_confidence_floor
 
     # ------------------------------------------------------------------
     # Phase 7: configuration setters (backward compatible)
@@ -394,6 +459,7 @@ class SupervisorAgent(BaseAgent):
                     }
                     _record_activity(agent_name, "NEUTRAL", 0.0, error=True)
                 else:
+                    result = normalize_agent_output(result, agent_name)
                     _record_activity(
                         agent_name,
                         str(result.get("signal", "NEUTRAL")),
@@ -519,6 +585,17 @@ class SupervisorAgent(BaseAgent):
             direction = str(raw.get("direction", "")).upper()
             if direction not in ("BUY", "SELL"):
                 # HOLD / NEUTRAL → no actionable proposal (pipeline → NO_TRADE).
+                return synthesis_dict, None
+
+            # Audit P2-4: an unresolved committee conflict with only a weak
+            # winner must NOT be forced into a trade. If any department lead
+            # reported unresolved_conflict and the consensus is not strong, we
+            # suppress the proposal so the pipeline yields WAIT/NO_TRADE.
+            if self._has_unresolved_conflict(results) and self._is_weak_consensus(raw):
+                logger.info(
+                    "Committee conflict unresolved and consensus weak — suppressing "
+                    "proposal (WAIT/NO_TRADE)."
+                )
                 return synthesis_dict, None
 
             proposal = {

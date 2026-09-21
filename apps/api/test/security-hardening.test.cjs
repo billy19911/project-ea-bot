@@ -60,3 +60,12 @@ test('secret redaction removes nested sensitive values without mutating source',
   assert.equal(source.apiKey, 'private');
   assert.equal(source.nested.password, 'private');
 });
+
+test('redactToken removes token query values for safe logging (P2-12)', () => {
+  const ws = require('../dist/middleware/websocket.js');
+  assert.equal(
+    ws.redactToken('/ws?token=secret123&x=1'),
+    '/ws?token=[redacted]&x=1'
+  );
+  assert.equal(ws.redactToken('/ws?x=1'), '/ws?x=1');
+});

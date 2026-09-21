@@ -207,6 +207,12 @@ class OrchestrationRuntime:
             if trace_collector is not None
             else TraceCollector(max_traces=TRACE_HISTORY_LIMIT)
         )
+        # Audit P2-8: a real decision-graph store populated per cycle so the
+        # /v2/decision/{id}/replay endpoint returns live data (bounded).
+        from review.decision_graph import DecisionGraphStore, GraphStage
+
+        self.decision_graphs = DecisionGraphStore(max_graphs=DECISION_HISTORY_LIMIT)
+        self._graph_stage = GraphStage
 
     @property
     def _reconciliation_runner(self) -> ReconciliationRunner:
@@ -252,7 +258,17 @@ class OrchestrationRuntime:
         execution_guard: Optional[Any] = None,
     ) -> TradingPipeline:
         """Build the production pipeline from the registered agents + risk gate."""
-        supervisor = SupervisorAgent()
+        # Audit P2-3: the production supervisor runs the configurable routing
+        # policy (default ``all_match``) so all matching department leads
+        # genuinely collaborate instead of collapsing to one agent per cycle.
+        policy = "all_match"
+        try:
+            import os
+
+            policy = os.getenv("SUPERVISOR_ROUTING_POLICY", "all_match") or "all_match"
+        except Exception:  # noqa: BLE001 - env read is best-effort
+            policy = "all_match"
+        supervisor = SupervisorAgent(routing_policy=policy)
         # The registry is used by the supervisor for dynamic delegation.
         supervisor._registry_cache = agent_registry
         risk_gate = RiskGate(RiskEngine(), MoneyManager())
@@ -366,6 +382,49 @@ class OrchestrationRuntime:
         entry = dict(record)
         entry.setdefault("recorded_at", time.time())
         self._decisions.append(entry)
+        self._record_decision_graph(entry)
+
+    def _record_decision_graph(self, record: dict[str, Any]) -> None:
+        """Populate a decision graph from a finished cycle (audit P2-8, fail-safe)."""
+        try:
+            decision_id = str(record.get("decision_id") or record.get("event_id") or "")
+            if not decision_id:
+                return
+            stage = self._graph_stage
+            graph = self.decision_graphs.start(
+                decision_id,
+                event_id=str(record.get("event_id") or ""),
+                strategy_version=str(record.get("strategy_version") or ""),
+            )
+            graph.add_node(stage.EVENT, {"event_type": record.get("event_type", "")})
+            graph.add_node(
+                stage.SUPERVISOR_SUMMARY,
+                {"summary": record.get("summary", ""), "confidence": record.get("confidence")},
+            )
+            graph.add_node(
+                stage.TRADE_PROPOSAL,
+                {
+                    "decision": record.get("decision", ""),
+                    "proposal_id": record.get("proposal_id", ""),
+                },
+            )
+            graph.add_node(
+                stage.RISK_CHECKS,
+                {
+                    "risk_approved": record.get("risk_approved"),
+                    "reason": record.get("risk_reason", ""),
+                },
+            )
+            graph.add_node(
+                stage.EXECUTION,
+                {
+                    "executed": record.get("executed"),
+                    "client_order_id": record.get("client_order_id", ""),
+                },
+            )
+            graph.add_node(stage.RESULT, {"status": record.get("status", "")})
+        except Exception as exc:  # noqa: BLE001 - observability must never break a cycle
+            logger.warning("Failed to record decision graph: %s", exc)
 
     def recent_decisions(self, limit: int = 50) -> list[dict[str, Any]]:
         """Return the most recent decision records (newest first)."""

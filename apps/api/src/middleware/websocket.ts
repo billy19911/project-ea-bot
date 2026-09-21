@@ -43,7 +43,13 @@ export function wsAuthHandler(req: Request): boolean {
 }
 
 /**
- * Extract Bearer token from query or headers
+ * Extract Bearer token from the Authorization header, the WebSocket subprotocol
+ * (``bearer.<token>``), or — as a last resort — the query string.
+ *
+ * Audit P2-12: the subprotocol is preferred over the query string for browsers
+ * (which cannot set an Authorization header on the WS upgrade), because query
+ * strings leak into proxy/access logs. The query fallback is retained for
+ * compatibility.
  */
 function extractToken(req: Request): string | null {
   // Try Authorization header first
@@ -52,9 +58,27 @@ function extractToken(req: Request): string | null {
     return authHeader.substring(7);
   }
 
-  // Fallback to query parameter (less secure but sometimes necessary)
-  const token = (req.url.split('token=')[1] || '').split('&')[0];
-  return token || null;
+  // WebSocket subprotocol: "bearer.<token>" (browser-friendly, not logged).
+  const protocols = req.headers['sec-websocket-protocol'];
+  if (typeof protocols === 'string') {
+    for (const proto of protocols.split(',').map((p) => p.trim())) {
+      if (proto.startsWith('bearer.')) {
+        return proto.slice('bearer.'.length) || null;
+      }
+    }
+  }
+
+  // Fallback to query parameter (less secure; may appear in access logs).
+  const match = /[?&]token=([^&]+)/.exec(req.url || '');
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+/**
+ * Redact any ``token=`` query value from a URL string (for logging).
+ * Audit P2-12: prevents WS tokens leaking into logs.
+ */
+export function redactToken(url: string): string {
+  return (url || '').replace(/([?&]token=)[^&]+/gi, '$1[redacted]');
 }
 
 /**

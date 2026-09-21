@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     max_daily_loss: float = Field(default=500.0, alias="MAX_DAILY_LOSS")
     risk_per_trade: float = Field(default=0.02, alias="RISK_PER_TRADE")
 
+    # Supervisor orchestration policy (audit P2-3). ``all_match`` (default) lets
+    # every matching department lead / specialist run so departments genuinely
+    # collaborate; ``first_match`` collapses to a single agent per cycle;
+    # ``priority_based`` keeps all, ordered by priority.
+    supervisor_routing_policy: str = Field(default="all_match", alias="SUPERVISOR_ROUTING_POLICY")
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

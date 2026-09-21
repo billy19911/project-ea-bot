@@ -75,12 +75,12 @@ def test_validate_daily_loss_exceeded():
 
 
 def test_validate_exposure_within_limit():
-    """Total exposure within limit should pass."""
+    """Total exposure within limit should pass (real balance supplied)."""
     positions = [
         {"symbol": "EURUSD", "volume": 1.0, "price": 1.0850},
         {"symbol": "GBPUSD", "volume": 0.5, "price": 1.2700},
     ]
-    result = validate_exposure(positions, max_exposure_pct=0.2)  # 20% of account
+    result = validate_exposure(positions, max_exposure_pct=0.2, account_balance=10000.0)
     assert result.valid is True
 
 
@@ -90,9 +90,16 @@ def test_validate_exposure_exceeded():
         {"symbol": "EURUSD", "volume": 50.0, "price": 1.0850},
         {"symbol": "GBPUSD", "volume": 50.0, "price": 1.2700},
     ]
-    result = validate_exposure(positions, max_exposure_pct=0.001)  # 0.1% limit
+    result = validate_exposure(positions, max_exposure_pct=0.001, account_balance=10000.0)
     assert result.valid is False
     assert "exposure" in result.reason.lower()
+
+
+def test_validate_exposure_fails_closed_without_balance():
+    """Audit P2-10: no real balance → exposure cannot be validated → fail."""
+    result = validate_exposure([{"symbol": "EURUSD", "volume": 1.0, "price": 1.08}], 0.2, 0.0)
+    assert result.valid is False
+    assert "balance" in result.reason.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +124,8 @@ def test_write_guard_validates_volume():
     result = guard.validate_order(
         agent,
         {"symbol": "EURUSD", "side": "BUY", "volume": 150.0},
+        positions=[],
+        account_state={"daily_pnl": 0.0, "balance": 10000.0},
     )
     assert result["valid"] is False
 
@@ -133,12 +142,38 @@ def test_write_guard_all_checks_pass():
 
     result = guard.validate_order(
         agent,
-        {
-            "symbol": "EURUSD",
-            "side": "BUY",
-            "volume": 1.0,
-            "account_state": {"daily_pnl": -500.0, "balance": 10000.0},
-            "positions": [],
-        },
+        {"symbol": "EURUSD", "side": "BUY", "volume": 1.0},
+        positions=[],
+        account_state={"daily_pnl": -500.0, "balance": 10000.0},
     )
     assert result["valid"] is True
+
+
+def test_write_guard_fails_closed_without_account_state():
+    """Audit P2-9: missing account state must block (fail-closed)."""
+    agent = _TestAgent("executor", permissions=["SEND_TO_MT5"])
+    guard = MT5WriteGuard()
+    result = guard.validate_order(agent, {"symbol": "EURUSD", "volume": 1.0})
+    assert result["valid"] is False
+    assert "account state" in result["reason"].lower()
+
+
+def test_send_order_delegates_to_executor():
+    """Audit P2-9: send_order must actually call the executor, not fake success."""
+    agent = _TestAgent("executor", permissions=["SEND_TO_MT5"])
+    guard = MT5WriteGuard()
+    sent: list[dict] = []
+
+    def fake_executor(order):
+        sent.append(order)
+        return {"success": True, "order_id": 123, "message": "sent"}
+
+    out = guard.send_order(
+        agent,
+        {"symbol": "EURUSD", "volume": 1.0},
+        positions=[],
+        account_state={"daily_pnl": 0.0, "balance": 10000.0},
+        executor=fake_executor,
+    )
+    assert out["success"] is True
+    assert len(sent) == 1  # the executor was actually invoked

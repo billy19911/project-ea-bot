@@ -34,6 +34,11 @@ class EventType(str, Enum):
     NEWS_FLASH = "NEWS_FLASH"
     RISK_BREACH = "RISK_BREACH"
     MARGIN_CALL = "MARGIN_CALL"
+    # Audit P2-2: external position changes detected by diffing snapshots.
+    SL_CHANGED = "SL_CHANGED"
+    TP_CHANGED = "TP_CHANGED"
+    PARTIAL_CLOSE = "PARTIAL_CLOSE"
+    POSITION_DISAPPEARED = "POSITION_DISAPPEARED"
 
 
 class Severity(str, Enum):
@@ -148,6 +153,7 @@ class PositionMonitor:
         mt5_connector: Any = None,
         atr_lookback: int = 14,
         close_detector: Any = None,
+        default_contract_size: float = 100000.0,
     ) -> None:
         """Initialize the Position Monitor.
 
@@ -159,15 +165,20 @@ class PositionMonitor:
                 (audit P1-6). When supplied, ``monitor_all_positions`` feeds the
                 raw positions to it so disappeared tickets trigger trade review.
                 Optional so existing callers are unaffected.
+            default_contract_size: Fallback contract size used only when the
+                broker symbol spec cannot be read (audit P2-7). Overridable so
+                non-FX instruments are not mis-scaled.
         """
         self.mt5_connector = mt5_connector
         self.atr_lookback = max(1, atr_lookback)
         self.close_detector = close_detector
+        self.default_contract_size = float(default_contract_size)
 
         # In-memory state tracking
         self._position_history: dict[int, list[PositionSnapshot]] = {}
         self._last_sl: dict[int, float] = {}
         self._last_tp: dict[int, float] = {}
+        self._last_volume: dict[int, float] = {}
         self._entry_prices: dict[int, float] = {}
         self._breakeven_applied: set[int] = set()
 
@@ -386,6 +397,117 @@ class PositionMonitor:
                 self._position_history[ticket] = self._position_history[ticket][-100:]
 
         return snapshots
+
+    def _snapshot_positions(self) -> list[PositionSnapshot]:
+        """Build snapshots + history WITHOUT feeding the close detector.
+
+        Internal helper for callers that already handled position-close
+        observation (e.g. :meth:`detect_position_changes`), so a single cycle
+        never double-fires the close detector.
+        """
+        snapshots: list[PositionSnapshot] = []
+        for pos in self._get_positions():
+            snapshot = self._normalize_position(pos)
+            snapshots.append(snapshot)
+            ticket = snapshot.ticket
+            if ticket not in self._position_history:
+                self._position_history[ticket] = []
+            self._position_history[ticket].append(snapshot)
+            if len(self._position_history[ticket]) > 100:
+                self._position_history[ticket] = self._position_history[ticket][-100:]
+        return snapshots
+
+    def detect_position_changes(self, account_id: Optional[int] = None) -> list[AbnormalEvent]:
+        """Diff the current positions against the last-seen state (audit P2-2).
+
+        Detects changes the system did not make itself:
+        - **external SL modification** (broker/manual change) → ``SL_CHANGED``
+        - **external TP modification** → ``TP_CHANGED``
+        - **partial close** (volume decreased) → ``PARTIAL_CLOSE``
+        - **unexpected disappearance** (ticket gone) → ``POSITION_DISAPPEARED``
+
+        The state maps are updated to the current snapshot so each change is
+        reported once. Read-only: it never modifies SL/TP or closes anything.
+        """
+        events: list[AbnormalEvent] = []
+        snapshots = self._snapshot_positions()
+        seen: set[int] = set()
+
+        for snap in snapshots:
+            ticket = snap.ticket
+            if not ticket:
+                continue
+            seen.add(ticket)
+            prev_sl = self._last_sl.get(ticket)
+            prev_tp = self._last_tp.get(ticket)
+            prev_vol = self._last_volume.get(ticket)
+
+            if prev_sl is not None and snap.sl != prev_sl:
+                events.append(
+                    AbnormalEvent(
+                        event_type=EventType.SL_CHANGED,
+                        severity=Severity.WARNING,
+                        message=(
+                            f"Stop loss changed on {snap.symbol} #{ticket}: "
+                            f"{prev_sl} → {snap.sl}"
+                        ),
+                        symbol=snap.symbol,
+                        metadata={"ticket": ticket, "old_sl": prev_sl, "new_sl": snap.sl},
+                    )
+                )
+            if prev_tp is not None and snap.tp != prev_tp:
+                events.append(
+                    AbnormalEvent(
+                        event_type=EventType.TP_CHANGED,
+                        severity=Severity.WARNING,
+                        message=(
+                            f"Take profit changed on {snap.symbol} #{ticket}: "
+                            f"{prev_tp} → {snap.tp}"
+                        ),
+                        symbol=snap.symbol,
+                        metadata={"ticket": ticket, "old_tp": prev_tp, "new_tp": snap.tp},
+                    )
+                )
+            if prev_vol is not None and snap.volume < prev_vol:
+                events.append(
+                    AbnormalEvent(
+                        event_type=EventType.PARTIAL_CLOSE,
+                        severity=Severity.WARNING,
+                        message=(
+                            f"Partial close on {snap.symbol} #{ticket}: "
+                            f"{prev_vol} → {snap.volume}"
+                        ),
+                        symbol=snap.symbol,
+                        metadata={
+                            "ticket": ticket,
+                            "old_volume": prev_vol,
+                            "new_volume": snap.volume,
+                        },
+                    )
+                )
+
+            # Update tracked state.
+            self._last_sl[ticket] = snap.sl
+            self._last_tp[ticket] = snap.tp
+            self._last_volume[ticket] = snap.volume
+
+        # Unexpected disappearance: a tracked ticket that is no longer present.
+        for ticket in list(self._last_sl.keys()):
+            if ticket not in seen:
+                events.append(
+                    AbnormalEvent(
+                        event_type=EventType.POSITION_DISAPPEARED,
+                        severity=Severity.WARNING,
+                        message=f"Position #{ticket} disappeared (closed externally?)",
+                        symbol="",
+                        metadata={"ticket": ticket},
+                    )
+                )
+                self._last_sl.pop(ticket, None)
+                self._last_tp.pop(ticket, None)
+                self._last_volume.pop(ticket, None)
+
+        return events
 
     def update_trailing_sl(
         self,
@@ -618,25 +740,56 @@ class PositionMonitor:
         if not tick:
             return (False, 0.0)
 
-        # Get contract size for proper risk calc
-        contract_size = 100000.0
+        # Audit P2-7: use the REAL contract size from the broker symbol spec.
+        # Fall back to a configurable default (never a silent 100000 baseline).
+        contract_size = self._contract_size(symbol)
+        if contract_size <= 0:
+            return (False, 0.0)
 
         risk_per_lot = risk_distance * contract_size
         total_risk = risk_per_lot * snapshot.volume
 
-        # Get account equity
-        try:
-            from mt5.connector import get_account_info
+        # Get account equity honestly. If it cannot be read, risk % is UNKNOWN —
+        # do not fabricate an equity figure.
+        equity = self._account_equity()
+        if equity is None or equity <= 0:
+            return (False, 0.0)
 
-            account = get_account_info()
-            equity = account.equity if account else 10000.0
-        except Exception:
-            equity = 10000.0
-
-        risk_pct = (total_risk / equity * 100.0) if equity > 0 else 0.0
+        risk_pct = total_risk / equity * 100.0
         at_risk = risk_pct > max_risk_pct
 
         return (at_risk, round(risk_pct, 2))
+
+    def _contract_size(self, symbol: str) -> float:
+        """Return the broker contract size for ``symbol`` (audit P2-7).
+
+        Falls back to ``self.default_contract_size`` when the spec is
+        unavailable. Never fabricates a fixed 100000.
+        """
+        try:
+            from market.symbol_spec import get_symbol_spec
+
+            spec = get_symbol_spec(symbol) or {}
+            value = float(spec.get("contract_size") or 0.0)
+            if value > 0:
+                return value
+        except Exception:  # noqa: BLE001 - spec lookup is best-effort
+            logger.debug("Contract size lookup failed for %s", symbol)
+        return float(self.default_contract_size)
+
+    def _account_equity(self) -> Optional[float]:
+        """Return the real account equity, or ``None`` when unavailable (P2-7)."""
+        try:
+            if self.mt5_connector is not None and hasattr(self.mt5_connector, "get_account_info"):
+                account = self.mt5_connector.get_account_info()
+            else:
+                from mt5.connector import get_account_info
+
+                account = get_account_info()
+            equity = getattr(account, "equity", None) if account is not None else None
+            return float(equity) if equity is not None else None
+        except Exception:  # noqa: BLE001 - equity read is best-effort
+            return None
 
     def check_exit_events(self, symbol: str) -> list[AbnormalEvent]:
         """Check for exit-triggering events on a position.

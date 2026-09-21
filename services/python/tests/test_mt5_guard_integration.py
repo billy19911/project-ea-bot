@@ -82,6 +82,8 @@ def test_guarded_execute_passes_valid_order():
         agent=agent,
         order={"symbol": "EURUSD", "side": "BUY", "volume": 1.0},
         guard=guard,
+        positions=[],
+        account_state={"daily_pnl": 0.0, "balance": 10000.0},
     )
     assert result["success"] is True
     assert result["order_id"] is not None
@@ -117,6 +119,8 @@ def test_guarded_execute_with_real_execute_order():
         order={"symbol": "GBPUSD", "side": "SELL", "volume": 0.5},
         guard=guard,
         executor=execute_order,
+        positions=[],
+        account_state={"daily_pnl": 0.0, "balance": 10000.0},
     )
     assert result["success"] is True
     assert "order_id" in result

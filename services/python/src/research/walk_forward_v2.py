@@ -41,7 +41,7 @@ __all__ = [
 ]
 
 SignalFn = Callable[[list[Bar], int], int]
-ParamSearchFn = Callable[[list[Bar]], dict[str, Any]]
+ParamSearchFn = Callable[[list["Bar"]], Optional[Any]]
 
 
 def _quarter_label(dt: datetime) -> str:
@@ -163,10 +163,12 @@ class WalkForwardValidator:
         Args:
             bars: Chronological bars.
             signal_fn: Strategy signal function ``(bars, idx) -> -1|0|1``.
-            param_search: Optional callable that, given a train segment,
-                returns tuned parameters. Currently accepted for API
-                compatibility; the injected ``signal_fn`` is used for both
-                segments (the harness is strategy-agnostic).
+            param_search: Optional callable that, given the TRAIN segment,
+                returns a *fitted* signal function to evaluate on the OOS test
+                segment: ``param_search(train_bars) -> signal_fn | None``.
+                Audit P2-14: this now actually re-fits per window instead of
+                being ignored. When it returns ``None`` (or is not supplied),
+                the injected ``signal_fn`` is used for the test segment.
         """
         report = WalkForwardReport()
         n = len(bars)
@@ -177,10 +179,21 @@ class WalkForwardValidator:
             bounds = [(0, train_end, n)]
 
         for train_start, train_end, test_end in bounds:
+            train_bars = bars[train_start:train_end]
             test_bars = bars[train_end:test_end]
             if len(test_bars) < 2:
                 continue
-            result = self.backtester.run(test_bars, signal_fn)
+            # Audit P2-14: fit on the train window, evaluate the fitted strategy
+            # on the OOS window. Fall back to the base signal_fn on any failure.
+            window_signal_fn = signal_fn
+            if param_search is not None:
+                try:
+                    fitted = param_search(train_bars)
+                    if callable(fitted):
+                        window_signal_fn = fitted
+                except Exception:  # noqa: BLE001 - a bad fit falls back to base
+                    window_signal_fn = signal_fn
+            result = self.backtester.run(test_bars, window_signal_fn)
             metrics = result.metrics
             trades = int(metrics.get("total_trades", len(result.trades)))
             expectancy_r = float(metrics.get("average_r", 0.0))

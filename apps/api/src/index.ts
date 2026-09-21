@@ -59,7 +59,18 @@ app.use(helmet({
 }));
 
 // Middleware: parse JSON dan attach logger ke request
-app.use(cors());
+// Audit P2-12: explicit CORS allowlist (never a wildcard). Origins come from
+// CORS_ALLOWED_ORIGINS (comma-separated); default is local dev origins only.
+const corsAllowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:4321,http://127.0.0.1:4321')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+app.use(
+  cors({
+    origin: corsAllowedOrigins,
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '1mb' }));
 
 // Phase 28: Security middleware

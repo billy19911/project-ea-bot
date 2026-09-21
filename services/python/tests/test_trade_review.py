@@ -167,30 +167,41 @@ class TestTimingScore:
 
 
 class TestDecisionQuality:
-    """Tests for agent decision quality scoring."""
+    """Tests for agent decision quality scoring (process-only, outcome-independent).
+
+    Audit P2-6: decision quality must NOT depend on the trade outcome, so the
+    same agent inputs score identically for WIN and LOSS.
+    """
 
     def test_win_with_buy_signal_high_confidence(self, reviewer: TradeReviewer) -> None:
-        agent = {"confidence": 0.9, "signal": "BUY"}
+        agent = {"confidence": 0.9, "signal": "BUY", "reasoning": "breakout"}
         score = reviewer.score_decision_quality(agent, "WIN")
-        # base=0.9*50=45, signal_bonus=25, outcome_bonus=25 → 95
-        assert score == 95.0
+        # base=0.9*60=54, signal_bonus=25, reasoning_bonus=15 → 94
+        assert score == 94.0
 
     def test_loss_with_buy_signal(self, reviewer: TradeReviewer) -> None:
-        agent = {"confidence": 0.6, "signal": "BUY"}
+        agent = {"confidence": 0.6, "signal": "BUY", "reasoning": "x"}
         score = reviewer.score_decision_quality(agent, "LOSS")
-        # base=0.6*50=30, signal_bonus=25, outcome_bonus=0 → 55
-        assert score == 55.0
+        # base=0.6*60=36, signal_bonus=25, reasoning_bonus=15 → 76
+        assert score == 76.0
+
+    def test_outcome_does_not_change_the_score(self, reviewer: TradeReviewer) -> None:
+        """A good process that lost must score the same as if it had won."""
+        agent = {"confidence": 0.7, "signal": "BUY", "reasoning": "plan"}
+        assert reviewer.score_decision_quality(agent, "WIN") == reviewer.score_decision_quality(
+            agent, "LOSS"
+        )
 
     def test_win_with_hold_signal(self, reviewer: TradeReviewer) -> None:
         agent = {"confidence": 0.5, "signal": "HOLD"}
         score = reviewer.score_decision_quality(agent, "WIN")
-        # base=0.5*50=25, signal_bonus=0, outcome_bonus=25 → 50
-        assert score == 50.0
+        # base=0.5*60=30, signal_bonus=0, reasoning_bonus=0 → 30
+        assert score == 30.0
 
     def test_default_confidence_when_missing(self, reviewer: TradeReviewer) -> None:
         score = reviewer.score_decision_quality({}, "WIN")
-        # base=0.5*50=25, signal_bonus=0 (HOLD default), outcome_bonus=25 → 50
-        assert score == 50.0
+        # base=0.5*60=30, signal_bonus=0 (HOLD default), reasoning_bonus=0 → 30
+        assert score == 30.0
 
 
 class TestExecutionQuality:
@@ -243,8 +254,8 @@ class TestReviewTrade:
         assert result.mae == pytest.approx(0.91, abs=0.01)
         assert result.mfe == pytest.approx(1.09, abs=0.01)
         assert result.timing_score == 100.0
-        # base=0.8*50=40, signal=25, outcome=25 → 90
-        assert result.decision_quality_score == 90.0
+        # Audit P2-6: process-only → base=0.8*60=48, signal=25, reasoning=0 → 73
+        assert result.decision_quality_score == 73.0
         assert result.execution_quality_score == 100.0
         assert "T001" in result.summary
         assert "WIN" in result.summary
@@ -265,8 +276,8 @@ class TestReviewTrade:
         assert result.trade_id == "T002"
         assert result.outcome == "LOSS"
         assert result.pnl == -100.0
-        # Decision: base=0.6*50=30, signal=25, outcome=0 → 55
-        assert result.decision_quality_score == 55.0
+        # Decision: process-only base=0.6*60=36, signal=25, reasoning=0 → 61
+        assert result.decision_quality_score == 61.0
         # Execution: 100 - 2*10 - 0.05*20 = 100 - 20 - 1 = 79
         assert result.execution_quality_score == 79.0
         assert "T002" in result.summary
@@ -289,8 +300,8 @@ class TestReviewTrade:
         assert result.outcome == "WIN"
         assert result.pnl == 100.0
         assert result.timing_score == 100.0
-        # Decision: base=0.7*50=35, signal=25, outcome=25 → 85
-        assert result.decision_quality_score == 85.0
+        # Decision: process-only base=0.7*60=42, signal=25, reasoning=0 → 67
+        assert result.decision_quality_score == 67.0
         assert result.execution_quality_score == 100.0
 
     def test_review_without_sr_levels(

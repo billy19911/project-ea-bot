@@ -284,14 +284,54 @@ export default function AppShell({
     };
   }, [pathname]);
 
-  // Mock realtime status changes – in production hook to websocket.
+  // Realtime status driven by a REAL health poll (no mock). Maps the API's
+  // reachability + status to the badge: reachable+ok → LIVE, reachable but not
+  // ok → DEGRADED, unreachable → OFFLINE. Polls every 15s and on focus.
   useEffect(() => {
-    // Simple demo: flip LIVE every 12s, otherwise DEGRADED.
-    const interval = setInterval(() => {
-      setRealtime(prev => (prev === 'LIVE' ? 'DEGRADED' : 'LIVE'));
-    }, 12000);
-    return () => clearInterval(interval);
-  }, []);
+    let cancelled = false;
+    let inFlight = false;
+
+    const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const res = await apiFetch('/health');
+        if (cancelled) return;
+        if (!res.ok) {
+          setRealtime('DEGRADED');
+          return;
+        }
+        let ok = true;
+        try {
+          const data = await res.json();
+          ok = String(data?.status ?? 'ok').toLowerCase() === 'ok';
+        } catch {
+          ok = true; // reachable but non-JSON — still online
+        }
+        setRealtime(ok ? 'LIVE' : 'DEGRADED');
+      } catch {
+        if (!cancelled) setRealtime('OFFLINE');
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void poll();
+    const interval = setInterval(poll, 15000);
+    const onVisible = () => {
+      if (typeof document !== 'undefined' && !document.hidden) void poll();
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisible);
+    }
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisible);
+      }
+    };
+  }, [pathname]);
 
   // Helper: map trade mode to badge enum.
   function toEnvironment(mode: AccountMode | null | undefined): Environment {

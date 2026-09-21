@@ -158,29 +158,45 @@ class TradeReviewer:
         agent_outputs: dict[str, Any],
         outcome: str,
     ) -> float:
-        """Score agent decision quality by comparing recommendation confidence vs actual outcome.
+        """Score the quality of the *decision process* (not the outcome).
+
+        Audit P2-6: decision quality must be independent of the trade result so
+        that a good decision that lost is not scored as a bad decision (and a
+        lucky win is not scored as a good one). The ``outcome`` argument is kept
+        for API compatibility but does NOT contribute to the score.
+
+        Process signals used:
+        * signal strength (non-HOLD) — a decision was actually taken,
+        * confidence calibration — higher confidence scores higher, but capped,
+        * reasoning presence — evidence was attached to the decision.
 
         Args:
-            agent_outputs: Dictionary with agent recommendation data.
-                Expected keys: "confidence" (0-1), "signal" ("BUY"/"SELL"/"HOLD").
-            outcome: Actual trade outcome ("WIN" or "LOSS").
+            agent_outputs: Dictionary with agent recommendation data
+                (``confidence`` 0-1, ``signal``, optional ``reasoning``).
+            outcome: Kept for backwards compatibility; not used in the score.
 
         Returns:
-            Decision quality score 0-100. Higher means agent prediction matched reality.
+            Decision quality score 0-100 reflecting the decision process only.
         """
         confidence = agent_outputs.get("confidence", 0.5)
         signal = agent_outputs.get("signal", "HOLD")
+        reasoning = agent_outputs.get("reasoning")
 
-        # Base score: high confidence
-        base_score = confidence * 50.0
+        # Base: confidence calibration (0-1 → 0-60).
+        try:
+            base_score = float(confidence) * 60.0
+        except (TypeError, ValueError):
+            base_score = 0.0
 
-        # Bonus if signal existed (non-HOLD)
-        signal_bonus = 25.0 if signal.upper() != "HOLD" else 0.0
+        # A concrete decision (non-HOLD) is a positive process signal.
+        signal_bonus = 25.0 if str(signal).upper() != "HOLD" else 0.0
 
-        # Outcome alignment bonus
-        outcome_bonus = 25.0 if outcome == "WIN" else 0.0
+        # Evidence attached to the decision (reasoning present) is a positive
+        # process signal — independent of whether the trade won or lost.
+        has_reasoning = bool(reasoning) if not isinstance(reasoning, list) else len(reasoning) > 0
+        reasoning_bonus = 15.0 if has_reasoning else 0.0
 
-        score = base_score + signal_bonus + outcome_bonus
+        score = base_score + signal_bonus + reasoning_bonus
         return round(min(100.0, max(0.0, score)), 2)
 
     def score_execution_quality(

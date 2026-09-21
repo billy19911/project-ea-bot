@@ -20,6 +20,26 @@
 | P1-5 | Promotion gate enforced: `activate(enforce_evidence=True)` + endpoint returns 409 without evidence | `strategy/registry.py`, `strategy/endpoints.py`, `strategy/__init__.py` | `test_strategy_promotion_gate.py` |
 | P1-6 | `PositionCloseDetector` observes disappeared tickets → fires review hook (observation only, no orders) | `review/close_detector.py` (new), `monitoring/position_monitor.py` | `test_position_close_detector.py` |
 
+## P2 fixes applied (third session)
+
+Test count 1904 → **1935** (all green); black/isort/flake8 clean; Node 46/46; web tsc/lint clean.
+
+| # | Fix | Files | Test |
+|---|---|---|---|
+| P2-1 | `AppShell` realtime badge polled from real `/health` (mock toggle removed) | `apps/web/components/AppShell.tsx` | web tsc/lint |
+| P2-2 | Monitor detects external SL/TP change, partial close, disappearance | `monitoring/position_monitor.py` | `test_position_monitor_changes.py` |
+| P2-3 | Production supervisor policy configurable, default `all_match` | `orchestration/runtime.py`, `config.py` | `test_supervisor_policy.py` |
+| P2-4 | Unresolved conflict + weak consensus → no proposal (WAIT/NO_TRADE) | `agents/supervisor.py` | `test_committee_conflict.py` |
+| P2-5 | Specialist output normalized (reasoning/reasons/evidence) at dispatch | `agents/supervisor.py` | `test_agent_output_normalization.py` |
+| P2-6 | Decision quality made outcome-independent | `review/trade_review.py` | `test_trade_review.py` |
+| P2-7 | Removed hardcoded contract-size/equity fallbacks | `monitoring/position_monitor.py` | `test_position_monitor.py` |
+| P2-8 | Decision replay + performance-intelligence return real data | `orchestration/runtime.py`, `system/v2_endpoints.py` | `test_dead_endpoints.py` |
+| P2-9 | `MT5WriteGuard.send_order` delegates; checks fail-closed | `mt5/write_guard.py`, `agents/permissions.py` | `test_mt5_write_guard.py` |
+| P2-10 | Exposure validated against real balance | `mt5/write_guard.py` | `test_mt5_write_guard.py` |
+| P2-12 | Node CORS allowlist; WS token off query (subprotocol) | `apps/api/src/index.ts`, `middleware/websocket.ts`, `liveStream.ts`, `apps/web/lib/api.ts`, `useLiveQuotes.ts` | api `security-hardening.test.cjs` |
+| P2-14 | Walk-forward actually re-fits via `param_search` | `research/walk_forward_v2.py` | `test_walk_forward_v2.py` |
+| P2-15 | **DEFERRED** — durable order-state persistence (low priority; needs DB path) | — | — |
+
 ---
 
 ## Implementation order (do in this sequence)

@@ -9,7 +9,7 @@ executes, raising ``AgentPermissionError`` when the permission is missing.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from agents.base import BaseAgent
@@ -101,16 +101,30 @@ def propose_execution(agent: "BaseAgent", proposal: dict[str, Any]) -> dict[str,
     return {"accepted": True, "proposer": agent.name, **proposal}
 
 
-def send_to_mt5(agent: "BaseAgent", order: dict[str, Any]) -> dict[str, Any]:
+def send_to_mt5(
+    agent: "BaseAgent",
+    order: dict[str, Any],
+    positions: Optional[list[dict[str, Any]]] = None,
+    account_state: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     """Send a validated order to MT5.
 
     Only agents with ``SEND_TO_MT5`` may call this.  This permission is
     intentionally kept separate from ``PROPOSE_EXECUTION`` so that the
     Execution Engine can be the sole component with MT5 write access.
+
+    Audit P2-9: the write guard is fail-closed, so callers should pass the real
+    ``positions`` and ``account_state``; without them the guard blocks (no
+    silent bypass of the daily-loss/exposure checks).
     """
     require_permission(agent, PERM_SEND_TO_MT5)
     # Use guarded_execute_order for safe MT5 writes
     from mt5.connector import guarded_execute_order
 
-    result = guarded_execute_order(agent=agent, order=order)
+    result = guarded_execute_order(
+        agent=agent,
+        order=order,
+        positions=positions,
+        account_state=account_state,
+    )
     return result
