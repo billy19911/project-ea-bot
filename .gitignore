@@ -61,3 +61,6 @@ test_ea_bot.db
 !docs/build/
 !docs/build/**
 
+
+# Runtime state (MT5 terminal selection)
+services/python/mt5_selected.json
