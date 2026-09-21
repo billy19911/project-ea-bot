@@ -28,9 +28,16 @@ from typing import Any, Callable, Optional, Protocol, runtime_checkable
 from execution.engine import OrderRequest
 from execution.order_builder import OrderBuilder
 from risk.gate import GateDecision
+from risk.money_management import MoneyManager
 from trading.market_snapshot import get_latest_snapshot
 
 logger = logging.getLogger(__name__)
+
+# Defaults used when COMPLETING a proposal whose synthesis left sizing/SL-TP
+# empty (audit follow-up). Conservative; never override caller-provided values.
+DEFAULT_RISK_PCT = 0.01  # risk 1% of equity per trade
+DEFAULT_POINT_VALUE = 0.0001  # 1 pip value for standard FX pairs
+DEFAULT_CONTRACT_SIZE = 100000.0
 
 __all__ = [
     "TradingPipeline",
@@ -205,12 +212,18 @@ class TradingPipeline:
         result_hook: Optional[Callable[[PipelineResult], None]] = None,
         lesson_provider: Optional[Any] = None,
         reconciliation_guard: Optional[Any] = None,
+        money_manager: Optional[Any] = None,
     ) -> None:
         self.supervisor = supervisor
         self.risk_gate = risk_gate
         self.execution_engine = execution_engine
         self.order_builder = order_builder if order_builder is not None else OrderBuilder()
         self.strategy_version = strategy_version
+        # Money manager used to COMPLETE a proposal whose SL/TP/size the synthesis
+        # left empty (so an entry command can reach execution). Deterministic;
+        # never overrides values the proposal already provides. Default instance
+        # keeps existing behaviour when a caller does not inject one.
+        self.money_manager = money_manager if money_manager is not None else MoneyManager()
         # Optional execution-critical guard (§24). When supplied it must expose
         # ``check_can_execute() -> (bool, reason)``; a False result blocks new
         # orders at the execution check-point. Optional so existing callers and
@@ -585,8 +598,8 @@ class TradingPipeline:
     # ------------------------------------------------------------------
     # Helpers — deterministic validation inputs
     # ------------------------------------------------------------------
-    @staticmethod
     def _build_validation_inputs(
+        self,
         proposal: dict[str, Any],
         context: dict[str, Any],
     ) -> dict[str, Any]:
@@ -596,17 +609,13 @@ class TradingPipeline:
         ``RiskGate.validate_proposal`` (entry_price / stop_loss /
         take_profit / size). Missing account/position/market inputs fall back
         to safe conservative defaults so the gate always runs deterministically.
-        """
-        normalised_proposal = {
-            "symbol": proposal.get("symbol") or context.get("symbol", ""),
-            "direction": str(proposal.get("direction", "")).upper(),
-            "entry_price": float(proposal.get("entry_price") or proposal.get("price") or 0.0),
-            "stop_loss": float(proposal.get("stop_loss") or proposal.get("sl") or 0.0),
-            "take_profit": float(proposal.get("take_profit") or proposal.get("tp") or 0.0),
-            "size": float(proposal.get("size") or proposal.get("volume") or 0.0),
-            "risk_pct": float(proposal.get("risk_pct") or 0.0),
-        }
 
+        When the synthesis leaves ``entry_price``/``stop_loss``/``take_profit``/
+        ``size`` empty, they are *completed* deterministically from the market
+        context via the injected :class:`MoneyManager` (audit follow-up). Values
+        the proposal already provides are NEVER overridden, and any completion
+        error is swallowed (the gate then fails closed on the missing field).
+        """
         account_state = context.get("account_state")
         if not isinstance(account_state, dict):
             account_state = {
@@ -625,12 +634,129 @@ class TradingPipeline:
         if not isinstance(market_info, dict):
             market_info = {}
 
+        normalised_proposal = {
+            "symbol": proposal.get("symbol") or context.get("symbol", ""),
+            "direction": str(proposal.get("direction", "")).upper(),
+            "entry_price": float(proposal.get("entry_price") or proposal.get("price") or 0.0),
+            "stop_loss": float(proposal.get("stop_loss") or proposal.get("sl") or 0.0),
+            "take_profit": float(proposal.get("take_profit") or proposal.get("tp") or 0.0),
+            "size": float(proposal.get("size") or proposal.get("volume") or 0.0),
+            "risk_pct": float(proposal.get("risk_pct") or 0.0),
+        }
+
+        # Complete SL/TP/size when the synthesis did not supply them so an
+        # approved entry can actually reach execution. Fail-safe: any error
+        # leaves the values unchanged (the gate then rejects missing fields).
+        try:
+            self._complete_proposal(normalised_proposal, context, account_state, market_info)
+        except Exception as exc:  # noqa: BLE001 - completion is best-effort
+            logger.warning("Proposal completion skipped: %s", exc)
+
         return {
             "proposal": normalised_proposal,
             "account_state": account_state,
             "current_positions": current_positions,
             "market_info": market_info,
         }
+
+    def _complete_proposal(
+        self,
+        proposal: dict[str, Any],
+        context: dict[str, Any],
+        account_state: dict[str, Any],
+        market_info: dict[str, Any],
+    ) -> None:
+        """Fill entry/SL/TP/size from market + account context when missing.
+
+        Deterministic only (uses :class:`MoneyManager`, no LLM). Only fills a
+        field the proposal left empty (``<= 0``); never overrides caller intent.
+        """
+        direction = str(proposal.get("direction", "")).upper()
+        if direction not in ("BUY", "SELL"):
+            return  # nothing actionable to size
+
+        # --- Resolve a usable entry price -------------------------------
+        entry = float(proposal.get("entry_price") or 0.0)
+        market_state = context.get("market_state")
+        if not isinstance(market_state, dict):
+            market_state = {}
+        if entry <= 0:
+            for candidate in (
+                market_state.get("close"),
+                market_state.get("price"),
+                market_info.get("ask") if direction == "BUY" else market_info.get("bid"),
+                market_info.get("price"),
+                context.get("close"),
+                context.get("price"),
+            ):
+                try:
+                    if candidate:
+                        entry = float(candidate)
+                        break
+                except (TypeError, ValueError):
+                    continue
+        if entry <= 0:
+            return  # no price → cannot size deterministically
+        proposal["entry_price"] = entry
+
+        # --- Resolve ATR (for SL/TP) and point/contract values ----------
+        atr = market_state.get("atr", context.get("atr"))
+        try:
+            atr = float(atr) if atr else 0.0
+        except (TypeError, ValueError):
+            atr = 0.0
+
+        # --- Complete SL/TP via ATR when both are missing ---------------
+        sl = float(proposal.get("stop_loss") or 0.0)
+        tp = float(proposal.get("take_profit") or 0.0)
+        if (sl <= 0 or tp <= 0) and atr > 0:
+            mm_direction = "long" if direction == "BUY" else "short"
+            try:
+                sl_price, tp_price = self.money_manager.calculate_sl_tp(
+                    entry_price=entry, direction=mm_direction, atr_value=atr
+                )
+                if sl <= 0:
+                    proposal["stop_loss"] = round(float(sl_price), 5)
+                    sl = proposal["stop_loss"]
+                if tp <= 0:
+                    proposal["take_profit"] = round(float(tp_price), 5)
+                    tp = proposal["take_profit"]
+            except Exception as exc:  # noqa: BLE001 - SL/TP is best-effort
+                logger.debug("SL/TP completion skipped: %s", exc)
+
+        # --- Complete size via risk-% sizing when missing ---------------
+        size = float(proposal.get("size") or 0.0)
+        if size <= 0 and sl > 0 and entry > 0:
+            risk_pct = float(proposal.get("risk_pct") or 0.0) or DEFAULT_RISK_PCT
+            equity = float(account_state.get("equity") or account_state.get("balance") or 0.0)
+            if equity > 0:
+                point_value = (
+                    float(market_info.get("point_value") or DEFAULT_POINT_VALUE)
+                    or DEFAULT_POINT_VALUE
+                )
+                contract_size = (
+                    float(market_info.get("contract_size") or DEFAULT_CONTRACT_SIZE)
+                    or DEFAULT_CONTRACT_SIZE
+                )
+                # SL distance in "pips" = price distance / point_value.
+                sl_distance = abs(entry - sl)
+                sl_pips = sl_distance / point_value if point_value > 0 else 0.0
+                if sl_pips > 0:
+                    try:
+                        sizing = self.money_manager.calculate_lot_size(
+                            balance=equity,
+                            risk_pct=risk_pct,
+                            sl_pips=sl_pips,
+                            point_value=point_value,
+                            contract_size=contract_size,
+                            equity=equity,
+                        )
+                        lot = float(getattr(sizing, "lot_size", 0.0) or 0.0)
+                        if lot > 0:
+                            proposal["size"] = round(lot, 2)
+                            proposal["risk_pct"] = risk_pct
+                    except Exception as exc:  # noqa: BLE001 - sizing is best-effort
+                        logger.debug("Position sizing skipped: %s", exc)
 
     def _build_order_request(
         self,

@@ -646,6 +646,27 @@ class ExecutionEngine:
             position_opened=self.sync_position(request.symbol),
         )
 
+    def _native_execution_armed(self) -> bool:
+        """Return True only when an operator-armed execution terminal is present.
+
+        A native ``mt5.order_send`` is a real broker order, so it must be gated
+        by the operator arm switch (``mt5.terminals.execution_permitted``), which
+        is itself fail-closed. Any doubt → False. Both import paths are checked
+        because the FastAPI app imports ``src.mt5`` while tests import ``mt5``.
+        """
+        for mod_name in ("mt5.terminals", "src.mt5.terminals"):
+            try:
+                import importlib
+
+                terms = importlib.import_module(mod_name)
+                return bool(terms.execution_permitted())
+            except ImportError:
+                continue
+            except Exception as exc:  # noqa: BLE001 - any doubt → stay blocked
+                logger.warning("Execution arm check failed (blocked): %s", exc)
+                return False
+        return False
+
     def _is_transient_error(self, code: int, message: str) -> bool:
         """Determine if an error code or message represents a transient failure.
 
@@ -704,95 +725,76 @@ class ExecutionEngine:
                 return self._parse_send_result(res)
 
         # 2. MetaTrader5 native library integration
-        # SAFETY: never send real orders when the connector is attached to a
-        # running terminal in read-only live-data mode (see mt5.connector).
-        # Check both import paths — the FastAPI app imports ``src.mt5`` while
-        # tests import ``mt5``, and they are distinct module instances.
-        _live_data_block = False
-        for _mod_name in ("mt5.connector", "src.mt5.connector"):
-            try:
-                import importlib
-
-                _conn = importlib.import_module(_mod_name)
-                if _conn.is_live_mode():
-                    _live_data_block = True
-                    break
-            except ImportError:
-                continue
-
-        if _live_data_block:
-            # Run 24: live mode is read-only UNLESS the operator explicitly
-            # armed a valid execution terminal via the dashboard. Fail-closed:
-            # any doubt (no selection, not running, not attached, not
-            # execution-enabled) keeps real orders blocked.
-            _armed = False
-            for _mod_name in ("mt5.terminals", "src.mt5.terminals"):
-                try:
-                    import importlib
-
-                    _terms = importlib.import_module(_mod_name)
-                    if _terms.execution_permitted():
-                        _armed = True
-                        break
-                except ImportError:
-                    continue
-
-            if not _armed:
+        # SAFETY: a native ``mt5.order_send`` is a REAL broker order. It must
+        # NEVER be called unless the operator has explicitly ARMED a valid
+        # execution terminal via the dashboard — regardless of whether the
+        # connector is attached in read-only live-data mode. This closes the hole
+        # where an importable ``MetaTrader5`` (a real terminal present) let the
+        # engine call ``order_send`` without the arm gate or ``initialize()`` —
+        # which returned ``None`` → a confusing ``error_code=0``.
+        # Fail-closed: any doubt (module missing, no selection, not running, not
+        # attached, not execution-enabled) keeps real orders blocked.
+        try:
+            import MetaTrader5 as mt5
+        except ImportError:
+            # Native MetaTrader5 is genuinely unavailable (no terminal). This is
+            # NOT a broker error — fall through to the simulation/honest-failure
+            # decision below (audit P0-2).
+            logger.debug("Native MT5 library not available; no live broker path.")
+        else:
+            if not self._native_execution_armed():
                 logger.warning(
-                    "Execution blocked: MT5 live-data (read-only) mode is active — "
-                    "native order_send is disabled."
+                    "Execution blocked: no armed MT5 execution terminal — native "
+                    "order_send is disabled (fail-closed)."
                 )
                 return {
                     "success": False,
                     "ticket": None,
-                    "error_code": 1,
-                    "message": "LIVE DATA MODE (read-only) — order execution disabled.",
+                    "error_code": 403,
+                    "message": (
+                        "EXECUTION NOT ARMED — no operator-armed terminal; native "
+                        "order_send is disabled."
+                    ),
                     "price": None,
                 }
+            try:
+                order_type_mt5 = (
+                    mt5.ORDER_TYPE_BUY
+                    if request.order_type.upper() == "BUY"
+                    else mt5.ORDER_TYPE_SELL
+                )
+                price = request.price
+                if price <= 0:
+                    tick = mt5.symbol_info_tick(request.symbol)
+                    if tick:
+                        price = tick.ask if request.order_type.upper() == "BUY" else tick.bid
 
-        try:
-            import MetaTrader5 as mt5
-
-            order_type_mt5 = (
-                mt5.ORDER_TYPE_BUY if request.order_type.upper() == "BUY" else mt5.ORDER_TYPE_SELL
-            )
-            price = request.price
-            if price <= 0:
-                tick = mt5.symbol_info_tick(request.symbol)
-                if tick:
-                    price = tick.ask if request.order_type.upper() == "BUY" else tick.bid
-
-            payload = {
-                "action": mt5.TRADE_ACTION_DEAL,
-                "symbol": request.symbol,
-                "volume": request.volume,
-                "type": order_type_mt5,
-                "price": price,
-                "sl": request.sl,
-                "tp": request.tp,
-                "magic": request.magic,
-                "comment": request.comment,
-                "type_time": mt5.ORDER_TIME_GTC,
-            }
-            res = mt5.order_send(payload)
-            return self._parse_send_result(res)
-
-        except ImportError:
-            # Native MetaTrader5 is genuinely unavailable (no terminal). This is
-            # NOT a broker error — fall through to the simulation/honest-failure
-            # decision below.
-            logger.debug("Native MT5 library not available; no live broker path.")
-        except Exception as exc:
-            # The native send was attempted AND raised. NEVER fabricate success
-            # here: report the real failure so the caller/risk layer sees it.
-            logger.warning("Native MT5 order_send raised: %s", exc)
-            return {
-                "success": False,
-                "ticket": None,
-                "error_code": -1,
-                "message": f"Native MT5 send failed: {exc}",
-                "price": None,
-            }
+                payload = {
+                    "action": mt5.TRADE_ACTION_DEAL,
+                    "symbol": request.symbol,
+                    "volume": request.volume,
+                    "type": order_type_mt5,
+                    "price": price,
+                    "sl": request.sl,
+                    "tp": request.tp,
+                    "magic": request.magic,
+                    "comment": request.comment,
+                    "type_time": mt5.ORDER_TIME_GTC,
+                }
+                res = mt5.order_send(payload)
+                return self._parse_send_result(res)
+            except Exception as exc:
+                # The native send was attempted AND raised. NEVER fabricate
+                # success here: report the real failure so the caller/risk layer
+                # sees it.
+                logger.warning("Native MT5 order_send raised: %s", exc)
+                return {
+                    "success": False,
+                    "ticket": None,
+                    "error_code": -1,
+                    "message": f"Native MT5 send failed: {exc}",
+                    "price": None,
+                }
 
         # 3. No live broker path. Simulation is EXPLICIT opt-in only; default is
         # an honest failure with no fabricated ticket (audit P0-2).

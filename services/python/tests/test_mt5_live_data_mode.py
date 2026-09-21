@@ -401,4 +401,7 @@ class TestEngineNativeGuard:
         result = engine._send_to_mt5(request)
 
         assert result["success"] is False
-        assert "read-only" in result["message"].lower()
+        # The native send must be blocked (no terminal armed). The message now
+        # names the root cause — the arm gate — since a native order_send is a
+        # real broker order regardless of read-only live-data mode.
+        assert "armed" in result["message"].lower()
