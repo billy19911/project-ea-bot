@@ -146,7 +146,13 @@ export default function NewsPage() {
 
         {/* Day tabs */}
         <div className={styles.tabs} role="tablist" aria-label="Days">
-          {tabs.length === 0 && <span className={styles.empty}>{loaded ? 'Tidak ada event USD.' : 'Memuat…'}</span>}
+          {tabs.length === 0 && (
+            <span className={styles.empty}>
+              {loaded
+                ? 'Tidak ada event USD. Sumber kalender ekonomi mungkin sedang membatasi akses (rate limit) — coba muat ulang beberapa saat lagi.'
+                : 'Memuat…'}
+            </span>
+          )}
           {tabs.map((t) => (
             <button
               key={t.key}
@@ -270,8 +276,7 @@ export default function NewsPage() {
                 <tr>
                   <td colSpan={6} className={styles.empty}>
                     {loaded ? 'Tidak ada event pada hari ini.' : 'Memuat…'}
-                  </td>
-                </tr>
+                  </td>                </tr>
               )}
             </tbody>
           </table>
