@@ -6,13 +6,18 @@ import { apiFetch } from '../../lib/api';
 import AppShell from '../../components/AppShell';
 
 type AgentStatus = 'active' | 'idle' | 'error';
-type AgentNode = { 
-  name: string; 
-  type: string; 
-  status: AgentStatus; 
-  priority: number;
-  lastActive?: string;
-  errorCount: number;
+type AgentNode = {
+  name: string;
+  type: string;
+  status: AgentStatus;
+  priority: number | null;
+  // REAL runtime metrics from the activity tracker.
+  invocations: number;
+  errors: number;
+  errorRate: number;
+  avgConfidence: number | null;
+  lastActive: string | null;
+  signalCounts: Record<string, number>;
 };
 type ActivityLog = { 
   id: string; 
@@ -216,9 +221,21 @@ export default function AIControlPage() {
                     </span>
                   </div>
                   <div className={styles.agentCardMeta}>
-                    <span>Priority: {agent.priority}</span>
-                    {agent.lastActive && <span>Last: {agent.lastActive}</span>}
-                    {agent.errorCount > 0 && <span className={styles.errorBadge}>{agent.errorCount} error</span>}
+                    <span>Runs: {agent.invocations}</span>
+                    {agent.avgConfidence !== null && (
+                      <span>Conf: {(agent.avgConfidence * 100).toFixed(0)}%</span>
+                    )}
+                    {Object.keys(agent.signalCounts || {}).length > 0 && (
+                      <span>
+                        {Object.entries(agent.signalCounts)
+                          .map(([k, v]) => `${k[0]}${v}`)
+                          .join(' ')}
+                      </span>
+                    )}
+                    {agent.lastActive && <span>Last: {agent.lastActive.slice(11, 19)}</span>}
+                    {agent.errors > 0 && (
+                      <span className={styles.errorBadge}>{agent.errors} error</span>
+                    )}
                   </div>
                 </div>
               ))}
