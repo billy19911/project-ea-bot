@@ -15,6 +15,15 @@
   font-size: var(--fs-sm);
 }
 
+.loading {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));

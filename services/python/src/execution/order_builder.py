@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Sequence
@@ -257,11 +258,7 @@ class MismatchEvent:
     internal_val: Any
     broker_val: Any
     severity: str = "HIGH"  # CRITICAL, HIGH, WARN
-    timestamp: float = field(
-        default_factory=lambda: (
-            logging.root.handlers[0].formatter.default_time_format if logging.root.handlers else 0.0
-        )
-    )
+    timestamp: float = field(default_factory=time.time)
     resolved: bool = False
     resolution_notes: str = ""
 
@@ -344,6 +341,23 @@ class ExecutionRecoveryEngine:
                         severity="CRITICAL",
                     )
                     new_events.append(event)
+
+                # Audit P3-2: SL/TP deviation (the docstring promised this; the
+                # code previously only checked volume). A divergence between the
+                # internal ledger and the broker stops/targets is CRITICAL.
+                for field_name, mismatch_type in (("sl", "SL_MISMATCH"), ("tp", "TP_MISMATCH")):
+                    i_val = float(i_pos.get(field_name, 0.0) or 0.0)
+                    b_val = float(b_pos.get(field_name, 0.0) or 0.0)
+                    if abs(i_val - b_val) > 1e-6:
+                        new_events.append(
+                            MismatchEvent(
+                                symbol=str(i_pos.get("symbol", "UNKNOWN")),
+                                mismatch_type=mismatch_type,
+                                internal_val=i_val,
+                                broker_val=b_val,
+                                severity="CRITICAL",
+                            )
+                        )
 
         self.mismatch_history.extend(new_events)
 

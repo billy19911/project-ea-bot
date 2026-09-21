@@ -40,6 +40,19 @@ Test count 1904 → **1935** (all green); black/isort/flake8 clean; Node 46/46; 
 | P2-14 | Walk-forward actually re-fits via `param_search` | `research/walk_forward_v2.py` | `test_walk_forward_v2.py` |
 | P2-15 | **DEFERRED** — durable order-state persistence (low priority; needs DB path) | — | — |
 
+## P3 fixes applied (fourth session)
+
+All six P3 cleanup items done. Test count 1935 → **1943** (all green).
+
+| # | Fix | Files | Test |
+|---|---|---|---|
+| P3-1 | `MismatchEvent.timestamp` now a real epoch float (was a format string) | `execution/order_builder.py` | `test_p3_cleanup.py` |
+| P3-2 | `audit_reconciliation` now detects SL/TP mismatch (matches its docstring) | `execution/order_builder.py` | `test_p3_cleanup.py` |
+| P3-3 | Engine symbol lookups route through the broker resolver (suffix-safe) | `execution/engine.py` | `test_p3_cleanup.py` |
+| P3-4 | Base stub agents renamed (`UnsupportedFundamentalAgent`/`UnsupportedSentimentAgent`) with distinct registry names; old names kept as aliases | `agents/base.py` | `test_dead_placeholder_agents.py` |
+| P3-5 | `ResearchInbox.transition` enforces the workflow graph (no stage skipping) | `research/scheduler.py` | `test_research_scheduler.py` |
+| P3-6 | Overview page shows a loading indicator | `apps/web/app/page.tsx`, `overview.module.css` | web tsc/lint |
+
 ---
 
 ## Implementation order (do in this sequence)

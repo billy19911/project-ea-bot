@@ -50,10 +50,12 @@ export default function OverviewPage() {
   const [data, setData] = useState<Overview | null>(null);
   const [decision, setDecision] = useState<Decision | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const [ovRes, decRes] = await Promise.all([
         apiFetch('/trading/overview'),
@@ -68,6 +70,8 @@ export default function OverviewPage() {
       setError(null);
     } catch {
       setError('Could not reach the API.');
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -86,6 +90,7 @@ export default function OverviewPage() {
     <AppShell activeKey="overview" eyebrow="Xynn / Overview" title="Command Center">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
+        {loading && !data && <div className={styles.loading}>Loading overview…</div>}
 
         {/* KPI row */}
         <div className={styles.grid}>

@@ -40,6 +40,22 @@ class InboxStatus(str, Enum):
     REJECTED = "REJECTED"
 
 
+# Allowed workflow transitions (audit P3-5). VALIDATED/REJECTED are terminal.
+_ALLOWED_TRANSITIONS: dict[str, tuple[str, ...]] = {
+    InboxStatus.NEW.value: (InboxStatus.REVIEWING.value, InboxStatus.REJECTED.value),
+    InboxStatus.REVIEWING.value: (
+        InboxStatus.EXPERIMENT.value,
+        InboxStatus.REJECTED.value,
+    ),
+    InboxStatus.EXPERIMENT.value: (
+        InboxStatus.VALIDATED.value,
+        InboxStatus.REJECTED.value,
+    ),
+    InboxStatus.VALIDATED.value: (),
+    InboxStatus.REJECTED.value: (),
+}
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -118,12 +134,23 @@ class ResearchInbox:
         return [i for i in self.all() if i.status == status]
 
     def transition(self, item_id: str, new_status: str, actor: str = "system") -> ResearchItem:
-        """Move an item through the inbox workflow (validated transitions only)."""
+        """Move an item through the inbox workflow (validated transitions only).
+
+        Audit P3-5: only transitions defined in the workflow graph are allowed
+        (NEW → REVIEWING/REJECTED → … → VALIDATED/REJECTED). An illegal jump
+        raises ``ValueError`` so the workflow can no longer skip stages.
+        """
         item = self._items.get(item_id)
         if item is None:
             raise ValueError(f"Unknown research item: {item_id}")
         if new_status not in {s.value for s in InboxStatus}:
             raise ValueError(f"Unknown inbox status: {new_status}")
+        allowed = _ALLOWED_TRANSITIONS.get(item.status, ())
+        if new_status not in allowed:
+            raise ValueError(
+                f"Invalid inbox transition: {item.status} → {new_status} "
+                f"(allowed: {', '.join(allowed) or 'none'})"
+            )
         item.status = new_status
         item.history.append({"status": new_status, "actor": actor, "timestamp": _now()})
         return item

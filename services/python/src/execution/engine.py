@@ -222,7 +222,10 @@ class ExecutionEngine:
             errors.append("Symbol cannot be empty")
             symbol_clean = ""
         else:
-            symbol_clean = request.symbol.strip().upper()
+            # Audit P3-3: resolve broker suffixes (XAUUSD ↔ XAUUSDc) so a base
+            # symbol still validates against the broker's naming. Fail-safe:
+            # returns the input unchanged when resolution is impossible.
+            symbol_clean = self._resolve_symbol(request.symbol)
 
         symbol_info = None
         if symbol_clean and self._has_symbol_lookup():
@@ -529,7 +532,7 @@ class ExecutionEngine:
             Dict summarizing positions count, total volume, buy/sell volumes,
             net volume, unrealized PnL, and individual position records.
         """
-        sym_clean = symbol.strip().upper() if symbol else ""
+        sym_clean = self._resolve_symbol(symbol) if symbol else ""
         positions = self._get_all_positions()
 
         matching_positions: list[dict[str, Any]] = []
@@ -842,6 +845,29 @@ class ExecutionEngine:
             hasattr(self.mt5_connector, method)
             for method in ("get_symbol_info", "symbol_info", "get_symbols")
         )
+
+    def _resolve_symbol(self, symbol: str) -> str:
+        """Resolve a base symbol to the broker's actual name (audit P3-3).
+
+        Uses ``mt5.symbol_resolver.resolve_symbol`` so a base like ``XAUUSD``
+        maps to the broker's ``XAUUSDc`` (and vice-versa). Fail-safe: returns the
+        upper-cased input unchanged when resolution is unavailable.
+        """
+        clean = (symbol or "").strip().upper()
+        if not clean:
+            return clean
+        for mod_name in ("mt5.symbol_resolver", "src.mt5.symbol_resolver"):
+            try:
+                import importlib
+
+                resolved = importlib.import_module(mod_name).resolve_symbol(clean)
+                if resolved:
+                    return str(resolved).upper()
+            except ImportError:
+                continue
+            except Exception:  # noqa: BLE001 - resolution is best-effort
+                break
+        return clean
 
     def _get_symbol_info(self, symbol: str) -> Any:
         """Fetch symbol metadata from connector or MT5."""

@@ -426,19 +426,23 @@ class TechnicalAnalystAgent(BaseAgent):
         return "unknown"
 
 
-class FundamentalAnalystAgent(BaseAgent):
+class UnsupportedFundamentalAgent(BaseAgent):
     """Fundamental analyst agent — honest UNSUPPORTED stub (PRD_V2 §25).
 
-    Fundamental data feeds (economic calendar, earnings) are not wired yet.
-    Rather than fabricate a neutral recommendation that looks like real
-    analysis, this agent returns an explicit ``UNSUPPORTED`` status with
-    ``confidence`` 0.0 so the Supervisor and downstream consumers can tell the
-    difference between "no signal" and "not implemented".
+    Fundamental data feeds (economic calendar, earnings) are not wired. Rather
+    than fabricate a neutral recommendation that looks like real analysis, this
+    agent returns an explicit ``UNSUPPORTED`` status with ``confidence`` 0.0.
+
+    Audit P3-4: renamed from ``FundamentalAnalystAgent`` to avoid a name clash
+    with the REAL deterministic analyst in
+    :mod:`agents.analysts.fundamental_analyst` (same class name, opposite
+    behaviour). The agent ``name`` is ``unsupported_fundamental`` so it can
+    never collide with the real ``fundamental_analyst`` in the registry.
     """
 
     def __init__(self) -> None:
         super().__init__(
-            name="fundamental_analyst",
+            name="unsupported_fundamental",
             agent_type="fundamental",
             description="Fundamental analysis agent (UNSUPPORTED — data feeds not wired)",
             priority=AgentPriority.NORMAL,
@@ -461,16 +465,19 @@ class FundamentalAnalystAgent(BaseAgent):
         }
 
 
-class SentimentAnalystAgent(BaseAgent):
+class UnsupportedSentimentAgent(BaseAgent):
     """Sentiment analyst agent — honest UNSUPPORTED stub (PRD_V2 §25).
 
     News/social sentiment feeds are not wired yet. Returns an explicit
     ``UNSUPPORTED`` status instead of fabricated neutral data.
+
+    Audit P3-4: renamed from ``SentimentAnalystAgent`` for clarity; agent
+    ``name`` is ``unsupported_sentiment``.
     """
 
     def __init__(self) -> None:
         super().__init__(
-            name="sentiment_analyst",
+            name="unsupported_sentiment",
             agent_type="sentiment",
             description="Sentiment analysis agent (UNSUPPORTED — data feeds not wired)",
             priority=AgentPriority.NORMAL,
@@ -491,3 +498,13 @@ class SentimentAnalystAgent(BaseAgent):
             "reasons": ["Sentiment analysis is not implemented"],
             "event_count": len(context.get("detected_events", []) or []),
         }
+
+
+# ---------------------------------------------------------------------------
+# Backwards-compatibility aliases (audit P3-4)
+# ---------------------------------------------------------------------------
+# The old names are kept so existing imports keep working, but they now map to
+# the clearly-named UNSUPPORTED stubs above. New code should import the REAL
+# analysts from ``agents.analysts``.
+FundamentalAnalystAgent = UnsupportedFundamentalAgent
+SentimentAnalystAgent = UnsupportedSentimentAgent

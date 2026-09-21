@@ -14,6 +14,8 @@
 > **SECOND UPDATE (same session):** All six **P1** issues AND the P0-3 follow-up (real reconciliation providers) were then **fixed** with isolated changes and regression tests. Test count 1860 → **1904** (all green); black/isort/flake8 clean. Remaining open: **P2/P3** only. See §12 "P1 fixes applied".
 >
 > **THIRD UPDATE (same session):** **P2-1 … P2-14** were then **fixed** (isolated changes + tests); **P2-15** (durable order-state persistence) is **DEFERRED** as low-priority and needing a DB write path. Test count 1904 → **1935** (all green); Node 46/46; web tsc/lint clean. Remaining open: **P3** only. See §13 "P2 fixes applied".
+>
+> **FOURTH UPDATE (same session):** All six **P3** cleanup items were then **fixed**. Test count 1935 → **1943** (all green). **The only remaining open item is P2-15 (deferred).** See §14 "P3 fixes applied".
 
 ---
 
@@ -506,6 +508,41 @@ P2-1 … P2-14 fixed with isolated changes + regression tests. **P2-15** (durabl
 ### Residual / deferred
 - **P2-15** durable order-state persistence: DEFERRED (needs a DB write path; not small/isolated).
 - WS query-string token is still accepted as a fallback for compatibility, but the frontend no longer uses it.
+
+---
+
+## 14. P3 fixes applied (same session, fourth pass)
+
+All six low-priority cleanup items fixed.
+
+| # | Fix | Files |
+|---|---|---|
+| P3-1 | `MismatchEvent.timestamp` real epoch float (was a `%H:%M:%S` format string) | `execution/order_builder.py` |
+| P3-2 | `audit_reconciliation` detects SL/TP mismatch (honours its docstring) | `execution/order_builder.py` |
+| P3-3 | `ExecutionEngine` resolves broker symbol suffixes via `symbol_resolver` | `execution/engine.py` |
+| P3-4 | Base stub agents renamed with distinct registry names; aliases kept | `agents/base.py` |
+| P3-5 | `ResearchInbox.transition` enforces the workflow graph | `research/scheduler.py` |
+| P3-6 | Overview page loading indicator | `apps/web/app/page.tsx`, `overview.module.css` |
+
+### Verification
+- Python tests: **1943 passed, 0 failed** (was 1935; +8 new).
+- Node API build clean; web `tsc` + lint clean; `black`/`isort`/`flake8` clean.
+
+### Remaining open
+- **P2-15** — durable order-state persistence (deferred; needs a DB write path).
+
+---
+
+## 15. Final status
+
+| Priority | Total | Fixed | Deferred |
+|---|---|---|---|
+| P0 (critical) | 3 | 3 | 0 |
+| P1 (high) | 6 (+1 follow-up) | 7 | 0 |
+| P2 (medium) | 15 | 14 | 1 (P2-15) |
+| P3 (low) | 6 | 6 | 0 |
+
+**Test suite: 1843 → 1943** across the four fix sessions; all green. `black`/`isort`/`flake8` clean; Node 46/46; web `tsc`/lint clean. The single deferred item (P2-15) is a low-priority durability enhancement requiring a DB write path.
 
 
 

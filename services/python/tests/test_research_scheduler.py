@@ -76,6 +76,27 @@ def test_inbox_unknown_status_rejected() -> None:
         inbox.transition(item.item_id, "BOGUS")
 
 
+def test_inbox_illegal_transition_rejected() -> None:
+    """Audit P3-5: skipping workflow stages must be rejected."""
+    inbox = ResearchInbox()
+    item = inbox.add("t", {})
+    # NEW → VALIDATED skips REVIEWING/EXPERIMENT → illegal.
+    with pytest.raises(ValueError):
+        inbox.transition(item.item_id, InboxStatus.VALIDATED.value)
+    assert item.status == InboxStatus.NEW.value
+
+
+def test_inbox_terminal_state_has_no_transitions() -> None:
+    """VALIDATED is terminal — no further transitions allowed."""
+    inbox = ResearchInbox()
+    item = inbox.add("t", {})
+    inbox.transition(item.item_id, InboxStatus.REVIEWING.value)
+    inbox.transition(item.item_id, InboxStatus.EXPERIMENT.value)
+    inbox.transition(item.item_id, InboxStatus.VALIDATED.value)
+    with pytest.raises(ValueError):
+        inbox.transition(item.item_id, InboxStatus.REJECTED.value)
+
+
 def test_runner_failure_does_not_break_scheduler() -> None:
     def boom(_task: ResearchTask) -> dict:
         raise RuntimeError("boom")

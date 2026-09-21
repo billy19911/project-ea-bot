@@ -48,8 +48,10 @@ def test_registry_still_works_with_placeholders():
         registry.register(FundamentalAnalystAgent())
         registry.register(SentimentAnalystAgent())
         assert registry.count() == 3
-        assert registry.get("fundamental_analyst") is not None
-        assert registry.get("sentiment_analyst") is not None
+        # Audit P3-4: the UNSUPPORTED stubs now have distinct names so they can
+        # never collide with the REAL analysts registered from agents.analysts.
+        assert registry.get("unsupported_fundamental") is not None
+        assert registry.get("unsupported_sentiment") is not None
     finally:
         AgentRegistry.reset()
 
