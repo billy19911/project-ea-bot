@@ -527,3 +527,62 @@ def test_native_send_error_is_reported_not_simulated():
     assert result.success is False
     assert result.ticket is None
     assert "broker exploded" in result.error_message
+
+
+# ---------------------------------------------------------------------------
+# Audit B-3 — the deterministic gate is executor-enforced when require_approval
+# ---------------------------------------------------------------------------
+
+
+def test_require_approval_blocks_order_without_token(monkeypatch):
+    """With require_approval, an order lacking an approval_token fails closed.
+
+    Regression guard for audit finding B-3: previously the executor had no
+    knowledge of the Risk Gate, so a direct call dispatched the order. Now the
+    executor refuses BEFORE any MT5 dispatch when approval is required.
+    """
+    import sys
+
+    engine = ExecutionEngine(mt5_connector=None, simulation_mode=True, require_approval=True)
+    monkeypatch.setitem(sys.modules, "MetaTrader5", None)
+
+    req = OrderRequest(symbol="EURUSD", order_type="BUY", volume=1.0)
+    result = engine.execute_order(req)
+
+    assert result.success is False
+    assert result.ticket is None
+    assert result.error_code == 403
+    assert "approval_token" in result.error_message
+
+
+def test_require_approval_allows_order_with_token(monkeypatch):
+    """A gate-stamped approval_token lets the order proceed (simulated)."""
+    import sys
+
+    engine = ExecutionEngine(mt5_connector=None, simulation_mode=True, require_approval=True)
+    monkeypatch.setitem(sys.modules, "MetaTrader5", None)
+
+    req = OrderRequest(
+        symbol="EURUSD",
+        order_type="BUY",
+        volume=1.0,
+        approval_token="gate:dec-test",
+    )
+    result = engine.execute_order(req)
+
+    assert result.success is True
+    assert result.ticket is not None
+
+
+def test_require_approval_defaults_off_for_backwards_compatibility(monkeypatch):
+    """The default engine (no require_approval) keeps prior behaviour."""
+    import sys
+
+    engine = ExecutionEngine(mt5_connector=None, simulation_mode=True)
+    monkeypatch.setitem(sys.modules, "MetaTrader5", None)
+
+    req = OrderRequest(symbol="EURUSD", order_type="BUY", volume=1.0)
+    result = engine.execute_order(req)
+
+    # No approval required by default → simulated success unchanged.
+    assert result.success is True

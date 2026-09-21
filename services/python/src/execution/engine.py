@@ -82,6 +82,15 @@ class OrderRequest:
     magic: int = 0
     comment: str = ""
     idempotency_key: str = field(default_factory=lambda: str(uuid.uuid4()))
+    approval_token: Optional[str] = None
+    """Gate-issued approval marker (audit B-3).
+
+    When ``ExecutionEngine(require_approval=True)`` is set, ``execute_order``
+    refuses to dispatch an order whose ``approval_token`` is empty. Only the
+    deterministic pipeline, *after* the Risk Gate approves, stamps this token —
+    so a direct call to the executor (or an un-gated order surface) fails
+    closed instead of reaching MT5.
+    """
 
 
 @dataclass
@@ -125,6 +134,7 @@ class ExecutionEngine:
         max_volume: float = 100.0,
         simulation_mode: bool = False,
         order_locator: Optional[Callable[[OrderRequest], Optional[dict[str, Any]]]] = None,
+        require_approval: bool = False,
     ) -> None:
         """Initialize the Execution Engine.
 
@@ -147,6 +157,12 @@ class ExecutionEngine:
                 retries idempotent against LOST RESPONSES (audit P1-1): if a
                 prior attempt actually landed but its reply was lost, the retry
                 adopts that fill instead of sending a duplicate order.
+            require_approval: When True (audit B-3), ``execute_order`` refuses to
+                dispatch any order whose ``approval_token`` is empty, failing
+                closed with an honest error. The production runtime opts in so
+                the deterministic Risk Gate becomes an *executor-enforced*
+                boundary, not merely a caller convention. Defaults to **False**
+                to preserve existing direct/test usage.
         """
         self.mt5_connector = mt5_connector
         self.max_retries = max(0, max_retries)
@@ -156,6 +172,7 @@ class ExecutionEngine:
         self.max_volume = max_volume
         self.simulation_mode = bool(simulation_mode)
         self.order_locator = order_locator
+        self.require_approval = bool(require_approval)
 
         # In-memory tracking for pending and completed orders
         self._pending_orders: dict[str, float] = {}
@@ -323,6 +340,27 @@ class ExecutionEngine:
         # Ensure idempotency key exists
         if not request.idempotency_key:
             request.idempotency_key = str(uuid.uuid4())
+
+        # Audit B-3: make the deterministic Risk Gate an executor-enforced
+        # boundary. When the engine is configured to require approval, an order
+        # without a gate-issued token is refused BEFORE any MT5 dispatch. This
+        # fails closed for direct callers / un-gated order surfaces.
+        if self.require_approval and not getattr(request, "approval_token", None):
+            msg = (
+                "Execution rejected: require_approval is enabled but the order "
+                "carries no gate-issued approval_token (fail-closed). Only the "
+                "deterministic pipeline may stamp approval after the Risk Gate."
+            )
+            logger.warning(msg)
+            set_order(request.idempotency_key, OrderState.UNKNOWN)
+            return ExecutionResult(
+                success=False,
+                ticket=None,
+                error_code=403,
+                error_message=msg,
+                retries=0,
+                position_opened=None,
+            )
 
         # Check duplicate submission
         if self._is_duplicate(request.idempotency_key):

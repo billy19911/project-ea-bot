@@ -396,6 +396,12 @@ class TradingPipeline:
             self._finalise(result)
             return result
 
+        # Audit B-3: stamp the gate-issued approval token. Reaching this point
+        # means the deterministic Risk Gate returned approved=True AND both the
+        # dependency and reconciliation guards passed. The token lets an
+        # ``ExecutionEngine(require_approval=True)`` enforce the boundary itself.
+        request.approval_token = f"gate:{result.decision_id}"
+
         result.client_order_id = request.idempotency_key
         result.execution_id = _new_id("exec")
 

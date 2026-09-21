@@ -433,5 +433,37 @@ class TestReconciliationGate:
         assert engine.calls == []
 
 
+# ---------------------------------------------------------------------------
+# Audit B-3 — the pipeline stamps a gate-issued approval_token
+# ---------------------------------------------------------------------------
+class TestApprovalToken:
+    def test_approved_order_carries_approval_token(self):
+        """An executed order must carry the gate-issued approval_token (B-3).
+
+        This lets an ``ExecutionEngine(require_approval=True)`` enforce the
+        deterministic gate at the executor, not just at the pipeline.
+        """
+        engine = FakeExecutionEngine(_ExecResult())
+        result = _pipeline(FakeSupervisor(_synthesis()), FakeRiskGate(_approved()), engine).run(
+            _event(), _context()
+        )
+
+        assert result.status == "EXECUTED"
+        assert len(engine.calls) == 1
+        order = engine.calls[0]
+        assert getattr(order, "approval_token", None)
+        assert order.approval_token.startswith("gate:")
+
+    def test_rejected_order_never_reaches_engine(self):
+        """A rejected proposal must not produce an order at all (no token)."""
+        engine = FakeExecutionEngine(_ExecResult())
+        result = _pipeline(FakeSupervisor(_synthesis()), FakeRiskGate(_rejected()), engine).run(
+            _event(), _context()
+        )
+
+        assert result.status == "BLOCKED"
+        assert engine.calls == []
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))

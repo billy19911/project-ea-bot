@@ -79,6 +79,31 @@ def _default_symbol_spec_provider():
     return _provider
 
 
+def _build_position_monitor() -> Optional[Any]:
+    """Build a read-only position monitor wired to the review/learning loop.
+
+    Audit B-6: the production runtime never closed positions and the paper engine
+    is unwired, so the trade-close → review → lesson leg never fired. This builds
+    a :class:`PositionMonitor` with a :class:`PositionCloseDetector` whose
+    ``on_close`` fires the process-wide :class:`ReviewAutoTrigger` (configured in
+    ``main.py`` to persist lessons). It is **observation-only**: it reads the
+    broker's open positions each cycle and only detects DISAPPEARED tickets — it
+    never places, modifies, or closes anything.
+
+    Fail-safe: any import/wiring error returns ``None`` (the loop is unaffected).
+    """
+    try:
+        from monitoring.position_monitor import PositionMonitor
+        from review.auto_trigger import on_position_closed
+        from review.close_detector import PositionCloseDetector
+
+        detector = PositionCloseDetector(on_close=on_position_closed)
+        return PositionMonitor(close_detector=detector)
+    except Exception as exc:  # noqa: BLE001 - monitoring must never block wiring
+        logger.warning("Position monitor not wired: %s", exc)
+        return None
+
+
 def _notify_cycle_result(result: Any) -> None:
     """Offer one finished cycle to the Telegram notifier (fail-safe).
 
@@ -123,6 +148,9 @@ class _RecordingPipelineProxy:
                 self._runtime._record_execution_outcome(record)
                 self._runtime._record_decision(record)
                 self._runtime._record_trace(record)
+                # Audit B-6: scheduler-driven cycles also observe positions so the
+                # close → review → lesson loop runs without manual API calls.
+                self._runtime._monitor_positions()
         except Exception as exc:  # noqa: BLE001 - recording must never break a cycle
             logger.warning("Failed to record scheduler cycle: %s", exc)
         return result
@@ -213,6 +241,9 @@ class OrchestrationRuntime:
 
         self.decision_graphs = DecisionGraphStore(max_graphs=DECISION_HISTORY_LIMIT)
         self._graph_stage = GraphStage
+        # Audit B-6: read-only position monitoring that feeds the review/learning
+        # loop when a ticket disappears (observation only; never orders).
+        self.position_monitor = _build_position_monitor()
 
     @property
     def _reconciliation_runner(self) -> ReconciliationRunner:
@@ -276,7 +307,14 @@ class OrchestrationRuntime:
         # its existing paper behaviour — but ONLY via an explicit, clearly
         # labelled simulation (audit P0-2). Without this flag a missing broker
         # path would now return an honest failure instead of a fabricated fill.
-        execution_engine = ExecutionEngine(mt5_connector=None, simulation_mode=True)
+        # Audit B-3: require a gate-issued approval_token so the deterministic
+        # Risk Gate is enforced by the executor itself (fail-closed for any
+        # direct/ungated caller), not merely by the pipeline's calling discipline.
+        execution_engine = ExecutionEngine(
+            mt5_connector=None,
+            simulation_mode=True,
+            require_approval=True,
+        )
         # Audit P1-4: normalise volume to the broker's lot step and round prices
         # to the symbol digits when a spec is available. Fail-safe: a spec lookup
         # failure leaves the order unchanged.
@@ -344,6 +382,8 @@ class OrchestrationRuntime:
             logger.warning("Telegram digest flush failed (%s)", type(exc).__name__)
         # Periodic reconciliation (PRD_V2 §14) — fail-safe, never raises.
         self._reconciliation_runner.tick()
+        # Audit B-6: observe positions to drive close → review → lesson.
+        self._monitor_positions()
         return record
 
     def _record_execution_outcome(self, record: dict[str, Any]) -> None:
@@ -365,6 +405,20 @@ class OrchestrationRuntime:
                 self.execution_guard.record_execution_result(False, detail=detail)
         except Exception as exc:  # noqa: BLE001 - guard bookkeeping is best-effort
             logger.warning("Could not record execution outcome: %s", exc)
+
+    def _monitor_positions(self) -> None:
+        """Observe open positions once per cycle to drive the review loop.
+
+        Audit B-6: feeds the read-only monitor so a closed (disappeared) ticket
+        fires the review auto-trigger → lesson store. Fail-safe: monitoring must
+        never break a cycle.
+        """
+        if self.position_monitor is None:
+            return
+        try:
+            self.position_monitor.monitor_all_positions()
+        except Exception as exc:  # noqa: BLE001 - observation is best-effort
+            logger.warning("Position monitoring failed: %s", exc)
 
     def _record_trace(self, record: dict[str, Any], trace_id: Optional[str] = None) -> None:
         """Record the cycle into the bounded trace store (fail-safe)."""
