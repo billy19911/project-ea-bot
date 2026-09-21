@@ -20,11 +20,18 @@ Design guarantees:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["AccountContextProvider", "build_connector_account_context"]
+
+# Default short TTL for the merged context. The account/positions/spread and the
+# news snapshot change slowly relative to event processing; caching it for a few
+# seconds means a burst of events does NOT re-read MT5 + the news feed per event
+# (which measured ~0.6s each). This keeps signal → execution latency low.
+DEFAULT_CONTEXT_TTL = 2.0
 
 
 def _to_dict(obj: Any) -> dict[str, Any]:
@@ -118,13 +125,34 @@ class AccountContextProvider:
         self,
         news_provider: Optional[Callable[[str], dict[str, Any]]] = None,
         account_provider: Optional[Callable[[str], dict[str, Any]]] = None,
+        cache_ttl: float = DEFAULT_CONTEXT_TTL,
+        clock: Optional[Callable[[], float]] = None,
     ) -> None:
         self._news_provider = news_provider
         self._account_provider = account_provider or build_connector_account_context
+        self._cache_ttl = max(0.0, float(cache_ttl))
+        self._clock = clock if clock is not None else time.monotonic
+        self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
     def __call__(self, event: Any) -> dict[str, Any]:
-        """Build the merged context for one event (fail-safe, never raises)."""
+        """Build the merged context for one event (fail-safe, never raises).
+
+        Results are cached per symbol for ``cache_ttl`` seconds so a burst of
+        events within one feed poll does not re-read MT5 + news each time. The
+        returned dict is a shallow copy so callers may mutate it safely.
+        """
         symbol = str(getattr(event, "symbol", "") or "")
+        now = self._clock()
+        cached = self._cache.get(symbol)
+        if cached is not None and (now - cached[0]) < self._cache_ttl:
+            return dict(cached[1])
+
+        context = self._build(symbol)
+        self._cache[symbol] = (now, context)
+        return dict(context)
+
+    def _build(self, symbol: str) -> dict[str, Any]:
+        """Assemble the context without caching (never raises)."""
         context: dict[str, Any] = {}
 
         # Account/positions/market first (deterministic risk inputs).

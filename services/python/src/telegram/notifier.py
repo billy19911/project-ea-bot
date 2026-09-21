@@ -75,6 +75,40 @@ _REASON_LABELS = {
 _gateway: Optional[TelegramGateway] = None
 _digest: Optional["PipelineDigest"] = None
 
+# The Python service can import this module under two identities
+# (``telegram.notifier`` and ``src.telegram.notifier``). A plain module-global
+# would give each identity its OWN singleton, so ``set_gateway`` on one would be
+# invisible to the other — breaking report delivery. Mirror the project's existing
+# shared-slot pattern (see ``agents/base.py``): keep the singletons in a stable
+# ``builtins`` slot so both import paths share the same object.
+_GBL_KEY = "__ea_bot_telegram_singletons__"
+
+
+def _shared_slot() -> dict[str, Any]:
+    import builtins
+
+    slot = getattr(builtins, _GBL_KEY, None)
+    if slot is None:
+        slot = {"gateway": None, "digest": None}
+        setattr(builtins, _GBL_KEY, slot)
+    return slot
+
+
+def _get_gateway_singleton() -> Optional[TelegramGateway]:
+    return _shared_slot().get("gateway")
+
+
+def _set_gateway_singleton(value: Optional[TelegramGateway]) -> None:
+    _shared_slot()["gateway"] = value
+
+
+def _get_digest_singleton() -> Optional["PipelineDigest"]:
+    return _shared_slot().get("digest")
+
+
+def _set_digest_singleton(value: Optional["PipelineDigest"]) -> None:
+    _shared_slot()["digest"] = value
+
 
 def _parse_allowlist(raw: str) -> list[str]:
     """Split a comma-separated chat-id list into trimmed non-empty items."""
@@ -104,16 +138,16 @@ def build_gateway_from_env() -> TelegramGateway:
 
 def get_gateway() -> TelegramGateway:
     """Return the process-wide gateway, building it from env on first use."""
-    global _gateway
-    if _gateway is None:
-        _gateway = build_gateway_from_env()
-    return _gateway
+    gateway = _get_gateway_singleton()
+    if gateway is None:
+        gateway = build_gateway_from_env()
+        _set_gateway_singleton(gateway)
+    return gateway
 
 
 def set_gateway(gateway: Optional[TelegramGateway]) -> None:
     """Override the process-wide gateway (used by tests / startup wiring)."""
-    global _gateway
-    _gateway = gateway
+    _set_gateway_singleton(gateway)
 
 
 # ---------------------------------------------------------------------------
@@ -235,21 +269,21 @@ def get_digest() -> Optional[PipelineDigest]:
     ``TELEGRAM_DIGEST_ENABLED=false`` — callers then deliver every report
     immediately.
     """
-    global _digest
-    if _digest is None:
+    digest = _get_digest_singleton()
+    if digest is None:
         if not _digest_enabled_from_env():
             return None
-        _digest = PipelineDigest(
+        digest = PipelineDigest(
             window_s=_float_from_env("TELEGRAM_DIGEST_WINDOW_S", _DIGEST_WINDOW_S_DEFAULT),
             max_items=int(_float_from_env("TELEGRAM_DIGEST_MAX_ITEMS", _DIGEST_MAX_ITEMS_DEFAULT)),
         )
-    return _digest
+        _set_digest_singleton(digest)
+    return digest
 
 
 def set_digest(digest: Optional[PipelineDigest]) -> None:
     """Override the process-wide digest (used by tests)."""
-    global _digest
-    _digest = digest
+    _set_digest_singleton(digest)
 
 
 def reset_digest() -> None:
@@ -500,7 +534,7 @@ def queue_pipeline_result(result: dict[str, Any]) -> bool:
 
 def flush_pipeline_digest() -> bool:
     """Send the pending digest batch now (no-op when empty or disabled)."""
-    digest = _digest
+    digest = _get_digest_singleton()
     if digest is None:
         return False
     return digest.flush()

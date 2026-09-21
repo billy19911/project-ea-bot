@@ -165,6 +165,10 @@ async def lifespan(app: FastAPI):
             timeframe=settings.market_feed_timeframe,
             interval_s=settings.market_feed_interval_s,
             event_cooldown_s=settings.market_feed_event_cooldown_s,
+            # Wake the scheduler the instant an event is enqueued so the
+            # signal → decision → execution path is not delayed by the idle
+            # poll (latency-sensitive entries).
+            on_emit=runtime.scheduler.wake,
         )
         feed_task = asyncio.create_task(feed.run())
         logger.info(

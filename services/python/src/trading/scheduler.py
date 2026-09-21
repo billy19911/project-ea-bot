@@ -72,6 +72,7 @@ class AutonomousScheduler:
 
         self._task: Optional[asyncio.Task] = None
         self._stop_event: Optional[asyncio.Event] = None
+        self._wake_event: Optional[asyncio.Event] = None
         self._running = False
 
         self._stats: dict[str, int] = {
@@ -192,8 +193,25 @@ class AutonomousScheduler:
         if self._running:
             return
         self._stop_event = asyncio.Event()
+        self._wake_event = asyncio.Event()
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
+
+    def wake(self) -> None:
+        """Signal the loop to process the queue immediately.
+
+        Called by whoever enqueues an event (e.g. the market feed loop) so the
+        signal → execution path does not wait for the ``poll_interval`` idle
+        sleep. Fail-safe: a no-op when the loop is not running (the next poll
+        still drains the queue). Never raises.
+        """
+        ev = self._wake_event
+        if ev is None:
+            return
+        try:
+            ev.set()
+        except Exception:  # noqa: BLE001 - waking is best-effort
+            pass
 
     async def stop(self) -> None:
         """Stop the async loop and await its completion (safe if not started)."""
@@ -214,6 +232,10 @@ class AutonomousScheduler:
         """The background loop body."""
         try:
             while self._running:
+                # Clear the wake flag *before* draining so an event enqueued
+                # during processing re-sets it and is picked up immediately.
+                if self._wake_event is not None:
+                    self._wake_event.clear()
                 processed = self.process_available()
                 if processed == 0:
                     await self._idle_sleep()
@@ -221,15 +243,32 @@ class AutonomousScheduler:
             raise
 
     async def _idle_sleep(self) -> None:
-        """Sleep for ``poll_interval`` or until stop is requested."""
+        """Sleep until woken by :meth:`wake`, stop is requested, or the timeout.
+
+        Waiting on the wake event (instead of a plain sleep) means a newly
+        enqueued event is processed almost immediately rather than after up to
+        ``poll_interval`` seconds — critical for latency-sensitive entries.
+        """
         stop_event = self._stop_event
+        wake_event = self._wake_event
         if stop_event is None:  # pragma: no cover - defensive
             await asyncio.sleep(self.poll_interval)
             return
+        waiters = [asyncio.ensure_future(stop_event.wait())]
+        if wake_event is not None:
+            waiters.append(asyncio.ensure_future(wake_event.wait()))
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=self.poll_interval)
-        except asyncio.TimeoutError:
-            pass
+            done, pending = await asyncio.wait(
+                waiters,
+                timeout=self.poll_interval,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for fut in pending:
+                fut.cancel()
+        except asyncio.CancelledError:  # pragma: no cover - defensive
+            for fut in waiters:
+                fut.cancel()
+            raise
 
     # ------------------------------------------------------------------
     # Stats

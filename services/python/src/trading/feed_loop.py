@@ -68,6 +68,10 @@ class MarketFeedLoop:
         event_cooldown_s: Seconds before the same ``(symbol, event_type)`` may
             be emitted again (anti-spam; default 300s).
         clock: Optional monotonic clock callable (tests inject a fake).
+        on_emit: Optional zero-arg callback invoked right after at least one
+            event is routed. Used to WAKE the scheduler immediately so the
+            signal → execution path is not delayed by the idle poll. Fail-safe:
+            a raising callback is swallowed.
     """
 
     def __init__(
@@ -82,6 +86,7 @@ class MarketFeedLoop:
         detector_factory: Optional[Callable[[], Any]] = None,
         event_cooldown_s: float = 300.0,
         clock: Optional[Callable[[], float]] = None,
+        on_emit: Optional[Callable[[], None]] = None,
     ) -> None:
         self.queue = queue
         self.symbols = [str(s).strip() for s in (symbols or []) if str(s).strip()]
@@ -91,6 +96,7 @@ class MarketFeedLoop:
         self.event_cooldown_s = float(event_cooldown_s)
         self._history = history
         self._clock = clock if clock is not None else time.monotonic
+        self._on_emit = on_emit
         self._connector = connector if connector is not None else self._default_connector()
         if detector_factory is not None:
             self._detector = detector_factory()
@@ -209,6 +215,13 @@ class MarketFeedLoop:
                 except Exception:  # noqa: BLE001 - history must never kill the loop
                     logger.warning("Market feed history add failed for %s", symbol)
             routed += 1
+        if routed and self._on_emit is not None:
+            # Wake the consumer immediately so a fresh signal is processed
+            # without waiting for the next idle poll (latency-sensitive entry).
+            try:
+                self._on_emit()
+            except Exception:  # noqa: BLE001 - waking must never kill the loop
+                logger.warning("Market feed on_emit callback failed")
         return routed
 
     def _build_snapshot(

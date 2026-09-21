@@ -150,10 +150,15 @@ async def get_market_sentiment(
 
 @router.post("/refresh")
 async def refresh_news_feed() -> dict:
-    """Force-refresh all cached news and calendar data."""
+    """Force-refresh all cached news and calendar data.
+
+    This is an *operator-initiated* refresh (dashboard button), so it clears the
+    upstream 429 cooldown (``force_network=True``) — automated polling stays
+    throttled, but a human asking for fresh data bypasses the back-off.
+    """
     provider = get_news_feed_provider()
     news = provider.fetch_news(force_refresh=True)
-    events = provider.fetch_calendar(force_refresh=True)
+    events = provider.fetch_calendar(force_refresh=True, force_network=True)
     return {
         "status": "ok",
         "news_count": len(news),

@@ -116,7 +116,10 @@ def _notify_cycle_result(result: Any) -> None:
     must never break the autonomous loop.
     """
     try:
-        from ..telegram.notifier import queue_pipeline_result
+        try:
+            from telegram.notifier import queue_pipeline_result
+        except ImportError:
+            from ..telegram.notifier import queue_pipeline_result  # type: ignore
 
         payload = result.to_dict() if hasattr(result, "to_dict") else result
         queue_pipeline_result(payload)
@@ -375,7 +378,10 @@ class OrchestrationRuntime:
         # Telegram digest now so the user sees the outcome without waiting for
         # the digest window. Fail-safe — reporting never breaks the cycle.
         try:
-            from ..telegram.notifier import flush_pipeline_digest
+            try:
+                from telegram.notifier import flush_pipeline_digest
+            except ImportError:
+                from ..telegram.notifier import flush_pipeline_digest  # type: ignore
 
             flush_pipeline_digest()
         except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
