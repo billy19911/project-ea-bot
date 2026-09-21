@@ -36,15 +36,39 @@ def _record(
 
 
 def check_database() -> dict[str, Any]:
+    """Probe the configured database, distinguishing a missing driver.
+
+    If the SQLAlchemy driver (e.g. ``psycopg2``) is not installed, this is a
+    NOT_AVAILABLE with an actionable message — not a mystery stack trace.
+    """
     try:
         from sqlalchemy import text
 
         from ..db.database import engine
+    except ModuleNotFoundError as exc:
+        return _record(
+            "database",
+            "NOT_AVAILABLE",
+            details=[
+                f"missing dependency: {exc.name} (install the DB driver, e.g. psycopg2-binary)"
+            ],
+        )
+    except Exception as exc:  # pragma: no cover – config may be absent
+        return _record("database", "NOT_AVAILABLE", details=[str(exc)])
 
+    try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         return _record("database", "PASS", version="1.0")
-    except Exception as exc:  # pragma: no cover – real DB may be absent in CI
+    except ModuleNotFoundError as exc:  # driver imported lazily by the dialect
+        return _record(
+            "database",
+            "NOT_AVAILABLE",
+            details=[
+                f"missing dependency: {exc.name} (install the DB driver, e.g. psycopg2-binary)"
+            ],
+        )
+    except Exception as exc:  # noqa: BLE001 – real DB may be absent in CI
         return _record("database", "NOT_AVAILABLE", details=[str(exc)])
 
 
@@ -54,10 +78,30 @@ def check_python_service() -> dict[str, Any]:
 
 
 def check_node_service() -> dict[str, Any]:
-    # Node service is the web API – we cannot easily query here; assume NOT_CONFIGURED
-    return _record(
-        "node_service", "NOT_CONFIGURED", details=["Node server not queried from Python"]
-    )
+    """Probe the Node control-plane API instead of reporting a fixed stub.
+
+    The Node API URL comes from ``NODE_API_URL`` (falling back to the same
+    ``EA_API_URL`` the web uses, then the loopback default port). A short HTTP
+    probe determines PASS/FAIL. When the URL is unset the check is honestly
+    NOT_CONFIGURED rather than a hardcoded value.
+    """
+    import os
+
+    url = (
+        os.getenv("NODE_API_URL")
+        or os.getenv("EA_API_URL")
+        or f"http://127.0.0.1:{os.getenv('NODE_PORT', '3789')}"
+    ).rstrip("/")
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(f"{url}/health", timeout=2.0) as resp:  # noqa: S310
+            status = getattr(resp, "status", 200)
+        if 200 <= int(status) < 400:
+            return _record("node_service", "PASS", version="1.0", details=[f"health ok @ {url}"])
+        return _record("node_service", "FAIL", details=[f"health {status} @ {url}"])
+    except Exception as exc:  # noqa: BLE001 - unreachable/bad URL → not configured
+        return _record("node_service", "NOT_CONFIGURED", details=[f"unreachable @ {url}: {exc}"])
 
 
 def check_web_service() -> dict[str, Any]:

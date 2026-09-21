@@ -19,6 +19,15 @@ type TerminalState = { label: string; running: boolean; armed: boolean };
 type AccountState = { login: number | null; server: string; mode: AccountMode | null };
 
 function mapTradeMode(raw: unknown): AccountMode | null {
+  // MetaTrader5 ACCOUNT_TRADE_MODE enum (returned by the connector as a string):
+  //   0 = DEMO, 1 = CONTEST, 2 = REAL (a.k.a. LIVE).
+  // Some surfaces instead pass a human string ("DEMO"/"LIVE"/"REAL"); handle both
+  // so the environment badge can never be stuck on UNKNOWN.
+  const numeric = typeof raw === 'number' ? String(raw) : typeof raw === 'string' ? raw.trim() : '';
+  if (numeric === '0') return 'DEMO';
+  if (numeric === '1') return 'CONTEST';
+  if (numeric === '2') return 'LIVE';
+
   if (typeof raw !== 'string') return null;
   const value = raw.toUpperCase();
   if (value.includes('LIVE') || value.includes('REAL')) return 'LIVE';
