@@ -6,6 +6,20 @@
 
 > Rule: do NOT implement P1/P2/P3 automatically unless the change is small, isolated, and clearly safe. Each fix below lists the test that must accompany it.
 
+> **STATUS UPDATE:** P0 (all 3) and **P1 (all 6 + the P0-3 follow-up)** are now **DONE** (see below and §P1 fixes applied). Remaining: **P2/P3** only. Test count 1843 → **1904** (all green); black/isort/flake8 clean.
+
+## P1 fixes applied (this session)
+
+| # | Fix | Files | Test |
+|---|---|---|---|
+| P1-2 | `ExecutionGuard` (breakers + kill switch) wired as pipeline `dependency_guard`; records execution outcomes | `risk/dependency_breakers.py`, `orchestration/runtime.py` | `test_execution_guard_wiring.py` |
+| P1-3 | `AccountContextProvider` supplies real account/positions/market to the scheduler context (merged with news) | `orchestration/account_context.py` (new), `runtime.py` | `test_account_context.py` |
+| P1-1 | Idempotent retry: `order_locator` adopts a landed order on lost response instead of resending | `execution/engine.py` | `test_execution_retry_idempotency.py` |
+| P0-3 f/u | `MT5ReconciliationProviders` feed real internal↔broker state (live mode only) | `execution/reconciliation_providers.py` (new), `runtime.py` | `test_reconciliation_providers.py` |
+| P1-4 | `OrderBuilder` snaps volume to `volume_step` and rounds prices to `digits` (opt-in spec provider) | `execution/order_builder.py`, `runtime.py` | `test_order_builder_normalization.py` |
+| P1-5 | Promotion gate enforced: `activate(enforce_evidence=True)` + endpoint returns 409 without evidence | `strategy/registry.py`, `strategy/endpoints.py`, `strategy/__init__.py` | `test_strategy_promotion_gate.py` |
+| P1-6 | `PositionCloseDetector` observes disappeared tickets → fires review hook (observation only, no orders) | `review/close_detector.py` (new), `monitoring/position_monitor.py` | `test_position_close_detector.py` |
+
 ---
 
 ## Implementation order (do in this sequence)

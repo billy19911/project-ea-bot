@@ -38,10 +38,16 @@ class OrderBuilder:
         default_magic: int = 70000,
         symbol_prefix: str = "",
         symbol_suffix: str = "",
+        symbol_spec_provider: Any = None,
     ) -> None:
         self.default_magic = default_magic
         self.symbol_prefix = symbol_prefix
         self.symbol_suffix = symbol_suffix
+        # Optional callable ``(symbol) -> dict`` returning broker symbol metadata
+        # (volume_step/min/max, digits). When supplied, order volume/prices are
+        # normalised to broker constraints (audit P1-4). Default None keeps the
+        # previous pass-through behaviour.
+        self.symbol_spec_provider = symbol_spec_provider
 
     def build_order_request(
         self,
@@ -137,6 +143,12 @@ class OrderBuilder:
             proposal.get("idempotency_key") or proposal.get("client_order_id") or ""
         )
 
+        # 8. Broker constraint normalisation (audit P1-4): snap the volume to a
+        # valid step and round prices to the symbol's digits when a spec is
+        # available. Any adjustment is logged; failure is non-fatal (we keep the
+        # original value rather than dropping the order).
+        volume, price, sl, tp = self._normalise_to_spec(clean_symbol, volume, price, sl, tp)
+
         kwargs: dict[str, Any] = {
             "symbol": clean_symbol,
             "order_type": order_type,
@@ -151,6 +163,76 @@ class OrderBuilder:
             kwargs["idempotency_key"] = idempotency_key
 
         return OrderRequest(**kwargs)
+
+    # ------------------------------------------------------------------
+    # Broker constraint normalisation (audit P1-4)
+    # ------------------------------------------------------------------
+    def _normalise_to_spec(
+        self,
+        symbol: str,
+        volume: float,
+        price: float,
+        sl: float,
+        tp: float,
+    ) -> tuple[float, float, float, float]:
+        """Snap volume to ``volume_step`` and round prices to ``digits``.
+
+        Only runs when a ``symbol_spec_provider`` is configured. Any error is
+        swallowed (the original values are returned) so a spec lookup failure
+        can never drop an otherwise-valid order.
+        """
+        if self.symbol_spec_provider is None:
+            return volume, price, sl, tp
+        try:
+            spec = self.symbol_spec_provider(symbol) or {}
+        except Exception as exc:  # noqa: BLE001 - spec lookup is best-effort
+            logger.warning("Symbol spec lookup failed for %s: %s", symbol, exc)
+            return volume, price, sl, tp
+        if not isinstance(spec, dict) or not spec:
+            return volume, price, sl, tp
+
+        # ── Volume: clamp to [min, max] and snap to the nearest step ────────
+        try:
+            step = float(spec.get("volume_step") or 0.0)
+            vmin = float(spec.get("volume_min") or 0.0)
+            vmax = float(spec.get("volume_max") or 0.0)
+            new_volume = float(volume)
+            if step > 0:
+                new_volume = round(new_volume / step) * step
+                # Avoid floating-point artefacts (e.g. 0.30000000000000004).
+                new_volume = round(new_volume, 8)
+            if vmin > 0 and new_volume < vmin:
+                new_volume = vmin
+            if vmax > 0 and new_volume > vmax:
+                new_volume = vmax
+            if new_volume != volume:
+                logger.info(
+                    "Volume normalised for %s: %s → %s (step=%s, min=%s, max=%s)",
+                    symbol,
+                    volume,
+                    new_volume,
+                    step,
+                    vmin,
+                    vmax,
+                )
+            volume = new_volume
+        except (TypeError, ValueError) as exc:
+            logger.warning("Volume normalisation skipped for %s: %s", symbol, exc)
+
+        # ── Prices: round to the symbol's digits ────────────────────────────
+        try:
+            digits = int(spec.get("digits")) if spec.get("digits") is not None else None
+        except (TypeError, ValueError):
+            digits = None
+        if digits is not None:
+            if price > 0:
+                price = round(price, digits)
+            if sl > 0:
+                sl = round(sl, digits)
+            if tp > 0:
+                tp = round(tp, digits)
+
+        return volume, price, sl, tp
 
 
 # ---------------------------------------------------------------------------

@@ -6,12 +6,15 @@ Phase 15 component for continuous position oversight in MetaTrader 5 trading.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
 from mt5.connector import get_ohlc, get_positions, get_tick
+
+logger = logging.getLogger(__name__)
 
 
 class Side(str, Enum):
@@ -144,6 +147,7 @@ class PositionMonitor:
         self,
         mt5_connector: Any = None,
         atr_lookback: int = 14,
+        close_detector: Any = None,
     ) -> None:
         """Initialize the Position Monitor.
 
@@ -151,9 +155,14 @@ class PositionMonitor:
             mt5_connector: Object exposing get_positions(), get_tick(symbol),
                           get_ohlc(symbol, timeframe, count). Defaults to mt5.connector.
             atr_lookback: Number of bars for ATR calculation.
+            close_detector: Optional object exposing ``observe(positions) -> list``
+                (audit P1-6). When supplied, ``monitor_all_positions`` feeds the
+                raw positions to it so disappeared tickets trigger trade review.
+                Optional so existing callers are unaffected.
         """
         self.mt5_connector = mt5_connector
         self.atr_lookback = max(1, atr_lookback)
+        self.close_detector = close_detector
 
         # In-memory state tracking
         self._position_history: dict[int, list[PositionSnapshot]] = {}
@@ -351,6 +360,16 @@ class PositionMonitor:
             List of PositionSnapshot for all open positions.
         """
         positions = self._get_positions()
+
+        # Audit P1-6: feed the raw positions to the close detector so a ticket
+        # that disappeared since the last snapshot triggers trade review (the
+        # live trade → review → learning path). Fail-safe: never break the loop.
+        if self.close_detector is not None:
+            try:
+                self.close_detector.observe(positions)
+            except Exception as exc:  # noqa: BLE001 - observation is best-effort
+                logger.warning("Close detector failed: %s", exc)
+
         snapshots: list[PositionSnapshot] = []
 
         for pos in positions:

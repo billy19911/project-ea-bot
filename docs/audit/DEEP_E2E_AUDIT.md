@@ -10,6 +10,8 @@
 > Where documentation conflicts with code, the discrepancy is reported. Anything not verifiable is marked **UNKNOWN — NOT VERIFIED**.
 
 > **POST-AUDIT UPDATE (same session):** The three P0 issues below were **fixed** with targeted, isolated changes plus regression tests. See §11 "P0 fixes applied". Test count went 1843 → 1860 (all green). P1/P2/P3 remain OPEN pending the fix plan.
+>
+> **SECOND UPDATE (same session):** All six **P1** issues AND the P0-3 follow-up (real reconciliation providers) were then **fixed** with isolated changes and regression tests. Test count 1860 → **1904** (all green); black/isort/flake8 clean. Remaining open: **P2/P3** only. See §12 "P1 fixes applied".
 
 ---
 
@@ -296,21 +298,27 @@ docs/audit/          CURRENT_STATE.md, PRD_V2_CONFORMANCE_AUDIT.md, + this audit
 
 **P1-1. Retry can duplicate a live position on lost response (Scenario F).**
 - Evidence: `engine.py:356-416` (retry re-invokes `_send_to_mt5`, incl. `CONNECTION`/`timeout` codes; no landed-order verification).
+- **STATUS: FIXED.** `ExecutionEngine.order_locator` hook: before resending on a transient error the engine consults the broker for a matching order and adopts it (idempotent) instead of duplicating. Test: `test_execution_retry_idempotency.py`.
 
 **P1-2. Breaker guards exist but are not wired into the pipeline.**
 - Evidence: `DependencyBreakers` never instantiated in prod; `MultiLevelBreaker` only in `v2_endpoints` + tests; `dependency_guard` optional and unset in `runtime.py:179-186`.
+- **STATUS: FIXED.** `ExecutionGuard` (per-dependency breakers + kill switch) is built in the runtime and passed as the pipeline `dependency_guard`; execution outcomes feed the breaker. Test: `test_execution_guard_wiring.py`.
 
 **P1-3. Risk gate runs against missing/zero account state in autonomous mode.**
-- Evidence: `pipeline.py:577-585` zeroed defaults; scheduler `context_provider` supplies news only (`runtime.py:136`). No account provider found. (Fails safe by rejecting, but is not real account-aware risk.)
+- Evidence: `pipeline.py:577-585` zeroed defaults; scheduler `context_provider` supplied news only (`runtime.py:136`). No account provider found. (Fails safe by rejecting, but is not real account-aware risk.)
+- **STATUS: FIXED.** `AccountContextProvider` reads account/positions/market from the connector (fail-safe) and merges news. Test: `test_account_context.py`.
 
 **P1-4. No lot-step / price-digits normalization before sending.**
 - Evidence: `order_builder.py:140-153`; broker specs unused. Risk of broker rejections + reconciliation noise.
+- **STATUS: FIXED.** `OrderBuilder(symbol_spec_provider=...)` snaps volume to `volume_step` within `[min,max]` and rounds price/SL/TP to `digits`; runtime wires the real spec helper. Test: `test_order_builder_normalization.py`.
 
 **P1-5. Strategy promotion gate is unenforced.**
 - Evidence: `PromotionGate.can_promote` never called; `StrategyRegistry.activate` has no evidence check; `LifecycleGovernor.propose` unreachable; `advance` requires no evidence.
+- **STATUS: FIXED.** `activate(..., enforce_evidence=True)` consults the gate (evidence read from metrics/validation); the HTTP endpoint returns 409 without evidence. Internal/bootstrap callers keep the permissive default. Test: `test_strategy_promotion_gate.py`.
 
 **P1-6. Trade-close → review → learning is not driven by live trades.**
 - Evidence: production `ExecutionEngine` has no close path; paper engine (the only auto-close path) is unwired in prod. The "learning loop from live trades" is **UNKNOWN — NOT VERIFIED**.
+- **STATUS: FIXED (observation-only bridge).** `PositionCloseDetector` diffs successive open-position snapshots and, when a ticket disappears, fires the review hook → lesson store. No orders are placed/closed. Test: `test_position_close_detector.py`.
 
 ### P2 — MEDIUM
 
@@ -435,4 +443,35 @@ All three P0 fixes were **isolated, safe, and covered by new regression tests**.
 ### Residual / follow-up (NOT fixed here — see fix plan)
 - P0-3 gate is real but the **reconciliation providers still default to no-op**; an MT5-backed provider must be supplied for the gate to see real state.
 - P0-1 is enforcement-when-configured; the operator/`.env` **must set `PYTHON_API_KEY`** in production for the protection to be active.
+
+---
+
+## 12. P1 fixes applied (same session, second pass)
+
+All six P1 items and the P0-3 follow-up were fixed with isolated changes + regression tests. No architecture change; no working module rewritten.
+
+### Files changed / added
+| File | Change |
+|---|---|
+| `risk/dependency_breakers.py` | Added `ExecutionGuard` (breakers + kill switch, `check_can_execute`, outcome recording) |
+| `orchestration/runtime.py` | Build + wire `ExecutionGuard`; add `AccountContextProvider`; add symbol-spec provider; live-only reconciliation providers; record execution outcomes |
+| `orchestration/account_context.py` | **NEW** — `AccountContextProvider` + `build_connector_account_context` (P1-3) |
+| `execution/engine.py` | `order_locator` idempotent-retry hook (P1-1) |
+| `execution/reconciliation_providers.py` | **NEW** — `MT5ReconciliationProviders` + `internal_positions_from_store` (P0-3 f/u) |
+| `execution/order_builder.py` | `symbol_spec_provider` volume/price normalisation (P1-4) |
+| `strategy/registry.py` | `PromotionError`; evidence-enforced `activate`; expanded `PromotionGate` (P1-5) |
+| `strategy/endpoints.py`, `strategy/__init__.py` | 409 on denied promotion; export `PromotionError` (P1-5) |
+| `review/close_detector.py` | **NEW** — `PositionCloseDetector` (P1-6) |
+| `monitoring/position_monitor.py` | Optional `close_detector` hook in `monitor_all_positions` (P1-6) |
+| Tests | `test_execution_guard_wiring.py`, `test_account_context.py`, `test_execution_retry_idempotency.py`, `test_reconciliation_providers.py`, `test_order_builder_normalization.py`, `test_strategy_promotion_gate.py`, `test_position_close_detector.py` (all new) |
+
+### Verification
+- Python tests: **1904 passed, 0 failed** (was 1860; +44 new).
+- `black --check` clean (324 files); `isort --check` clean; `flake8` clean.
+
+### Residual (intentional / operational)
+- The close→review bridge is **observation-only** — it does not close positions (closing live positions was judged out of scope and too dangerous to automate).
+- Reconciliation gate sees real data **only in MT5 live mode** (paper mode keeps no-op providers to avoid a permanent false positive from simulated positions).
+- `PYTHON_API_KEY` (P0-1) and terminal arming still require operator configuration to be effective.
+
 

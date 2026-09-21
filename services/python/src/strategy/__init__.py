@@ -2,6 +2,7 @@
 """Strategy versioning and promotion module (EPIC 13)."""
 
 from .registry import (
+    PromotionError,
     PromotionGate,
     PromotionResult,
     StrategyRegistry,
@@ -10,6 +11,7 @@ from .registry import (
 )
 
 __all__ = [
+    "PromotionError",
     "PromotionGate",
     "PromotionResult",
     "StrategyRegistry",

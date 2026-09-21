@@ -29,12 +29,14 @@ from execution.reconciliation_runner import (
 )
 from market.news_feed import get_news_feed_provider
 from observability.traces import TraceCollector
+from risk.dependency_breakers import ExecutionGuard
 from risk.engine import RiskEngine
 from risk.gate import RiskGate
 from risk.money_management import MoneyManager
 from trading.event_engine import EventQueue
 from trading.scheduler import AutonomousScheduler
 
+from .account_context import AccountContextProvider
 from .pipeline import TradingPipeline
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,30 @@ DECISION_HISTORY_LIMIT = 100
 TRACE_HISTORY_LIMIT = 200
 # Bound on the in-process reconciliation history retained for the control plane.
 RECONCILIATION_HISTORY_LIMIT = 50
+
+
+def _default_symbol_spec_provider():
+    """Return a callable ``(symbol) -> spec dict`` for order normalisation.
+
+    Audit P1-4: uses the existing broker symbol-spec helper. Fail-safe: any
+    error returns an empty dict (OrderBuilder then leaves values unchanged).
+    """
+
+    def _provider(symbol: str) -> dict:
+        for mod_name in ("market.symbol_spec", "src.market.symbol_spec"):
+            try:
+                import importlib
+
+                spec = importlib.import_module(mod_name).get_symbol_spec(symbol)
+                return spec if isinstance(spec, dict) else {}
+            except ImportError:
+                continue
+            except Exception as exc:  # noqa: BLE001 - normalisation is best-effort
+                logger.debug("Symbol spec provider failed for %s: %s", symbol, exc)
+                return {}
+        return {}
+
+    return _provider
 
 
 def _notify_cycle_result(result: Any) -> None:
@@ -94,6 +120,7 @@ class _RecordingPipelineProxy:
         try:
             record = result.to_dict() if hasattr(result, "to_dict") else result
             if isinstance(record, dict):
+                self._runtime._record_execution_outcome(record)
                 self._runtime._record_decision(record)
                 self._runtime._record_trace(record)
         except Exception as exc:  # noqa: BLE001 - recording must never break a cycle
@@ -118,11 +145,18 @@ class OrchestrationRuntime:
         reconciliation_providers: Optional[Any] = None,
         reconciliation_history_limit: int = RECONCILIATION_HISTORY_LIMIT,
         reconciliation_runner: Optional[ReconciliationRunner] = None,
+        execution_guard: Optional[ExecutionGuard] = None,
     ) -> None:
         self.queue = queue if queue is not None else EventQueue()
-        # Periodic reconciliation (PRD_V2 §14). Providers default to safe no-ops
-        # so production wiring can inject MT5-backed providers without forcing
-        # tests to spin up MT5.
+        # Periodic reconciliation (PRD_V2 §14). Providers default to the
+        # MT5-backed providers (audit P0-3 follow-up) so the reconciliation gate
+        # sees real internal↔broker state. In non-live (paper/dev) mode the
+        # connector's positions are simulation placeholders that the engine
+        # never created, so reconciling them against an empty internal ledger
+        # would be a permanent false positive; we therefore keep no-op providers
+        # unless MT5 live data is active. Tests can still inject providers.
+        if reconciliation_providers is None:
+            reconciliation_providers = self._default_reconciliation_providers()
         self.reconciliation = (
             reconciliation_runner
             if reconciliation_runner is not None
@@ -135,10 +169,17 @@ class OrchestrationRuntime:
         # Audit P0-3: a critical reconciliation mismatch BLOCKS new orders. The
         # guard wraps the runner and is injected into the pipeline below.
         self._reconciliation_guard = ReconciliationGuard(self.reconciliation)
+        # Audit P1-2: per-dependency circuit breakers (§24) + kill switch, wired
+        # into the pipeline as the execution-critical dependency guard. An open
+        # EXECUTION breaker or an engaged kill switch blocks new orders.
+        self.execution_guard = execution_guard if execution_guard is not None else ExecutionGuard()
         self.pipeline = (
             pipeline
             if pipeline is not None
-            else self._build_pipeline(reconciliation_guard=self._reconciliation_guard)
+            else self._build_pipeline(
+                reconciliation_guard=self._reconciliation_guard,
+                execution_guard=self.execution_guard,
+            )
         )
         self.scheduler = (
             scheduler
@@ -149,8 +190,12 @@ class OrchestrationRuntime:
                 # /decisions + traces stay complete for feed-driven events.
                 pipeline=_RecordingPipelineProxy(self.pipeline, self),
                 reconciliation_runner=self.reconciliation,
-                context_provider=lambda evt: get_news_feed_provider().get_news_context(
-                    symbol=str(getattr(evt, "symbol", "XAUUSD") or "XAUUSD")
+                # Audit P1-3: supply REAL account/positions/market inputs so the
+                # deterministic Risk Gate is account-aware, merged with news.
+                context_provider=AccountContextProvider(
+                    news_provider=lambda sym: get_news_feed_provider().get_news_context(
+                        symbol=sym or "XAUUSD"
+                    ),
                 ),
             )
         )
@@ -173,7 +218,39 @@ class OrchestrationRuntime:
         return getattr(self.scheduler, "reconciliation_runner", None) or self.reconciliation
 
     @staticmethod
-    def _build_pipeline(reconciliation_guard: Optional[Any] = None) -> TradingPipeline:
+    def _default_reconciliation_providers() -> Any:
+        """Pick reconciliation providers based on MT5 mode (audit P0-3).
+
+        Live mode → real MT5-backed providers (internal ledger vs broker state).
+        Non-live (paper/dev) → no-op providers, because the connector's
+        simulated positions are placeholders the engine never created and would
+        otherwise be a permanent false-positive mismatch.
+        """
+        try:
+            from execution.reconciliation_providers import MT5ReconciliationProviders
+
+            live = False
+            for mod_name in ("mt5.connector", "src.mt5.connector"):
+                try:
+                    import importlib
+
+                    live = bool(importlib.import_module(mod_name).is_live_mode())
+                    break
+                except ImportError:
+                    continue
+            if live:
+                return MT5ReconciliationProviders()
+        except Exception as exc:  # noqa: BLE001 - fall back to no-op providers
+            logger.warning("MT5 reconciliation providers unavailable: %s", exc)
+        from execution.reconciliation_runner import ReconciliationProviders
+
+        return ReconciliationProviders()
+
+    @staticmethod
+    def _build_pipeline(
+        reconciliation_guard: Optional[Any] = None,
+        execution_guard: Optional[Any] = None,
+    ) -> TradingPipeline:
         """Build the production pipeline from the registered agents + risk gate."""
         supervisor = SupervisorAgent()
         # The registry is used by the supervisor for dynamic delegation.
@@ -184,7 +261,10 @@ class OrchestrationRuntime:
         # labelled simulation (audit P0-2). Without this flag a missing broker
         # path would now return an honest failure instead of a fabricated fill.
         execution_engine = ExecutionEngine(mt5_connector=None, simulation_mode=True)
-        order_builder = OrderBuilder()
+        # Audit P1-4: normalise volume to the broker's lot step and round prices
+        # to the symbol digits when a spec is available. Fail-safe: a spec lookup
+        # failure leaves the order unchanged.
+        order_builder = OrderBuilder(symbol_spec_provider=_default_symbol_spec_provider())
         # Fase 7: prior lessons are summarised into the analysis context
         # (advisory only). Fail-safe — a missing/broken store simply disables
         # feedback without affecting the pipeline.
@@ -204,6 +284,7 @@ class OrchestrationRuntime:
             result_hook=_notify_cycle_result,
             lesson_provider=lesson_provider,
             reconciliation_guard=reconciliation_guard,
+            dependency_guard=execution_guard,
         )
 
     def run_cycle(
@@ -233,6 +314,7 @@ class OrchestrationRuntime:
         record = result.to_dict()
         if trace_id:
             record["trace_id"] = str(trace_id)
+        self._record_execution_outcome(record)
         self._record_decision(record)
         self._record_trace(record, trace_id)
         # A manual (HTTP-triggered) cycle is user-initiated: flush the pending
@@ -247,6 +329,26 @@ class OrchestrationRuntime:
         # Periodic reconciliation (PRD_V2 §14) — fail-safe, never raises.
         self._reconciliation_runner.tick()
         return record
+
+    def _record_execution_outcome(self, record: dict[str, Any]) -> None:
+        """Feed a finished cycle's execution outcome into the execution guard.
+
+        Audit P1-2: a completed execution (``status == EXECUTED``) resets the
+        EXECUTION breaker; an execution that was attempted but errored counts as
+        a failure so repeated failures trip the breaker → kill switch → block.
+        Cycles that never attempted execution (WAIT/BLOCKED/NO_TRADE) do not
+        affect the breaker. Fail-safe: bookkeeping must never break a cycle.
+        """
+        try:
+            status = str(record.get("status", "")).upper()
+            if status == "EXECUTED":
+                self.execution_guard.record_execution_result(True)
+            elif status == "ERROR" and record.get("execution_id"):
+                # An order build/execution error — count toward the breaker.
+                detail = str(record.get("error") or "execution error")
+                self.execution_guard.record_execution_result(False, detail=detail)
+        except Exception as exc:  # noqa: BLE001 - guard bookkeeping is best-effort
+            logger.warning("Could not record execution outcome: %s", exc)
 
     def _record_trace(self, record: dict[str, Any], trace_id: Optional[str] = None) -> None:
         """Record the cycle into the bounded trace store (fail-safe)."""

@@ -27,7 +27,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from ..trading.engine import DEFAULT_CONFIG
-from .registry import StrategyRegistry
+from .registry import PromotionError, StrategyRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,13 @@ async def get_strategy(strategy_id: str) -> Any:
 
 @router.post("/{strategy_id}/active", summary="Activate or retire a strategy")
 async def set_active(strategy_id: str, body: dict[str, Any]) -> Any:
-    """Activate (``active=true``) or retire (``active=false``) a strategy version."""
+    """Activate (``active=true``) or retire (``active=false``) a strategy version.
+
+    Activation is gated (audit P1-5): the promotion gate must approve, using the
+    strategy's recorded ``metrics_summary``/``validation_evidence`` (or evidence
+    supplied in the request body). A denied promotion returns 409 with the
+    reason — a strategy can no longer be flipped ACTIVE without evidence.
+    """
     active = body.get("active") if isinstance(body, dict) else None
     if not isinstance(active, bool):
         return JSONResponse(status_code=400, content={"error": "active must be boolean"})
@@ -108,7 +114,24 @@ async def set_active(strategy_id: str, body: dict[str, Any]) -> Any:
         return JSONResponse(status_code=404, content={"error": "strategy_not_found"})
 
     if active:
-        registry.activate(target.name, target.version)
+        # Optional inline evidence (metrics / validation_passed) wins over the
+        # strategy's stored evidence, so the caller can record evidence at
+        # activation time.
+        metrics = body.get("metrics")
+        if isinstance(metrics, dict):
+            target.metrics_summary = metrics
+        if "validation_passed" in body:
+            target.validation_evidence = {
+                **target.validation_evidence,
+                "passed": bool(body.get("validation_passed")),
+            }
+        try:
+            registry.activate(target.name, target.version, enforce_evidence=True)
+        except PromotionError as exc:
+            return JSONResponse(
+                status_code=409,
+                content={"error": "promotion_denied", "reason": str(exc)},
+            )
         message = f"Strategi {target.name} diaktifkan"
     else:
         registry.retire(target.name, target.version)

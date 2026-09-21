@@ -146,14 +146,30 @@ class PromotionResult:
     reason: str = ""
 
 
+class PromotionError(RuntimeError):
+    """Raised when a strategy activation is denied by the promotion gate."""
+
+
 class PromotionGate:
     """Enforce promotion rules between strategy statuses (13.03)."""
 
     PROMOTION_RULES = {
-        StrategyStatus.DRAFT: [StrategyStatus.TESTING],
+        StrategyStatus.DRAFT: [
+            StrategyStatus.TESTING,
+            StrategyStatus.RESEARCH,
+            StrategyStatus.BACKTESTED,
+            StrategyStatus.ACTIVE,
+        ],
         StrategyStatus.TESTING: [StrategyStatus.ACTIVE, StrategyStatus.DRAFT],
+        StrategyStatus.RESEARCH: [StrategyStatus.BACKTESTED, StrategyStatus.DRAFT],
+        StrategyStatus.BACKTESTED: [StrategyStatus.WALK_FORWARD, StrategyStatus.ACTIVE],
+        StrategyStatus.WALK_FORWARD: [StrategyStatus.PAPER, StrategyStatus.ACTIVE],
+        StrategyStatus.PAPER: [StrategyStatus.DEMO, StrategyStatus.ACTIVE],
+        StrategyStatus.DEMO: [StrategyStatus.APPROVED, StrategyStatus.ACTIVE],
+        StrategyStatus.APPROVED: [StrategyStatus.ACTIVE, StrategyStatus.REJECTED],
         StrategyStatus.ACTIVE: [StrategyStatus.RETIRED],
         StrategyStatus.RETIRED: [],
+        StrategyStatus.REJECTED: [StrategyStatus.DRAFT],
     }
 
     def can_promote(
@@ -163,7 +179,12 @@ class PromotionGate:
         metrics: Optional[dict[str, float]] = None,
         validation_passed: bool = False,
     ) -> PromotionResult:
-        """Check if promotion is allowed (13.03)."""
+        """Check if promotion is allowed (13.03, evidence-enforced).
+
+        Any transition *into* ACTIVE requires positive evidence: either
+        ``validation_passed=True`` or backtest metrics with ``win_rate >= 50``.
+        DRAFT → TESTING also requires backtest metrics with a ≥ 50% win rate.
+        """
         if to_status not in self.PROMOTION_RULES.get(from_status, []):
             return PromotionResult(
                 allowed=False,
@@ -182,12 +203,27 @@ class PromotionGate:
                     reason="Win rate must be ≥ 50% to proceed to TESTING.",
                 )
 
-        if from_status == StrategyStatus.TESTING and to_status == StrategyStatus.ACTIVE:
-            if not validation_passed:
-                return PromotionResult(
-                    allowed=False,
-                    reason="TESTING → ACTIVE requires passed validation.",
+        if to_status == StrategyStatus.ACTIVE:
+            # Audit P1-5: reaching ACTIVE always requires evidence.
+            if from_status == StrategyStatus.TESTING:
+                # The legacy TESTING → ACTIVE path strictly requires validation.
+                if not validation_passed:
+                    return PromotionResult(
+                        allowed=False,
+                        reason="TESTING → ACTIVE requires passed validation.",
+                    )
+            else:
+                has_metrics = (
+                    bool(metrics) and float((metrics or {}).get("win_rate", 0) or 0) >= 50.0
                 )
+                if not validation_passed and not has_metrics:
+                    return PromotionResult(
+                        allowed=False,
+                        reason=(
+                            f"{from_status.value} → ACTIVE requires passed validation or "
+                            "backtest metrics with win rate ≥ 50%."
+                        ),
+                    )
 
         return PromotionResult(allowed=True)
 
@@ -239,8 +275,44 @@ class StrategyRegistry:
         """List all strategies with given status."""
         return [s for s in self._strategies.values() if s.status == status]
 
-    def activate(self, name: str, version: str) -> None:
-        """Activate a strategy version (13.04)."""
+    def activate(
+        self,
+        name: str,
+        version: str,
+        *,
+        enforce_evidence: bool = False,
+    ) -> None:
+        """Activate a strategy version (13.04).
+
+        Args:
+            name: Strategy name.
+            version: Version to activate.
+            enforce_evidence: When True (audit P1-5), the promotion gate must
+                approve. Evidence is read from the strategy's
+                ``metrics_summary``/``validation_evidence``. Denied promotions
+                raise :class:`PromotionError`. Defaults to False so internal
+                bootstrap paths and existing callers are unaffected.
+
+        Raises:
+            ValueError: strategy version not found.
+            PromotionError: promotion denied by the gate.
+        """
+        # Audit P1-5: enforce the promotion gate when requested.
+        if enforce_evidence:
+            target = self.get(name, version)
+            if target is None:
+                raise ValueError(f"Strategy {name} v{version} not found")
+            metrics = target.metrics_summary or None
+            validation_passed = bool(target.validation_evidence.get("passed", False))
+            decision = PromotionGate().can_promote(
+                target.status,
+                StrategyStatus.ACTIVE,
+                metrics=metrics,
+                validation_passed=validation_passed,
+            )
+            if not decision.allowed:
+                raise PromotionError(decision.reason or "Promotion denied by gate")
+
         # Retire old version
         if name in self._active_by_name:
             old_version = self._active_by_name[name]

@@ -11,7 +11,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .state_machine import OrderState, get_order, set_order
 
@@ -124,6 +124,7 @@ class ExecutionEngine:
         min_volume: float = 0.01,
         max_volume: float = 100.0,
         simulation_mode: bool = False,
+        order_locator: Optional[Callable[[OrderRequest], Optional[dict[str, Any]]]] = None,
     ) -> None:
         """Initialize the Execution Engine.
 
@@ -140,6 +141,12 @@ class ExecutionEngine:
                 no native MetaTrader5, ``execute_order`` returns an honest
                 ``success=False`` (never a fabricated ticket). Autonomy must
                 opt in to simulation explicitly.
+            order_locator: Optional callable ``(request) -> Optional[dict]`` that
+                looks up an order/position already present at the broker for
+                this request (matched by symbol/magic/volume). Used to make
+                retries idempotent against LOST RESPONSES (audit P1-1): if a
+                prior attempt actually landed but its reply was lost, the retry
+                adopts that fill instead of sending a duplicate order.
         """
         self.mt5_connector = mt5_connector
         self.max_retries = max(0, max_retries)
@@ -148,6 +155,7 @@ class ExecutionEngine:
         self.min_volume = min_volume
         self.max_volume = max_volume
         self.simulation_mode = bool(simulation_mode)
+        self.order_locator = order_locator
 
         # In-memory tracking for pending and completed orders
         self._pending_orders: dict[str, float] = {}
@@ -411,6 +419,26 @@ class ExecutionEngine:
                 if not is_transient or attempt >= self.max_retries:
                     break
 
+                # Audit P1-1: before resending on a transient/connection error,
+                # check whether a PRIOR attempt actually landed at the broker but
+                # its reply was lost. If so, adopt that fill (idempotent) instead
+                # of sending a duplicate order.
+                adopted = self._adopt_lost_response(request)
+                if adopted is not None:
+                    self._clear_pending(request.idempotency_key)
+                    set_order(
+                        request.idempotency_key,
+                        OrderState.POSITION_CONFIRMED,
+                        {"ticket": adopted.ticket, "adopted": True},
+                    )
+                    self._completed_orders[request.idempotency_key] = adopted
+                    logger.warning(
+                        "Adopted a landed order for idempotency key %s (retry avoided "
+                        "to prevent a duplicate position).",
+                        request.idempotency_key,
+                    )
+                    return adopted
+
                 retries += 1
                 backoff = self.retry_delay * (2 ** (attempt))
                 logger.info(
@@ -546,6 +574,36 @@ class ExecutionEngine:
     # ---------------------------------------------------------------------------
     # Internal Helpers
     # ---------------------------------------------------------------------------
+
+    def _adopt_lost_response(self, request: OrderRequest) -> Optional[ExecutionResult]:
+        """Try to adopt an order that landed despite a lost reply (audit P1-1).
+
+        Consults the injected ``order_locator`` (a callable that searches the
+        broker for a matching order/position). When a match is found, returns a
+        successful :class:`ExecutionResult` carrying the found ticket so the
+        caller stops retrying and never sends a duplicate.
+
+        Returns ``None`` when no locator is configured, the locator errors, or
+        no matching order is found (i.e. the retry should proceed normally).
+        """
+        if self.order_locator is None:
+            return None
+        try:
+            found = self.order_locator(request)
+        except Exception as exc:  # noqa: BLE001 - locator must never break retry
+            logger.warning("Order locator failed (retry proceeds): %s", exc)
+            return None
+        if not found:
+            return None
+        ticket = found.get("ticket") if isinstance(found, dict) else getattr(found, "ticket", None)
+        return ExecutionResult(
+            success=True,
+            ticket=int(ticket) if ticket is not None else None,
+            error_code=0,
+            error_message="",
+            retries=0,
+            position_opened=self.sync_position(request.symbol),
+        )
 
     def _is_transient_error(self, code: int, message: str) -> bool:
         """Determine if an error code or message represents a transient failure.

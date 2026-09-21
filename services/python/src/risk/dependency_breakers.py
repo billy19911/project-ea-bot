@@ -23,10 +23,11 @@ from enum import Enum
 from typing import Any, Callable, Optional
 
 from .circuit_breaker import BreakerState, BreakerTripReason, CircuitBreaker
+from .kill_switch import KillSwitch
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Dependency", "DependencyBreakers"]
+__all__ = ["Dependency", "DependencyBreakers", "ExecutionGuard"]
 
 
 class Dependency(str, Enum):
@@ -127,3 +128,72 @@ class DependencyBreakers:
     def snapshot(self) -> dict[str, dict[str, Any]]:
         """Serialise every breaker for the control plane."""
         return {name: breaker.to_dict() for name, breaker in self._breakers.items()}
+
+
+class ExecutionGuard:
+    """Single execution gate combining dependency breakers + the kill switch.
+
+    Audit P1-2: the per-dependency circuit breakers (§24) and the kill switch
+    existed but were never wired into the trade path. This adapter exposes the
+    ``check_can_execute() -> (bool, reason)`` contract the
+    :class:`~orchestration.pipeline.TradingPipeline` already understands, so an
+    open EXECUTION breaker **or** an engaged kill switch BLOCKS new orders.
+
+    It also records execution outcomes so the breaker can actually trip:
+
+    * :meth:`record_execution_result` — call after every execution attempt; a
+      failure counts toward the EXECUTION breaker, a success resets it.
+
+    Fail-closed: when either authority is blocked the guard refuses execution.
+    """
+
+    def __init__(
+        self,
+        breakers: Optional[DependencyBreakers] = None,
+        kill_switch: Optional[KillSwitch] = None,
+    ) -> None:
+        self.kill_switch = kill_switch if kill_switch is not None else KillSwitch()
+        self.breakers = (
+            breakers if breakers is not None else DependencyBreakers(kill_switch=self.kill_switch)
+        )
+
+    # ------------------------------------------------------------------
+    # Gate
+    # ------------------------------------------------------------------
+    def check_can_execute(self) -> tuple[bool, str]:
+        """Return ``(allowed, reason)``; blocked on kill switch or open breaker."""
+        if self.kill_switch.is_blocked():
+            return (
+                False,
+                f"execution blocked — kill switch is {self.kill_switch.state.value}",
+            )
+        return self.breakers.check_can_execute()
+
+    # ------------------------------------------------------------------
+    # Outcome recording
+    # ------------------------------------------------------------------
+    def record_execution_result(self, success: bool, detail: str = "") -> None:
+        """Feed one execution outcome into the EXECUTION breaker (§24).
+
+        Success resets the breaker; failure counts toward tripping it. When the
+        breaker trips it auto-triggers + locks the kill switch (via the breaker's
+        kill switch wiring), which then blocks all further orders.
+        """
+        if success:
+            self.breakers.record_success(Dependency.EXECUTION.value)
+            return
+        try:
+            self.breakers.record_failure(
+                Dependency.EXECUTION.value,
+                reason=BreakerTripReason.EXECUTION_ERROR,
+                detail=detail,
+            )
+        except Exception as exc:  # never let breaker bookkeeping break a cycle
+            logger.warning("Could not record execution failure: %s", exc)
+
+    def snapshot(self) -> dict[str, Any]:
+        """Serialise guard state for the control plane."""
+        return {
+            "kill_switch": self.kill_switch.to_dict(),
+            "breakers": self.breakers.snapshot(),
+        }

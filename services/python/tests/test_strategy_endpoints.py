@@ -92,7 +92,11 @@ def test_activate_then_deactivate() -> None:
     registry = get_strategy_registry()
     strategy = registry.register("breakout", "v1", {"lookback": 50}, "desc")
 
-    resp = client.post(f"/strategies/{strategy.strategy_id}/active", json={"active": True})
+    # Audit P1-5: reaching ACTIVE now requires evidence (validation or metrics).
+    resp = client.post(
+        f"/strategies/{strategy.strategy_id}/active",
+        json={"active": True, "validation_passed": True},
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["strategy"]["status"] == "ACTIVE"
