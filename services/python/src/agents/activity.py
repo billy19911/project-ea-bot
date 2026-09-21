@@ -128,11 +128,23 @@ class AgentActivityTracker:
 
 
 _INSTANCE: Optional[AgentActivityTracker] = None
+_SHARED_KEY = "_ea_shared_activity_tracker"
 
 
 def get_activity_tracker() -> AgentActivityTracker:
-    """Return the process-wide activity tracker (lazy singleton)."""
+    """Return the process-wide activity tracker (lazy singleton).
+
+    Stored on a process-global slot so the ``src.agents.activity`` and
+    ``agents.activity`` import identities share ONE tracker.
+    """
     global _INSTANCE
     if _INSTANCE is None:
-        _INSTANCE = AgentActivityTracker()
+        import builtins
+
+        shared = getattr(builtins, _SHARED_KEY, None)
+        if shared is not None:
+            _INSTANCE = shared
+        else:
+            _INSTANCE = AgentActivityTracker()
+            setattr(builtins, _SHARED_KEY, _INSTANCE)
     return _INSTANCE

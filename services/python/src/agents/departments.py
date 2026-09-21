@@ -16,6 +16,18 @@ from typing import Any
 from .base import AgentPriority, BaseAgent
 
 
+def _record_specialist_activity(
+    name: str, signal: str, confidence: float, error: bool = False
+) -> None:
+    """Best-effort realtime activity record for a specialist (fail-safe)."""
+    try:
+        from .activity import get_activity_tracker
+
+        get_activity_tracker().record(name, signal, confidence, error=error)
+    except Exception:  # noqa: BLE001 - metrics must never break analysis
+        pass
+
+
 @dataclass
 class Department:
     """Named group of specialists owned by one department lead."""
@@ -94,7 +106,14 @@ class DepartmentLead(BaseAgent):
 
         for specialist in selected:
             try:
-                results[specialist.name] = specialist.analyze(context)
+                result = specialist.analyze(context)
+                results[specialist.name] = result
+                _record_specialist_activity(
+                    specialist.name,
+                    str(result.get("signal", "NEUTRAL")),
+                    float(result.get("confidence", 0.0) or 0.0),
+                    error=False,
+                )
             except Exception as exc:  # defensive boundary around specialist failures
                 results[specialist.name] = {
                     "agent": specialist.name,
@@ -103,6 +122,7 @@ class DepartmentLead(BaseAgent):
                     "confidence": 0.0,
                     "reasons": [f"Specialist failed: {exc}"],
                 }
+                _record_specialist_activity(specialist.name, "NEUTRAL", 0.0, error=True)
 
         consensus_signal, unresolved_conflict = self._resolve_consensus(results)
         return {

@@ -306,13 +306,24 @@ async def health_check() -> dict:
 
     # Merge REAL runtime activity (invocations, last_active, signals, avg
     # confidence) so the AI Control page shows live metrics instead of the
-    # shared priority enum that reads like a dummy column.
+    # shared priority enum that reads like a dummy column. Agents that have not
+    # run yet get explicit idle defaults (never a fabricated 0 that looks like
+    # real activity — `status` is "idle" and avg_confidence is null).
     try:
         from .agents.activity import get_activity_tracker
 
         activity = get_activity_tracker().snapshot()
         for entry in agents:
-            entry.update(activity.get(entry.get("name", ""), {}))
+            metrics = activity.get(entry.get("name", "")) or {
+                "invocations": 0,
+                "errors": 0,
+                "error_rate": 0.0,
+                "last_active": None,
+                "signal_counts": {},
+                "avg_confidence": None,
+                "status": "idle",
+            }
+            entry.update(metrics)
     except Exception:  # noqa: BLE001 - health must never fail on metrics
         pass
 

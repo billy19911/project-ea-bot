@@ -302,11 +302,23 @@ class NewsPatternMemory:
 
 
 _INSTANCE: Optional[NewsPatternMemory] = None
+_SHARED_KEY = "_ea_shared_news_patterns"
 
 
 def get_news_pattern_memory() -> NewsPatternMemory:
-    """Return the process-wide news pattern memory (lazy singleton)."""
+    """Return the process-wide news pattern memory (lazy singleton).
+
+    Stored on a process-global slot so the ``src.market.*`` / ``market.*``
+    import identities share ONE store.
+    """
     global _INSTANCE
     if _INSTANCE is None:
-        _INSTANCE = NewsPatternMemory()
+        import builtins
+
+        shared = getattr(builtins, _SHARED_KEY, None)
+        if shared is not None:
+            _INSTANCE = shared
+        else:
+            _INSTANCE = NewsPatternMemory()
+            setattr(builtins, _SHARED_KEY, _INSTANCE)
     return _INSTANCE

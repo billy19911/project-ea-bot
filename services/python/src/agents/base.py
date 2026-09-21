@@ -39,21 +39,43 @@ class AgentRegistry:
 
     Agents are registered by name and type.  The registry exposes
     ``get``, ``list``, and ``route`` for supervisor dispatch.
+
+    NOTE on process-wide identity: this module can be imported under two names
+    (``src.agents.base`` by the FastAPI app, ``agents.base`` by top-level
+    imports). To keep ONE shared registry across both, the singleton instance
+    is cached on a process-global slot keyed by a stable name rather than on the
+    class object (which differs per import path).
     """
 
     _instance: Optional["AgentRegistry"] = None
+    _SHARED_KEY = "_ea_shared_agent_registry"
 
     def __new__(cls) -> "AgentRegistry":
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._agents: dict[str, "BaseAgent"] = {}
-            cls._instance._by_type: dict[str, list[str]] = {}
-        return cls._instance
+        # Reuse a shared instance if another import identity already created one.
+        import builtins
+
+        shared = getattr(builtins, cls._SHARED_KEY, None)
+        if shared is not None:
+            cls._instance = shared
+            return shared
+        inst = super().__new__(cls)
+        inst._agents = {}
+        inst._by_type = {}
+        cls._instance = inst
+        setattr(builtins, cls._SHARED_KEY, inst)
+        return inst
 
     @classmethod
     def reset(cls) -> None:
         """Reset the singleton (useful in tests)."""
+        import builtins
+
         cls._instance = None
+        if hasattr(builtins, cls._SHARED_KEY):
+            try:
+                delattr(builtins, cls._SHARED_KEY)
+            except AttributeError:
+                pass
 
     def register(self, agent: "BaseAgent") -> None:
         """Register an agent instance."""

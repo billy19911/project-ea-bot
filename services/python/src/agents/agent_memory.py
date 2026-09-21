@@ -201,11 +201,23 @@ class AgentPatternMemory:
 
 
 _INSTANCE: Optional[AgentPatternMemory] = None
+_SHARED_KEY = "_ea_shared_agent_memory"
 
 
 def get_agent_memory() -> AgentPatternMemory:
-    """Return the process-wide agent pattern memory (lazy singleton)."""
+    """Return the process-wide agent pattern memory (lazy singleton).
+
+    Stored on a process-global slot so the ``src.agents.*`` / ``agents.*``
+    import identities share ONE store.
+    """
     global _INSTANCE
     if _INSTANCE is None:
-        _INSTANCE = AgentPatternMemory()
+        import builtins
+
+        shared = getattr(builtins, _SHARED_KEY, None)
+        if shared is not None:
+            _INSTANCE = shared
+        else:
+            _INSTANCE = AgentPatternMemory()
+            setattr(builtins, _SHARED_KEY, _INSTANCE)
     return _INSTANCE
