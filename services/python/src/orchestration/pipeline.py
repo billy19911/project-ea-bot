@@ -526,6 +526,12 @@ class TradingPipeline:
             proposal["symbol"] = analysis["symbol"]
         if not proposal.get("proposal_id") and analysis.get("proposal_id"):
             proposal["proposal_id"] = analysis["proposal_id"]
+        # Alias the synthesiser's SL/TP key names (target_sl/target_tp) to the
+        # ones the risk gate/order builder expects (stop_loss/take_profit).
+        if proposal.get("stop_loss") is None and proposal.get("target_sl") is not None:
+            proposal["stop_loss"] = proposal["target_sl"]
+        if proposal.get("take_profit") is None and proposal.get("target_tp") is not None:
+            proposal["take_profit"] = proposal["target_tp"]
         return proposal
 
     @staticmethod

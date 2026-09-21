@@ -458,6 +458,134 @@ td {
   padding: 10px 12px 6px;
 }
 .priceChartSvg { display: block; width: 100%; height: auto; user-select: none; }
+.priceChartSvg.pcPannable { cursor: grab; }
+.priceChartSvg.pcPannable:active { cursor: grabbing; }
+
+/* Chart viewport controls (zoom / pan helpers) — client-side only. */
+.pcControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.pcCtrlBtn {
+  min-width: 30px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.pcCtrlBtn:hover:not(:disabled) {
+  background: var(--surface-muted);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.pcCtrlBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pcCtrlInfo {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.pcCtrlSep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 2px;
+}
+
+/* Plot wrapper so the resize handle can be positioned relative to the SVG. */
+.pcPlot { position: relative; }
+
+/* Divider handle between the price panel and the RSI panel. */
+.pcResizeHandle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 12px;
+  margin-top: -6px;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  z-index: 2;
+}
+.pcResizeHandle:hover .pcResizeGrip,
+.pcResizeHandle:active .pcResizeGrip {
+  background: var(--primary);
+  opacity: 0.9;
+}
+.pcResizeGrip {
+  width: 44px;
+  height: 4px;
+  border-radius: var(--r-full);
+  background: var(--border-strong);
+  opacity: 0.55;
+  transition: background var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
+}
+
+/* Live value flash — a brief highlight when a number changes (price/P&L). */
+@keyframes pcFlash {
+  0% { background: var(--primary-soft); }
+  100% { background: transparent; }
+}
+.liveFlash { animation: pcFlash 900ms var(--ease); border-radius: var(--r-sm); }
+.liveUp { color: var(--success); }
+.liveDown { color: var(--danger); }
+.liveDot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-full);
+  background: var(--text-muted);
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.liveDot.liveOn { background: var(--success); animation: livePulse 1.6s infinite; }
+.liveDot.liveOff { background: var(--danger); }
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* Live toggle (checkbox + dot) used in page headers. */
+.liveToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.liveToggle input { accent-color: var(--primary); cursor: pointer; }
+
+/* Small "live" tag next to a panel title. */
+.posLiveTag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--success);
+}
+
+
 .priceChartEmpty {
   display: flex;
   flex-direction: column;

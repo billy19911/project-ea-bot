@@ -154,6 +154,21 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+# Seconds per timeframe — used to estimate how far back to request bars when
+# lazy-loading chart history (`before`).
+_TIMEFRAME_SECONDS: dict[str, int] = {
+    "M1": 60,
+    "M5": 300,
+    "M15": 900,
+    "M30": 1800,
+    "H1": 3600,
+    "H4": 14400,
+    "D1": 86400,
+    "W1": 604800,
+    "MN1": 2592000,
+}
+
+
 # ---------------------------------------------------------------------------
 # Connector functions (read-only)
 # ---------------------------------------------------------------------------
@@ -335,8 +350,21 @@ def get_tick(symbol: str) -> Optional[Tick]:
     )
 
 
-def get_ohlc(symbol: str, timeframe: str = "H1", count: int = 100) -> list[OHLC]:
-    """Return OHLC bars for a symbol."""
+def get_ohlc(
+    symbol: str,
+    timeframe: str = "H1",
+    count: int = 100,
+    before: Optional[datetime] = None,
+) -> list[OHLC]:
+    """Return OHLC bars for a symbol (oldest → newest).
+
+    Args:
+        symbol: Symbol name (broker suffix resolved automatically).
+        timeframe: MT5 timeframe label (M1..MN1).
+        count: Number of bars to return.
+        before: When given, return the ``count`` bars immediately *before* this
+            timestamp (used by the chart's lazy-load-history on pan-left).
+    """
     if _live_mode:
         try:
             import MetaTrader5 as mt5
@@ -368,6 +396,36 @@ def get_ohlc(symbol: str, timeframe: str = "H1", count: int = 100) -> list[OHLC]
             except Exception:  # noqa: BLE001 - enumeration is best-effort
                 pass
 
+            # When loading history before a timestamp, ask MT5 for bars from an
+            # estimated start (count bars back, with slack) and keep the last
+            # `count` strictly older than `before`.
+            if before is not None:
+                tf_seconds = _TIMEFRAME_SECONDS.get(str(timeframe).upper(), 3600)
+                start_ts = int(before.timestamp()) - (count + 8) * tf_seconds
+                before_ts = int(before.timestamp())
+                for cand in candidates:
+                    rates = mt5.copy_rates_from(cand, tf, start_ts, (count + 8) * 2)
+                    if rates is None or len(rates) == 0:
+                        continue
+                    older = [r for r in rates if int(r["time"]) < before_ts]
+                    if not older:
+                        continue
+                    older = older[-count:]
+                    return [
+                        OHLC(
+                            symbol=cand,
+                            timeframe=timeframe,
+                            open=r["open"],
+                            high=r["high"],
+                            low=r["low"],
+                            close=r["close"],
+                            volume=float(r["tick_volume"]),
+                            time=datetime.fromtimestamp(int(r["time"])),
+                        )
+                        for r in older
+                    ]
+                return []
+
             for cand in candidates:
                 rates = mt5.copy_rates_from_pos(cand, tf, 0, count)
                 if rates is not None and len(rates) > 0:
@@ -391,7 +449,7 @@ def get_ohlc(symbol: str, timeframe: str = "H1", count: int = 100) -> list[OHLC]
     if symbol not in SIMULATED_PRICES:
         return []
     base_price = SIMULATED_PRICES[symbol][0]
-    now = _now()
+    now = before if before is not None else _now()
     bars = []
     for i in range(count):
         t = now - timedelta(hours=i)

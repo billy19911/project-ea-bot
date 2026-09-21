@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
+import Pagination from '@/components/ui/pagination';
 import styles from '@/components/ops.module.css';
 
 type Incident = {
@@ -37,6 +38,8 @@ export default function IncidentsPage() {
   const [openCritical, setOpenCritical] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const load = useCallback(async () => {
     setError(null);
@@ -64,6 +67,10 @@ export default function IncidentsPage() {
     await apiFetch(`/v2/incidents/${encodeURIComponent(id)}/resolve`, { method: 'POST' });
     load();
   };
+
+  const pageCount = Math.max(1, Math.ceil(incidents.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const visible = incidents.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   return (
     <AppShell activeKey="incidents" eyebrow="Xynn / Incidents" title="Incidents">
@@ -103,6 +110,7 @@ export default function IncidentsPage() {
           {loaded && incidents.length === 0 ? (
             <div className={styles.empty}>No incidents recorded.</div>
           ) : (
+            <>
             <table className={styles.table}>
               <thead>
                 <tr>
@@ -118,7 +126,7 @@ export default function IncidentsPage() {
                 </tr>
               </thead>
               <tbody>
-                {incidents.map(inc => (
+                {visible.map(inc => (
                   <tr key={inc.incident_id}>
                     <td className={styles.mono}>{inc.incident_id}</td>
                     <td>
@@ -155,6 +163,17 @@ export default function IncidentsPage() {
                 ))}
               </tbody>
             </table>
+            {incidents.length > 0 && (
+              <Pagination
+                page={safePage}
+                pageSize={pageSize}
+                total={incidents.length}
+                onPageChange={setPage}
+                onPageSizeChange={setPageSize}
+                unitLabel="incidents"
+              />
+            )}
+            </>
           )}
         </div>
       </div>

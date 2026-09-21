@@ -153,7 +153,9 @@ class TestChartEndpoint:
 
         bars = _bars(100)
         monkeypatch.setattr(connector, "is_live_mode", lambda: True)
-        monkeypatch.setattr(connector, "get_ohlc", lambda symbol, tf, count: bars[:count])
+        monkeypatch.setattr(
+            connector, "get_ohlc", lambda symbol, tf, count, before=None: bars[:count]
+        )
         r = self.client.get(
             "/chart/candles",
             params={"symbol": "XAUUSD", "timeframe": "H1", "bars": 60},
@@ -176,7 +178,7 @@ class TestChartEndpoint:
         from src.mt5 import connector
 
         monkeypatch.setattr(connector, "is_live_mode", lambda: True)
-        monkeypatch.setattr(connector, "get_ohlc", lambda symbol, tf, count: [])
+        monkeypatch.setattr(connector, "get_ohlc", lambda symbol, tf, count, before=None: [])
         r = self.client.get("/chart/candles", params={"symbol": "NOSUCHSYM"})
         assert r.status_code == 200
         assert r.json()["ok"] is False
@@ -224,7 +226,9 @@ class TestChartAnalysisEndpoint:
 
         bars = _bars(120)
         monkeypatch.setattr(connector, "is_live_mode", lambda: True)
-        monkeypatch.setattr(connector, "get_ohlc", lambda symbol, tf, count: bars[:count])
+        monkeypatch.setattr(
+            connector, "get_ohlc", lambda symbol, tf, count, before=None: bars[:count]
+        )
         monkeypatch.setattr(connector, "get_account_info", lambda: SimpleNamespace(equity=10000.0))
         monkeypatch.setattr(connector, "get_positions", lambda: [])
 
@@ -252,7 +256,9 @@ class TestChartAnalysisEndpoint:
 
         bars = _bars(120)
         monkeypatch.setattr(connector, "is_live_mode", lambda: True)
-        monkeypatch.setattr(connector, "get_ohlc", lambda symbol, tf, count: bars[:count])
+        monkeypatch.setattr(
+            connector, "get_ohlc", lambda symbol, tf, count, before=None: bars[:count]
+        )
         monkeypatch.setattr(connector, "get_account_info", lambda: SimpleNamespace(equity=10000.0))
         monkeypatch.setattr(
             connector,
@@ -277,7 +283,9 @@ class TestChartAnalysisEndpoint:
 
         bars = _bars(120)
         monkeypatch.setattr(connector, "is_live_mode", lambda: True)
-        monkeypatch.setattr(connector, "get_ohlc", lambda symbol, tf, count: bars[:count])
+        monkeypatch.setattr(
+            connector, "get_ohlc", lambda symbol, tf, count, before=None: bars[:count]
+        )
         monkeypatch.setattr(connector, "get_account_info", lambda: SimpleNamespace(equity=10000.0))
         monkeypatch.setattr(
             connector,
@@ -296,7 +304,116 @@ class TestChartAnalysisEndpoint:
         from src.mt5 import connector
 
         monkeypatch.setattr(connector, "is_live_mode", lambda: True)
-        monkeypatch.setattr(connector, "get_ohlc", lambda symbol, tf, count: _bars(10))
+        monkeypatch.setattr(connector, "get_ohlc", lambda symbol, tf, count, before=None: _bars(10))
         r = self.client.get("/chart/analysis", params={"symbol": "XAUUSD", "bars": 50})
         assert r.status_code == 200
         assert r.json()["ok"] is False
+
+
+class TestChartHistoryPaging:
+    """Lazy-load of older history via the `before` parameter."""
+
+    def setup_method(self) -> None:
+        self.client = TestClient(app)
+
+    def _bars_ending(self, end_iso: str, count: int):
+        base_end = datetime.fromisoformat(end_iso)
+        out = []
+        for i in range(count):
+            t = base_end - timedelta(hours=count - 1 - i)
+            out.append(
+                SimpleNamespace(
+                    time=t,
+                    open=1.0 + i * 0.001,
+                    high=1.0 + i * 0.001 + 0.0005,
+                    low=1.0 + i * 0.001 - 0.0005,
+                    close=1.0 + i * 0.001,
+                    volume=1000.0,
+                )
+            )
+        return out
+
+    def test_before_returns_older_window_and_has_more(self, monkeypatch) -> None:
+        from src.mt5 import connector
+
+        monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+        calls = []
+
+        def fake_get_ohlc(symbol, tf, count, before=None):
+            calls.append(before)
+            if before is None:
+                return self._bars_ending("2026-01-10T00:00:00", count)
+            # One older page exists, then nothing before that.
+            if before > datetime(2026, 1, 1, 0, 0, 0):
+                return self._bars_ending(before.isoformat(), count)
+            return []
+
+        monkeypatch.setattr(connector, "get_ohlc", fake_get_ohlc)
+
+        r = self.client.get(
+            "/chart/candles",
+            params={
+                "symbol": "XAUUSD",
+                "timeframe": "H1",
+                "bars": 50,
+                "before": "2026-01-05T00:00:00",
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["before"] == "2026-01-05T00:00:00"
+        # First call must be the requested window (the later probe passes an
+        # older timestamp).
+        assert calls[0] == datetime(2026, 1, 5, 0, 0, 0)
+        # The fake still has bars older than the returned window, so more
+        # history exists → has_more is True.
+        assert body["has_more"] is True
+
+    def test_before_invalid_iso_400(self, monkeypatch) -> None:
+        from src.mt5 import connector
+
+        monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+        r = self.client.get(
+            "/chart/candles",
+            params={"symbol": "XAUUSD", "bars": 50, "before": "not-a-date"},
+        )
+        assert r.status_code == 400
+
+    def test_has_more_false_when_no_older_bars(self, monkeypatch) -> None:
+        """When the older-history probe returns nothing, has_more is False."""
+        from src.mt5 import connector
+
+        monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+
+        def fake_get_ohlc(symbol, tf, count, before=None):
+            # The paged window returns a full page; the probe (count == 1)
+            # returns empty → no more history.
+            if count == 1:
+                return []
+            return self._bars_ending("2026-01-05T00:00:00", count)
+
+        monkeypatch.setattr(connector, "get_ohlc", fake_get_ohlc)
+        r = self.client.get(
+            "/chart/candles",
+            params={"symbol": "XAUUSD", "bars": 50, "before": "2026-01-05T00:00:00"},
+        )
+        assert r.status_code == 200
+        assert r.json()["has_more"] is False
+
+    def test_history_page_allows_fewer_than_min_bars(self, monkeypatch) -> None:
+        """A final history page may legitimately return < _MIN_BARS bars."""
+        from src.mt5 import connector
+
+        monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+        monkeypatch.setattr(
+            connector,
+            "get_ohlc",
+            lambda symbol, tf, count, before=None: _bars(5) if before else _bars(60),
+        )
+        r = self.client.get(
+            "/chart/candles",
+            params={"symbol": "XAUUSD", "bars": 50, "before": "2020-01-01T00:00:00"},
+        )
+        assert r.status_code == 200
+        assert r.json()["ok"] is True

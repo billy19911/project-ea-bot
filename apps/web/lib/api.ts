@@ -23,6 +23,43 @@ export function getAuthToken(): string | null {
   }
 }
 
+/**
+ * Resolve the realtime WebSocket URL for the Node control-plane API.
+ *
+ * Order of preference:
+ *   1. NEXT_PUBLIC_WS_URL (explicit, e.g. ws://10.0.0.5:3789/ws).
+ *   2. Derived from NEXT_PUBLIC_API_URL / API_BASE when it points at the API
+ *      origin (ws://<api-origin>/ws).
+ *   3. Fallback to the current host with the Node API port (default 3789),
+ *      matching the `/ea-api`-less WS connection used in local dev.
+ *
+ * The browser can only set headers on fetch, not on the WS upgrade, so the
+ * token is appended as a `?token=` query parameter (validated server-side).
+ */
+export function getLiveSocketUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+
+  const explicit = process.env.NEXT_PUBLIC_WS_URL;
+  let base = explicit || '';
+
+  if (!base) {
+    const apiEnv = process.env.NEXT_PUBLIC_API_URL;
+    if (apiEnv && /^https?:\/\//.test(apiEnv)) {
+      base = apiEnv.replace(/^http/, 'ws');
+    } else {
+      const port = process.env.NEXT_PUBLIC_WS_PORT || '3789';
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      base = `${proto}//${window.location.hostname}:${port}`;
+    }
+  }
+
+  base = base.replace(/\/+$/, '');
+  const url = new URL(base + '/ws');
+  const token = getAuthToken();
+  if (token) url.searchParams.set('token', token);
+  return url.toString();
+}
+
 export function generateTraceId(): string {
   try {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {

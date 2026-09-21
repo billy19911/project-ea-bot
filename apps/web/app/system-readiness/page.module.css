@@ -38,3 +38,49 @@
 .table tbody tr:last-child td {
   border-bottom: none;
 }
+
+/* Status pills — semantic colour so NOT_AVAILABLE / NOT_CONFIGURED read as
+ * problems at a glance instead of plain text. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.pillOk {
+  background: var(--success-soft);
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.pillWarn {
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--warning);
+}
+
+.pillDanger {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
+.pillNeutral {
+  background: var(--neutral-muted);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.empty {
+  padding: var(--sp-5);
+  text-align: center;
+  color: var(--text-muted);
+}

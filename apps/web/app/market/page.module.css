@@ -130,6 +130,27 @@
 }
 .metaItem { white-space: nowrap; }
 
+.livePrice {
+  color: var(--text);
+  font-weight: 700;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.liveSub { color: var(--text-muted); font-weight: 500; }
+
+.liveToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.liveToggle input { accent-color: var(--primary); cursor: pointer; }
+
 .errorBox {
   padding: 10px 14px;
   border: 1px solid var(--danger-border);
@@ -238,6 +259,18 @@
   font-weight: 600;
   color: var(--text);
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.posLiveTag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--success);
 }
 .posTableWrap { overflow-x: auto; }
 .posTable { width: 100%; border-collapse: collapse; font-size: 12.5px; }

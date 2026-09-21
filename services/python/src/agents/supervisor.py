@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 
 from .base import AgentCapability, AgentPriority, BaseAgent
+from .synthesis import AgentSynthesizer
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,19 @@ def _record_activity(name: str, signal: str, confidence: float, error: bool = Fa
         get_activity_tracker().record(name, signal, confidence, error=error)
     except Exception:  # noqa: BLE001 - metrics must never break the pipeline
         pass
+
+
+def _coerce_float(value: Any) -> Optional[float]:
+    """Best-effort float coercion; returns None for missing/invalid values."""
+    if value is None or value == "":
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if result != result:  # NaN
+        return None
+    return result
 
 
 # ── Default routing table ────────────────────────────────────────────────────
@@ -127,6 +141,10 @@ class SupervisorAgent(BaseAgent):
         # injects it at construction (see orchestration.runtime); a per-call
         # "registry" in the context overrides it.
         self._registry_cache: Optional[Any] = None
+        # Synthesis: turn the aggregated agent results into a trade proposal so
+        # the pipeline's Risk Gate has something to validate. Without this the
+        # pipeline always saw ``proposal=None`` and every cycle was NO_TRADE.
+        self.synthesizer = AgentSynthesizer()
 
     # ------------------------------------------------------------------
     # Phase 7: configuration setters (backward compatible)
@@ -447,6 +465,12 @@ class SupervisorAgent(BaseAgent):
                         overall_confidence = result["confidence"]
                         overall_signal = result.get("signal", "NEUTRAL")
 
+        # ── Synthesise a trade proposal from the agent results ─────────
+        # This is what the pipeline's Risk Gate validates. Fail-safe: if
+        # synthesis breaks, the cycle simply has no proposal → NO_TRADE
+        # (never an unvalidated order).
+        synthesis, proposal = self._synthesise(event_type, context, results)
+
         return {
             "agent": self.name,
             "event_type": event_type,
@@ -457,4 +481,63 @@ class SupervisorAgent(BaseAgent):
             "skipped_agents": skipped,
             "token_used": self.token_used,
             "token_budget": self.token_budget,
+            "synthesis": synthesis,
+            "proposal": proposal,
         }
+
+    def _synthesise(
+        self,
+        event_type: str,
+        context: dict[str, Any],
+        results: dict[str, Any],
+    ) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+        """Synthesise agent results into a pipeline-ready proposal.
+
+        Returns ``(synthesis_dict, proposal_dict)``. The proposal is only
+        emitted for an actionable BUY/SELL consensus so the pipeline can
+        separate "no signal" (NO_TRADE) from "actionable trade". Any failure
+        returns ``(None, None)`` — fail-closed, never an unvalidated order.
+        """
+        try:
+            event = context.get("event")
+            if not isinstance(event, dict):
+                event = {"symbol": context.get("symbol", "UNKNOWN")}
+            elif "symbol" not in event and context.get("symbol"):
+                event = {**event, "symbol": context.get("symbol")}
+
+            synthesis = self.synthesizer.generate_proposal(
+                event=event,
+                agent_outputs=results,
+                market_state=context,
+            )
+            synthesis_dict = synthesis.to_dict()
+
+            raw = synthesis_dict.get("proposal")
+            if raw is None:
+                return synthesis_dict, None
+
+            direction = str(raw.get("direction", "")).upper()
+            if direction not in ("BUY", "SELL"):
+                # HOLD / NEUTRAL → no actionable proposal (pipeline → NO_TRADE).
+                return synthesis_dict, None
+
+            proposal = {
+                "symbol": raw.get("symbol") or context.get("symbol", ""),
+                "direction": direction,
+                "confidence": raw.get("confidence"),
+                "reasoning": raw.get("reasoning"),
+                # SL/TP: the synthesizer names them target_sl/target_tp; the
+                # pipeline/risk gate expects stop_loss/take_profit. Provide both.
+                "stop_loss": raw.get("target_sl"),
+                "take_profit": raw.get("target_tp"),
+                "target_sl": raw.get("target_sl"),
+                "target_tp": raw.get("target_tp"),
+                "entry_price": _coerce_float(
+                    context.get("close") or context.get("price") or context.get("entry_price")
+                ),
+                "requires_escalation": raw.get("requires_escalation", False),
+            }
+            return synthesis_dict, proposal
+        except Exception as exc:  # noqa: BLE001 - synthesis must never break a cycle
+            logger.warning("Supervisor synthesis failed (cycle continues): %s", exc)
+            return None, None

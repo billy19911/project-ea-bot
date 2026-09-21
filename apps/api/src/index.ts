@@ -4,6 +4,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import { createServer } from 'http';
 import express, { type Response, type Request } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -14,6 +15,13 @@ import { auditMiddleware, fetchAuditLogs } from './middleware/audit';
 import { validatePayload, sanitizeInput, securityHeaders, preventParameterPollution } from './middleware/security';
 import { generalLimiter, authLimiter } from './middleware/rateLimiter';
 import { validateSecrets, redactSecrets } from './middleware/secrets';
+import {
+  wsAuthHandler,
+  setupWSConnection,
+  setupWSHeartbeat,
+  type SecureWebSocket,
+} from './middleware/websocket';
+import { attachLiveStream } from './liveStream';
 // Run 18: honest supervisor status (real uptime; no fabricated zeros).
 import { buildSupervisorStatus, buildUsageRows } from './supervisorStatus.js';
 import {
@@ -822,6 +830,19 @@ app.get('/mt5/mode', async (req, res) => {
   await sendProxy(res, '/mt5/mode', undefined, req);
 });
 
+// Lightweight latest-tick proxy (read-only). Used by the live WebSocket
+// broadcaster and any client that wants a single quote without pulling bars.
+app.get('/mt5/market/tick', async (req, res) => {
+  const symbol = String(req.query.symbol || '').trim().toUpperCase();
+  if (!/^[A-Z0-9._#+-]{1,32}$/.test(symbol)) {
+    res.status(400).json({ error: 'invalid_symbol' });
+    return;
+  }
+  const log = (req as any).log;
+  log.info({ symbol }, 'mt5.market.tick');
+  await sendProxy(res, `/mt5/market/tick?symbol=${encodeURIComponent(symbol)}`, undefined, req);
+});
+
 // Read-only account info for the ACTIVE terminal (UI/UX F2): the dashboard
 // shell shows login/server/trade_mode in its sidebar footer. Behind the global
 // auth middleware — no mutation, no order path.
@@ -913,7 +934,7 @@ app.get('/chart/candles', async (req, res) => {
   const log = (req as any).log;
   log.info('chart.candles');
   const qs = new URLSearchParams();
-  for (const key of ['symbol', 'timeframe', 'bars', 'ema_fast', 'ema_slow']) {
+  for (const key of ['symbol', 'timeframe', 'bars', 'ema_fast', 'ema_slow', 'before']) {
     const v = (req.query as any)[key];
     if (v !== undefined) qs.set(key, String(v));
   }
@@ -1114,9 +1135,36 @@ app.use((err: any, req: any, res: any, _next: any) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, () => {
+const server = createServer(app);
+
+// Realtime stream (Fase "live"): price + open-position P&L over WebSocket at
+// /ws. Auth reuses the same JWT check as HTTP; token may come as
+// `?token=` query (browsers can't set headers on the WS upgrade).
+const live = attachLiveStream(server, {
+  authCheck: (req) => wsAuthHandler(req as Request),
+  onConnection: (ws, req) => setupWSConnection(ws as SecureWebSocket, req as Request),
+  intervalMs: Number(process.env.LIVE_INTERVAL_MS || 2500),
+});
+const heartbeat = setupWSHeartbeat(live.wss);
+
+server.listen(PORT, () => {
   logger.info({ port: PORT, nodeEnv: process.env.NODE_ENV, serviceName: process.env.SERVICE_NAME }, 'server.started');
   console.log(`EA Bot API server running on http://localhost:${PORT}`);
   console.log(`  Metrics: http://localhost:${PORT}/metrics`);
   console.log(`  Observability JSON: http://localhost:${PORT}/observability/metrics`);
+  console.log(`  Live stream (WS): ws://localhost:${PORT}/ws`);
 });
+
+// Graceful shutdown: stop the stream loop before exiting.
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    try {
+      clearInterval(heartbeat as NodeJS.Timeout);
+      live.close();
+    } catch {
+      /* ignore */
+    }
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 3000).unref();
+  });
+}

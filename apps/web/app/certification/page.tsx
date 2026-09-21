@@ -80,28 +80,36 @@ export default function CertificationPage() {
           </div>
           {report ? (
             <div className={styles.panelBody}>
-              {report.gates.map(g => (
-                <div key={g.gate} style={{ marginBottom: 16 }}>
-                  <div className={styles.row} style={{ marginBottom: 8 }}>
-                    <strong>{GATE_LABELS[g.gate] ?? g.gate}</strong>
-                    <span className={`${styles.pill} ${g.passed ? styles.pillOk : styles.pillDanger}`}>
-                      {g.passed ? 'PASS' : 'FAIL'}
-                    </span>
-                  </div>
-                  <div className={styles.grid}>
-                    {Object.entries(g.checks).map(([name, ok]) => (
-                      <div key={name} className={styles.card}>
-                        <span className={styles.cardLabel}>{name.replace(/_/g, ' ')}</span>
-                        <span className={styles.cardValue}>
-                          <span className={`${styles.pill} ${ok ? styles.pillOk : styles.pillNeutral}`}>
-                            {ok ? '✓' : '—'}
-                          </span>
-                        </span>
+              {report.gates.map(g => {
+                const failed = g.failed ?? [];
+                return (
+                  <div key={g.gate} className={styles.gateBlock}>
+                    <div className={styles.gateHead}>
+                      <strong className={styles.gateTitle}>{GATE_LABELS[g.gate] ?? g.gate}</strong>
+                      <span className={`${styles.pill} ${g.passed ? styles.pillOk : styles.pillDanger}`}>
+                        {g.passed ? 'PASS' : 'FAIL'}
+                      </span>
+                    </div>
+                    <div className={styles.checkGrid}>
+                      {Object.entries(g.checks).map(([name, ok]) => (
+                        <div
+                          key={name}
+                          className={`${styles.check} ${ok ? styles.checkOk : styles.checkMiss}`}
+                          title={ok ? 'Passed' : 'Not passing'}
+                        >
+                          <span className={styles.checkIcon} aria-hidden>{ok ? '✓' : '✕'}</span>
+                          <span className={styles.checkLabel}>{name.replace(/_/g, ' ')}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {failed.length > 0 && (
+                      <div className={styles.gateFailed}>
+                        Failing: {failed.map(f => f.replace(/_/g, ' ')).join(', ')}
                       </div>
-                    ))}
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {report.reasons.length > 0 && (
                 <div className={styles.cardHint} style={{ marginTop: 8 }}>
                   {report.reasons.join(' · ')}

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
 import AppShell from '../../components/AppShell';
+import Pagination from '../../components/ui/pagination';
 
 type AgentStatus = 'active' | 'idle' | 'error';
 type AgentNode = {
@@ -105,6 +106,8 @@ export default function AIControlPage() {
   const [supervisorStatus, setSupervisorStatus] = useState<SupervisorStatus | null>(null);
   const [source, setSource] = useState<SourceState>('unavailable');
   const [loading, setLoading] = useState(true);
+  const [modelPage, setModelPage] = useState(1);
+  const [modelPageSize, setModelPageSize] = useState(25);
   // LLM Advisor (ide #1) — advisory-only, guardrail fail-closed.
   const [advisorStatus, setAdvisorStatus] = useState<AdvisorStatus | null>(null);
   const [advisorRole, setAdvisorRole] = useState('market');
@@ -168,6 +171,10 @@ export default function AIControlPage() {
   const totalTokens = models.reduce((sum, m) => sum + m.promptTokens + m.completionTokens, 0);
   const totalCost = models.reduce((sum, m) => sum + m.cost, 0);
   const totalCalls = models.reduce((sum, m) => sum + m.calls, 0);
+
+  const modelPageCount = Math.max(1, Math.ceil(models.length / modelPageSize));
+  const safeModelPage = Math.min(modelPage, modelPageCount);
+  const visibleModels = models.slice((safeModelPage - 1) * modelPageSize, safeModelPage * modelPageSize);
 
   return (
     <AppShell
@@ -451,7 +458,7 @@ export default function AIControlPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {models.map((model) => (
+                  {visibleModels.map((model) => (
                     <tr key={model.model}>
                       <td><strong>{model.model}</strong></td>
                       <td>{model.provider}</td>
@@ -471,6 +478,16 @@ export default function AIControlPage() {
                   ))}
                 </tbody>
               </table>
+              {models.length > 0 && (
+                <Pagination
+                  page={safeModelPage}
+                  pageSize={modelPageSize}
+                  total={models.length}
+                  onPageChange={setModelPage}
+                  onPageSizeChange={setModelPageSize}
+                  unitLabel="models"
+                />
+              )}
               {models.length === 0 && (
                 <div className={styles.empty}>
                   {source === 'live'

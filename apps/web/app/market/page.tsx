@@ -7,13 +7,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
+import { useLiveQuotes, type LivePosition } from '../../lib/useLiveQuotes';
 import AppShell from '../../components/AppShell';
+import Pagination from '../../components/ui/pagination';
 import PriceChart, { ChartData, ChartLevel } from '../../components/PriceChart';
 
 const TIMEFRAMES = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1', 'MN1'] as const;
 type Timeframe = (typeof TIMEFRAMES)[number];
 
 const DEFAULT_SYMBOLS = ['XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'BTCUSD'];
+
+// Price formatter that adapts decimals to magnitude (like the chart axis).
+function fmtLive(v: number): string {
+  if (!Number.isFinite(v)) return '—';
+  if (Math.abs(v) >= 1000) return v.toFixed(1);
+  if (Math.abs(v) >= 10) return v.toFixed(2);
+  return v.toFixed(5);
+}
 
 // Analysis response shape (additional to candles)
 type AnalysisData = {
@@ -55,6 +65,22 @@ type AnalysisData = {
   };
 };
 
+// Renders a numeric value that briefly flashes when it changes — gives the
+// "angka bergerak" feel without re-rendering the whole table.
+function LiveNumber({ value, format, className }: { value: number; format: (v: number) => string; className?: string }) {
+  const [flash, setFlash] = useState(false);
+  const prev = useRef<number>(value);
+  useEffect(() => {
+    if (prev.current !== value) {
+      prev.current = value;
+      setFlash(true);
+      const t = setTimeout(() => setFlash(false), 900);
+      return () => clearTimeout(t);
+    }
+  }, [value]);
+  return <span className={`${flash ? 'liveFlash ' : ''}${className ?? ''}`.trim()}>{format(value)}</span>;
+}
+
 export default function MarketPage() {
   const [symbol, setSymbol] = useState('XAUUSD');
   const [symbolInput, setSymbolInput] = useState('XAUUSD');
@@ -72,7 +98,21 @@ export default function MarketPage() {
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
+  const [posPage, setPosPage] = useState(1);
+  const [posPageSize, setPosPageSize] = useState(25);
+  const [live, setLive] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   const reqSeq = useRef(0);
+  const loadingMoreRef = useRef(false);
+
+  // Realtime stream (WS): price quotes + open-position P&L, read-only.
+  const {
+    quotes: liveQuotes,
+    positions: livePositions,
+    status: liveStatus,
+    lastUpdate: liveUpdate,
+  } = useLiveQuotes({ symbols, positions: true, enabled: live });
 
   const load = useCallback(async () => {
     const seq = ++reqSeq.current;
@@ -116,7 +156,88 @@ export default function MarketPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Lazy-load older history when the chart is panned to its left edge. Fetches
+  // the previous window (`before` = oldest loaded bar) and PREPENDS it to every
+  // series so the chart extends seamlessly — the viewport stays anchored on the
+  // same bars (PriceChart shifts the window forward by the prepended count).
+  const loadMoreHistory = useCallback(async () => {
+    if (loadingMoreRef.current) return;
+    const cur = data;
+    const oldest = cur?.bars?.[0]?.time;
+    if (!cur?.ok || !oldest || !cur.has_more) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const qs = new URLSearchParams({
+        symbol,
+        timeframe,
+        bars: String(bars),
+        before: oldest,
+      });
+      const res = await apiFetch(`/chart/candles?${qs}`);
+      if (!res.ok) return;
+      const older: ChartData = await res.json();
+      if (!older.ok || !older.bars?.length) return;
+      setData((prev) => {
+        if (!prev?.ok || !prev.bars) return prev;
+        // Guard against a duplicate page (e.g. double trigger).
+        if (prev.bars[0]?.time === older.bars![0]?.time) return prev;
+        const merge = (a?: (number | null)[], b?: (number | null)[]) => [...(b ?? []), ...(a ?? [])];
+        const prevOv = prev.overlays;
+        const ov = older.overlays;
+        return {
+          ...prev,
+          bars: [...older.bars!, ...prev.bars],
+          has_more: older.has_more,
+          overlays: {
+            ema_fast: { period: prevOv?.ema_fast.period ?? 20, values: merge(prevOv?.ema_fast.values, ov?.ema_fast.values) },
+            ema_slow: { period: prevOv?.ema_slow.period ?? 50, values: merge(prevOv?.ema_slow.values, ov?.ema_slow.values) },
+            bollinger: prevOv?.bollinger
+              ? {
+                  period: prevOv.bollinger.period,
+                  std: prevOv.bollinger.std,
+                  upper: merge(prevOv.bollinger.upper, ov?.bollinger?.upper),
+                  middle: merge(prevOv.bollinger.middle, ov?.bollinger?.middle),
+                  lower: merge(prevOv.bollinger.lower, ov?.bollinger?.lower),
+                }
+              : null,
+          },
+          panels: {
+            rsi: prev.panels?.rsi ? { period: prev.panels.rsi.period, values: merge(prev.panels.rsi.values, older.panels?.rsi?.values) } : null,
+            macd:
+              prev.panels?.macd && older.panels?.macd
+                ? {
+                    fast: prev.panels.macd.fast,
+                    slow: prev.panels.macd.slow,
+                    signal: prev.panels.macd.signal,
+                    line: merge(prev.panels.macd.line, older.panels.macd.line),
+                    signal_line: merge(prev.panels.macd.signal_line, older.panels.macd.signal_line),
+                    histogram: merge(prev.panels.macd.histogram, older.panels.macd.histogram),
+                  }
+                : prev.panels?.macd ?? null,
+          },
+          provenance: {
+            ...prev.provenance,
+            source: prev.provenance?.source ?? 'mt5',
+            mode: prev.provenance?.mode ?? 'live-read-only',
+            bar_count: prev.bars.length + older.bars!.length,
+          },
+        };
+      });
+    } catch {
+      /* best-effort; a failed history load just leaves the current window */
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [data, symbol, timeframe, bars]);
+
   const submitSymbol = (e: React.FormEvent) => { e.preventDefault(); const s = symbolInput.trim().toUpperCase(); if (s) setSymbol(s); };
+
+  // Live quote for the charted symbol (WS). Null when the stream has no value
+  // yet — never a fabricated number.
+  const liveQuote = liveQuotes[symbol] ?? null;
+  const livePrice = liveQuote?.last ?? liveQuote?.bid ?? null;
 
   // Build chart level overlays: analysis + open positions
   const chartLevels: ChartLevel[] = [];
@@ -132,9 +253,32 @@ export default function MarketPage() {
       if (typeof p.tp === 'number') chartLevels.push({ label: `TP #${p.ticket}`, value: p.tp, kind: 'target' });
     }
   }
+  // Live last price drawn as an entry-style line so it moves with the stream.
+  if (typeof livePrice === 'number' && Number.isFinite(livePrice)) {
+    chartLevels.push({ label: 'Harga kini', value: livePrice, kind: 'entry' });
+  }
 
   const barCount = data?.bars?.length ?? 0;
   const prov = data?.provenance;
+
+  // Merge open positions (from /chart/analysis) with the live stream by ticket
+  // so price/profit tick without refetching the chart. Server truth wins for
+  // SL/TP/entry; only the moving fields take the live value.
+  const liveByTicket = new Map<string, LivePosition>();
+  for (const p of livePositions ?? []) {
+    if (p && p.ticket != null) liveByTicket.set(String(p.ticket), p);
+  }
+
+  const allPositions = (analysis?.positions ?? []).map((p) => {
+    const lp = liveByTicket.get(String(p.ticket));
+    if (!lp) return p;
+    const current = typeof lp.current === 'number' ? lp.current : (typeof lp.price_current === 'number' ? lp.price_current : p.current);
+    const profit = typeof lp.profit === 'number' ? lp.profit : (typeof lp.unrealized_pnl === 'number' ? lp.unrealized_pnl : p.profit);
+    return { ...p, current, profit };
+  });
+  const posPageCount = Math.max(1, Math.ceil(allPositions.length / posPageSize));
+  const safePosPage = Math.min(posPage, posPageCount);
+  const visiblePositions = allPositions.slice((safePosPage - 1) * posPageSize, safePosPage * posPageSize);
 
   return (
     <AppShell
@@ -142,9 +286,17 @@ export default function MarketPage() {
       eyebrow="EA BOT / PASAR"
       title="Pasar"
       actions={
-        <button type="button" className={styles.refreshBtn} onClick={load} disabled={loading}>
-          {loading ? 'Memuat…' : 'Muat ulang'}
-        </button>
+        <>
+          <label className={styles.liveToggle} title="Streaming harga & P&L via WebSocket">
+            <input type="checkbox" checked={live} onChange={e => setLive(e.target.checked)} />
+            <span className={`liveDot ${live ? (liveStatus === 'live' ? 'liveOn' : 'liveOff') : 'liveOff'}`} />
+            Live
+            {live && liveStatus !== 'live' ? ` · ${liveStatus}` : ''}
+          </label>
+          <button type="button" className={styles.refreshBtn} onClick={load} disabled={loading}>
+            {loading ? 'Memuat…' : 'Muat ulang'}
+          </button>
+        </>
       }
     >
       {/* Controls */}
@@ -211,15 +363,25 @@ export default function MarketPage() {
       {/* Metadata */}
       <div className={styles.metaRow}>
         <span className={styles.metaItem}>{data?.symbol ?? symbol} · {data?.timeframe ?? timeframe}</span>
+        {typeof livePrice === 'number' ? (
+          <span className={`${styles.metaItem} ${styles.livePrice}`}>
+            <span className={`liveDot ${liveStatus === 'live' ? 'liveOn' : 'liveOff'}`} />
+            {fmtLive(livePrice)}
+            {liveQuote?.bid != null && liveQuote?.ask != null ? (
+              <span className={styles.liveSub}> · b {fmtLive(liveQuote.bid)} / a {fmtLive(liveQuote.ask)}</span>
+            ) : null}
+          </span>
+        ) : null}
         {prov ? (<span className={styles.metaItem}>{barCount} bar · sumber {prov.source} · mode {prov.mode}</span>) : null}
-        {updatedAt ? (<span className={styles.metaItem}>diperbarui {updatedAt.toLocaleTimeString('id-ID')}</span>) : null}
+        {liveUpdate ? (<span className={styles.metaItem}>live {liveUpdate.toLocaleTimeString('id-ID')}</span>) : null}
+        {updatedAt ? (<span className={styles.metaItem}>chart {updatedAt.toLocaleTimeString('id-ID')}</span>) : null}
       </div>
 
       {error && <div className={styles.errorBox}>{error}</div>}
 
       {/* Chart */}
       {data ? (
-        <PriceChart data={data} showEma={showEma} showBollinger={showBollinger} showRsi={showRsi} showMacd={showMacd} levels={chartLevels} />
+        <PriceChart data={data} showEma={showEma} showBollinger={showBollinger} showRsi={showRsi} showMacd={showMacd} levels={chartLevels} onNeedMoreHistory={loadMoreHistory} loadingMore={loadingMore} />
       ) : (
         <div className={styles.loadingBox}>{loading ? 'Memuat chart…' : 'Chart belum tersedia.'}</div>
       )}
@@ -255,7 +417,11 @@ export default function MarketPage() {
             </div>
             <div className={styles.levelItem}>
               <span className={styles.levelLabel}>Harga kini</span>
-              <span className={styles.levelValue}>{analysis.analysis.close.toFixed(2)}</span>
+              <span className={styles.levelValue}>
+                {typeof livePrice === 'number'
+                  ? <LiveNumber value={livePrice} format={fmtLive} />
+                  : analysis.analysis.close.toFixed(2)}
+              </span>
             </div>
           </div>
           <p className={styles.analysisReason}>{analysis.analysis.reason}</p>
@@ -265,10 +431,15 @@ export default function MarketPage() {
         </section>
       )}
 
-      {/* Open positions table */}
-      {analysis?.positions && analysis.positions.length > 0 && (
+      {/* Open positions table (analysis + live stream merged) */}
+      {allPositions.length > 0 && (
         <section className={styles.posBox}>
-          <h2 className={styles.posTitle}>Posisi terbuka · {analysis?.symbol ?? symbol}</h2>
+          <h2 className={styles.posTitle}>
+            Posisi terbuka · {analysis?.symbol ?? symbol}
+            {liveStatus === 'live' && livePositions && livePositions.length > 0 ? (
+              <span className={styles.posLiveTag}><span className="liveDot liveOn" />live</span>
+            ) : null}
+          </h2>
           <div className={styles.posTableWrap}>
             <table className={styles.posTable}>
               <thead>
@@ -277,21 +448,33 @@ export default function MarketPage() {
                 </tr>
               </thead>
               <tbody>
-                {analysis.positions.map(p => (
+                {visiblePositions.map(p => (
                   <tr key={p.ticket}>
                     <td className={styles.posMono}>{p.ticket}</td>
                     <td><span className={`${styles.sideBadge} ${p.side === 'BUY' ? styles.sideBuy : styles.sideSell}`}>{p.side}</span></td>
                     <td className={styles.posMono}>{p.volume}</td>
                     <td className={styles.posMono}>{p.entry.toFixed(2)}</td>
-                    <td className={styles.posMono}>{p.current.toFixed(2)}</td>
+                    <td className={styles.posMono}>
+                      <LiveNumber value={p.current} format={fmtLive} />
+                    </td>
                     <td className={styles.posMono}>{p.sl !== null ? p.sl.toFixed(2) : '—'}</td>
                     <td className={styles.posMono}>{p.tp !== null ? p.tp.toFixed(2) : '—'}</td>
-                    <td className={p.profit >= 0 ? styles.positive : styles.negative}>{p.profit.toFixed(2)}</td>
+                    <td className={p.profit >= 0 ? styles.positive : styles.negative}>
+                      <LiveNumber value={p.profit} format={(v) => v.toFixed(2)} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          <Pagination
+            page={safePosPage}
+            pageSize={posPageSize}
+            total={allPositions.length}
+            onPageChange={setPosPage}
+            onPageSizeChange={setPosPageSize}
+            unitLabel="positions"
+          />
         </section>
       )}
     </AppShell>

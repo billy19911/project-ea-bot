@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
+import Pagination from '@/components/ui/pagination';
 import styles from '@/components/ops.module.css';
 
 type Evaluation = {
@@ -29,6 +30,8 @@ function statusPill(status: string): string {
 export default function SloPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const load = useCallback(async () => {
     try {
@@ -48,6 +51,11 @@ export default function SloPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const evaluations = report?.evaluations ?? [];
+  const pageCount = Math.max(1, Math.ceil(evaluations.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const visible = evaluations.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   return (
     <AppShell activeKey="slo" eyebrow="Xynn / Observability" title="System SLO">
@@ -79,6 +87,7 @@ export default function SloPage() {
             </button>
           </div>
           {report && report.evaluations.length > 0 ? (
+            <>
             <table className={styles.table}>
               <thead>
                 <tr>
@@ -93,7 +102,7 @@ export default function SloPage() {
                 </tr>
               </thead>
               <tbody>
-                {report.evaluations.map(e => (
+                {visible.map(e => (
                   <tr key={e.sli}>
                     <td className={styles.mono}>{e.sli}</td>
                     <td>
@@ -111,6 +120,15 @@ export default function SloPage() {
                 ))}
               </tbody>
             </table>
+            <Pagination
+              page={safePage}
+              pageSize={pageSize}
+              total={evaluations.length}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+              unitLabel="SLIs"
+            />
+            </>
           ) : (
             <div className={styles.empty}>No SLO data available.</div>
           )}

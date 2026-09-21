@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
+import Pagination from '@/components/ui/pagination';
 import styles from '@/components/ops.module.css';
 
 type BreakerState = {
@@ -42,6 +43,8 @@ export default function CircuitBreakerPage() {
   const [state, setState] = useState<BreakerState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const load = useCallback(async () => {
     try {
@@ -61,6 +64,11 @@ export default function CircuitBreakerPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const transitions = state?.recent ?? [];
+  const pageCount = Math.max(1, Math.ceil(transitions.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const visibleTransitions = transitions.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const trigger = async (key: string) => {
     setBusy(true);
@@ -167,6 +175,7 @@ export default function CircuitBreakerPage() {
             <span className={styles.panelTitle}>Recent Transitions</span>
           </div>
           {state && state.recent.length > 0 ? (
+            <>
             <table className={styles.table}>
               <thead>
                 <tr>
@@ -178,7 +187,7 @@ export default function CircuitBreakerPage() {
                 </tr>
               </thead>
               <tbody>
-                {state.recent.map((r, i) => (
+                {visibleTransitions.map((r, i) => (
                   <tr key={i}>
                     <td>{r.from}</td>
                     <td>{r.to}</td>
@@ -189,6 +198,15 @@ export default function CircuitBreakerPage() {
                 ))}
               </tbody>
             </table>
+            <Pagination
+              page={safePage}
+              pageSize={pageSize}
+              total={transitions.length}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+              unitLabel="transitions"
+            />
+            </>
           ) : (
             <div className={styles.empty}>No transitions recorded.</div>
           )}

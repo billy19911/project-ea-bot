@@ -372,3 +372,99 @@ class TestBackwardCompatibility:
         assert "my_agent" in sup.match_routes("CUSTOM_EVENT")
         assert sup.remove_route("CUSTOM_") is True
         assert sup.remove_route("NONEXISTENT") is False
+
+
+# ===================================================================
+# Synthesis wiring — the Supervisor must emit a pipeline-ready proposal
+# so the Risk Gate is actually reached (regression for the bug where every
+# cycle was NO_TRADE because no proposal was ever produced).
+# ===================================================================
+
+
+class _SignalAgent(BaseAgent):
+    """Agent that always returns a fixed signal/confidence."""
+
+    def __init__(self, name: str, signal: str, confidence: float) -> None:
+        super().__init__(
+            name=name,
+            agent_type="analyst",
+            description=f"signal agent {name}",
+            priority=AgentPriority.NORMAL,
+        )
+        self._signal = signal
+        self._confidence = confidence
+
+    def can_handle(self, event_type: str, context: dict[str, Any]) -> bool:
+        return True
+
+    def analyze(self, context: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "agent": self.name,
+            "signal": self._signal,
+            "confidence": self._confidence,
+            "reasons": ["stub"],
+        }
+
+
+class TestSupervisorSynthesisWiring:
+    def _context(self, *agents: BaseAgent) -> dict[str, Any]:
+        return {
+            "event_type": "BREAKOUT",
+            "symbol": "EURUSD",
+            "agents": list(agents),
+            "event": {"event_id": "e1", "event_type": "BREAKOUT", "symbol": "EURUSD"},
+            "close": 1.1000,
+            "atr": 0.0020,
+        }
+
+    def test_bullish_consensus_emits_proposal(self):
+        sup = SupervisorAgent()
+        ctx = self._context(
+            _SignalAgent("structure_analyst", "BULLISH", 0.8),
+            _SignalAgent("momentum_analyst", "BUY", 0.7),
+        )
+        result = sup.analyze(ctx)
+
+        assert result["overall_signal"] in ("BULLISH", "BUY")
+        proposal = result["proposal"]
+        assert proposal is not None
+        assert proposal["direction"] == "BUY"
+        # Pipeline/risk-gate expected keys.
+        assert proposal["entry_price"] == 1.1
+        assert proposal["stop_loss"] is not None
+        assert proposal["take_profit"] is not None
+        assert result["synthesis"] is not None
+        assert result["synthesis"]["proposal"]["direction"] == "BUY"
+
+    def test_bearish_consensus_emits_sell_proposal(self):
+        sup = SupervisorAgent()
+        ctx = self._context(
+            _SignalAgent("structure_analyst", "BEARISH", 0.85),
+            _SignalAgent("momentum_analyst", "SELL", 0.75),
+        )
+        proposal = sup.analyze(ctx)["proposal"]
+        assert proposal is not None
+        assert proposal["direction"] == "SELL"
+
+    def test_neutral_consensus_emits_no_proposal(self):
+        """No actionable signal must NOT fabricate a trade (fail-closed)."""
+        sup = SupervisorAgent()
+        ctx = self._context(
+            _SignalAgent("structure_analyst", "NEUTRAL", 0.2),
+            _SignalAgent("momentum_analyst", "NEUTRAL", 0.3),
+        )
+        result = sup.analyze(ctx)
+        assert result["proposal"] is None
+
+    def test_synthesis_failure_is_fail_closed(self):
+        """A broken synthesizer yields no proposal, never an exception."""
+        sup = SupervisorAgent()
+
+        class _Boom:
+            def generate_proposal(self, *a, **k):
+                raise RuntimeError("boom")
+
+        sup.synthesizer = _Boom()  # type: ignore[assignment]
+        ctx = self._context(_SignalAgent("structure_analyst", "BULLISH", 0.9))
+        result = sup.analyze(ctx)
+        assert result["proposal"] is None

@@ -10,7 +10,8 @@ reason — no fake candles, no fake zeros.
 from __future__ import annotations
 
 import re
-from typing import Any
+from datetime import datetime
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -32,11 +33,20 @@ async def get_chart_candles(
     bars: int = Query(300, ge=_MIN_BARS, le=_MAX_BARS, description="Number of candles"),
     ema_fast: int = Query(20, ge=1, le=400, description="Fast EMA period (overlay)"),
     ema_slow: int = Query(50, ge=2, le=400, description="Slow EMA period (overlay)"),
+    before: Optional[str] = Query(
+        None,
+        description=(
+            "ISO timestamp — return the `bars` candles immediately BEFORE this "
+            "time (chart lazy-loads older history when panned left)."
+        ),
+    ),
 ) -> dict[str, Any]:
     """Candles + indicator series for one symbol/timeframe (read-only).
 
     Returns ``ok: false`` with a human-readable reason when MT5 is not in live
-    mode or the symbol has no bars — never a chart of fabricated data.
+    mode or the symbol has no bars — never a chart of fabricated data. When
+    ``before`` is supplied only a window of older history is returned and
+    ``has_more`` reports whether even older bars exist.
     """
     symbol = symbol.strip().upper()
     timeframe = timeframe.strip().upper()
@@ -52,6 +62,13 @@ async def get_chart_candles(
     if ema_slow <= ema_fast:
         raise HTTPException(status_code=400, detail="ema_slow harus lebih besar dari ema_fast.")
 
+    before_dt: Optional[datetime] = None
+    if before:
+        try:
+            before_dt = datetime.fromisoformat(before.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="`before` harus format ISO-8601.")
+
     from ..mt5 import connector
 
     if not connector.is_live_mode():
@@ -63,7 +80,7 @@ async def get_chart_candles(
             ),
         }
 
-    bars_data = connector.get_ohlc(symbol, timeframe, bars)
+    bars_data = connector.get_ohlc(symbol, timeframe, bars, before=before_dt)
     if not bars_data:
         return {
             "ok": False,
@@ -72,7 +89,9 @@ async def get_chart_candles(
                 "di Market Watch terminal MT5."
             ),
         }
-    if len(bars_data) < _MIN_BARS:
+    # The minimum-bars guard only applies to the initial (latest) window; a
+    # history page legitimately returns fewer bars when history runs out.
+    if before_dt is None and len(bars_data) < _MIN_BARS:
         return {
             "ok": False,
             "reason": (
@@ -87,6 +106,13 @@ async def get_chart_candles(
         ema_slow=ema_slow,
     )
 
+    # Tell the client whether even older history exists, so paging can stop.
+    oldest = bars_data[0].time
+    has_more = False
+    if len(bars_data) >= bars:
+        older_probe = connector.get_ohlc(symbol, timeframe, 1, before=oldest)
+        has_more = len(older_probe) > 0
+
     return {
         "ok": True,
         "symbol": symbol,
@@ -94,6 +120,8 @@ async def get_chart_candles(
         "bars": payload["bars"],
         "overlays": payload["overlays"],
         "panels": payload["panels"],
+        "has_more": has_more,
+        "before": before_dt.isoformat() if before_dt else None,
         "provenance": {
             "source": "mt5",
             "mode": "live-read-only",

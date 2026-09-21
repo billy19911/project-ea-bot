@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
 import AppShell from '../../components/AppShell';
+import Pagination from '../../components/ui/pagination';
 
 // View model: camelCase performance fields for rendering. Mapped from the
 // Node API's StrategyRecord (snake_case) in `mapStrategy`.
@@ -56,6 +57,8 @@ export default function StrategyCenterPage() {
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const selected = selectedId ? strategies.find((s) => s.id === selectedId) : null;
 
@@ -106,6 +109,10 @@ export default function StrategyCenterPage() {
     }
   };
 
+  const pageCount = Math.max(1, Math.ceil(strategies.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const visibleStrategies = strategies.slice((safePage - 1) * pageSize, safePage * pageSize);
+
   return (
     <AppShell
       activeKey="strategy"
@@ -148,7 +155,7 @@ export default function StrategyCenterPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {strategies.map((strat) => (
+                  {visibleStrategies.map((strat) => (
                     <tr key={strat.id} onClick={() => setSelectedId(strat.id)} className={styles.clickableRow}>
                       <td>
                         <strong>{strat.name}</strong>
@@ -179,6 +186,14 @@ export default function StrategyCenterPage() {
                   ))}
                  </tbody>
                </table>
+               <Pagination
+                 page={safePage}
+                 pageSize={pageSize}
+                 total={strategies.length}
+                 onPageChange={setPage}
+                 onPageSizeChange={setPageSize}
+                 unitLabel="strategies"
+               />
              </div>
             )}
            </section>

@@ -5,6 +5,30 @@ import styles from './page.module.css';
 import { apiFetch, generateTraceId, getAuthToken } from '../../lib/api';
 import AppShell from '../../components/AppShell';
 import DailyReport from '../../components/DailyReport';
+import Pagination from '../../components/ui/pagination';
+
+// Client-side pagination hook for long server-returned lists. The full array
+// stays in memory; only the visible window is rendered. Page resets to 1 when
+// the list length changes (e.g. after a refresh) so we never land on an empty
+// page. Returns the slice to render plus a ready-to-drop-in <Pagination>.
+function usePagedRows<T>(rows: T[] | undefined, initialSize = 25) {
+  const data = rows ?? [];
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(initialSize);
+  const pageCount = Math.max(1, Math.ceil(data.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const slice = data.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const pager = data.length > pageSize ? (
+    <Pagination
+      page={safePage}
+      pageSize={pageSize}
+      total={data.length}
+      onPageChange={setPage}
+      onPageSizeChange={setPageSize}
+    />
+  ) : null;
+  return { rows: slice, pager };
+}
 
 // API routes require a Bearer token (PRD_V2 §28). The /login page mints and
 // stores the token in localStorage under this key; the "Run Cycle" action
@@ -399,6 +423,20 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
   const learning = data.learning as any;
   const reconciliation = data.reconciliation as any;
 
+  // One paged view per long list. Hooks run unconditionally (required) — the
+  // slices are only used inside the matching tab branch below.
+  const tradesPage = usePagedRows<any>(trading?.recent_trades, 10);
+  const positionsPage = usePagedRows<any>(positions?.positions, 25);
+  const symbolsPage = usePagedRows<any>(market?.symbols, 15);
+  const agentsPage = usePagedRows<any>(aiControl?.agents, 15);
+  const tasksPage = usePagedRows<any>(tasks?.tasks, 25);
+  const decisionsPage = usePagedRows<any>(decisions?.decisions, 25);
+  const strategiesPage = usePagedRows<any>(strategies?.strategies, 25);
+  const auditPage = usePagedRows<any>(audit?.events, 25);
+  const healthPage = usePagedRows<any>(health?.components, 25);
+  const providersPage = usePagedRows<any>(providers?.providers, 25);
+  const modelsPage = usePagedRows<any>(models?.models, 50);
+
   if (tab === 'overview') {
     if (!overview) return <div className={s.empty}>Belum ada data ringkasan. Pastikan token aktif lalu klik Muat ulang.</div>;
     return (
@@ -476,7 +514,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
             <table className={s.table}>
               <thead><tr><th>ID</th><th>Symbol</th><th>Side</th><th>Vol</th><th>PnL</th><th>Status</th></tr></thead>
               <tbody>
-                {trading.recent_trades?.map((t: any) => (
+                {tradesPage.rows.map((t: any) => (
                   <tr key={t.id}>
                     <td className={s.mono}>{t.id}</td>
                     <td><strong>{t.symbol}</strong></td>
@@ -489,6 +527,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
               </tbody>
             </table>
           </div>
+          {tradesPage.pager}
         </section>
       </div>
     );
@@ -503,7 +542,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           <table className={s.table}>
             <thead><tr><th>Ticket</th><th>Symbol</th><th>Side</th><th>Vol</th><th>Open</th><th>Current</th><th>SL</th><th>TP</th><th>PnL</th></tr></thead>
             <tbody>
-              {positions.positions?.map((p: any) => {
+              {positionsPage.rows.map((p: any) => {
                 const pnl = p.unrealized_pnl ?? p.profit ?? null;
                 return (
                 <tr key={p.ticket}>
@@ -522,6 +561,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
             </tbody>
           </table>
         </div>
+        {positionsPage.pager}
       </section>
     );
   }
@@ -552,7 +592,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           <table className={s.table}>
             <thead><tr><th>Symbol</th><th>Price</th><th>Chg%</th><th>Spread</th><th>Volatility</th></tr></thead>
             <tbody>
-              {market.symbols?.map((sym: any) => (
+              {symbolsPage.rows.map((sym: any) => (
                 <tr key={sym.symbol}>
                   <td><strong>{sym.symbol}</strong></td>
                   <td>{sym.price ?? '—'}</td>
@@ -563,6 +603,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
               ))}
             </tbody>
           </table>
+          {symbolsPage.pager}
         </section>
       </div>
     );
@@ -585,7 +626,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           <table className={s.table}>
             <thead><tr><th>Agent</th><th>Type</th><th>Status</th><th>Priority</th><th>Last active</th><th>Errors</th></tr></thead>
             <tbody>
-              {aiControl.agents?.map((a: any) => (
+              {agentsPage.rows.map((a: any) => (
                 <tr key={a.name}>
                   <td><strong>{a.name}</strong></td>
                   <td>{a.type}</td>
@@ -597,6 +638,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
               ))}
             </tbody>
           </table>
+          {agentsPage.pager}
         </section>
       </div>
     );
@@ -616,7 +658,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
         <table className={s.table}>
           <thead><tr><th>ID</th><th>Type</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Duration</th></tr></thead>
           <tbody>
-            {tasks.tasks?.map((t: any) => (
+            {tasksPage.rows.map((t: any) => (
               <tr key={t.id}>
                 <td className={s.mono}>{t.id}</td>
                 <td>{t.type}</td>
@@ -631,6 +673,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
             )}
           </tbody>
         </table>
+        {tasksPage.pager}
       </section>
     );
   }
@@ -644,7 +687,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           <table className={s.table}>
             <thead><tr><th>ID</th><th>Event</th><th>Verdict</th><th>Status</th><th>Risk</th><th>Confidence</th><th>Summary</th><th>Waktu</th></tr></thead>
             <tbody>
-              {decisions.decisions?.map((d: any) => (
+              {decisionsPage.rows.map((d: any) => (
                 <tr key={d.decision_id ?? d.event_id}>
                   <td className={s.mono}>{d.decision_id ?? '—'}</td>
                   <td>{d.event_type ?? '—'}</td>
@@ -662,6 +705,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
             </tbody>
           </table>
         </div>
+        {decisionsPage.pager}
       </section>
     );
   }
@@ -707,7 +751,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
         <table className={s.table}>
           <thead><tr><th>ID</th><th>Strategy</th><th>Version</th><th>Status</th><th>Win rate</th><th>PF</th><th>Max DD</th></tr></thead>
           <tbody>
-            {strategies.strategies?.map((st: any) => (
+            {strategiesPage.rows.map((st: any) => (
               <tr key={st.id}>
                 <td className={s.mono}>{st.id}</td>
                 <td><strong>{st.name}</strong></td>
@@ -720,6 +764,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
             ))}
           </tbody>
         </table>
+        {strategiesPage.pager}
       </section>
     );
   }
@@ -732,7 +777,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
         <table className={s.table}>
           <thead><tr><th>ID</th><th>Waktu</th><th>Actor</th><th>Action</th><th>Target</th><th>Severity</th></tr></thead>
           <tbody>
-            {audit.events?.map((e: any) => (
+            {auditPage.rows.map((e: any) => (
               <tr key={e.id}>
                 <td className={s.mono}>{e.id}</td>
                 <td>{e.timestamp}</td>
@@ -744,6 +789,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
             ))}
           </tbody>
         </table>
+        {auditPage.pager}
       </section>
     );
   }
@@ -756,7 +802,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
         <table className={s.table}>
           <thead><tr><th>Component</th><th>Status</th><th>Detail</th></tr></thead>
           <tbody>
-            {health.components?.map((c: any) => (
+            {healthPage.rows.map((c: any) => (
               <tr key={c.name}>
                 <td><strong>{c.name}</strong></td>
                 <td><span className={`${s.badge} ${badgeClass(c.status, s)}`}>{c.status ?? '—'}</span></td>
@@ -765,6 +811,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
             ))}
           </tbody>
         </table>
+        {healthPage.pager}
         {health.checked_at && <div className={s.mono} style={{ marginTop: 10 }}>Checked at: {health.checked_at}</div>}
       </section>
     );
@@ -832,7 +879,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           <table className={s.table}>
             <thead><tr><th>Provider</th><th>Status</th><th>Models</th><th>Priority</th><th>Calls</th></tr></thead>
             <tbody>
-              {providers.providers?.map((p: any) => (
+              {providersPage.rows.map((p: any) => (
                 <tr key={p.name}>
                   <td><strong>{p.name}</strong></td>
                   <td><span className={`${s.badge} ${badgeClass(p.status, s)}`}>{p.status ?? '—'}</span></td>
@@ -843,6 +890,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
               ))}
             </tbody>
           </table>
+          {providersPage.pager}
           {providers.budget ? (
             <div className={s.mono} style={{ marginTop: 10 }}>Budget: {providers.budget.tokens_used}/{providers.budget.tokens_limit} tokens · ${providers.budget.cost_today}</div>
           ) : (
@@ -884,7 +932,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           <table className={s.table}>
             <thead><tr><th>Model</th><th>Provider</th><th>Context</th><th>Free/Paid</th><th>Capabilities</th></tr></thead>
             <tbody>
-              {models.models?.map((m: any) => (
+              {modelsPage.rows.map((m: any) => (
                 <tr key={m.id}>
                   <td className={s.mono}>{m.id}</td>
                   <td>{m.provider}</td>
@@ -896,6 +944,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
             </tbody>
           </table>
         </div>
+        {modelsPage.pager}
       </section>
     );
   }
@@ -1063,6 +1112,12 @@ function TerminalPanel({
   const selected = all.find((t) => t.selected);
   const probedAt = terminals?.accounts_probed_at ?? null;
 
+  const [termPage, setTermPage] = useState(1);
+  const [termPageSize, setTermPageSize] = useState(25);
+  const termPageCount = Math.max(1, Math.ceil(list.length / termPageSize));
+  const safeTermPage = Math.min(termPage, termPageCount);
+  const visibleTerminals = list.slice((safeTermPage - 1) * termPageSize, safeTermPage * termPageSize);
+
   const post = async (path: string, body: Record<string, unknown>, okMsg: string) => {
     if (!hasToken) return;
     setBusy(true);
@@ -1158,7 +1213,7 @@ function TerminalPanel({
               </tr>
             </thead>
             <tbody>
-              {list.map((t) => (
+              {visibleTerminals.map((t) => (
                 <tr key={t.id}>
                   <td>
                     <strong>{t.label || t.id}</strong>
@@ -1205,6 +1260,16 @@ function TerminalPanel({
             </tbody>
           </table>
         </div>
+      )}
+      {list.length > termPageSize && (
+        <Pagination
+          page={safeTermPage}
+          pageSize={termPageSize}
+          total={list.length}
+          onPageChange={setTermPage}
+          onPageSizeChange={setTermPageSize}
+          unitLabel="terminals"
+        />
       )}
       <div className={s.actions}>
         <button

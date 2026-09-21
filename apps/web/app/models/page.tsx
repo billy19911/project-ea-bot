@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
+import Pagination from '@/components/ui/pagination';
 import styles from '@/components/ops.module.css';
 
 type Telemetry = {
@@ -23,6 +24,8 @@ export default function ModelsPage() {
   const [records, setRecords] = useState<Telemetry[]>([]);
   const [count, setCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const load = useCallback(async () => {
     try {
@@ -49,6 +52,10 @@ export default function ModelsPage() {
     records.length > 0
       ? (records.reduce((sum, r) => sum + (r.latency || 0), 0) / records.length).toFixed(3)
       : '—';
+
+  const pageCount = Math.max(1, Math.ceil(records.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const visible = records.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   return (
     <AppShell activeKey="models" eyebrow="Xynn / AI" title="Models & LLM Observability">
@@ -83,6 +90,7 @@ export default function ModelsPage() {
           {records.length === 0 ? (
             <div className={styles.empty}>No LLM requests recorded yet.</div>
           ) : (
+            <>
             <table className={styles.table}>
               <thead>
                 <tr>
@@ -97,7 +105,7 @@ export default function ModelsPage() {
                 </tr>
               </thead>
               <tbody>
-                {records.map(r => (
+                {visible.map(r => (
                   <tr key={r.request_id}>
                     <td className={styles.mono}>{r.request_id}</td>
                     <td>{r.model}</td>
@@ -119,6 +127,15 @@ export default function ModelsPage() {
                 ))}
               </tbody>
             </table>
+            <Pagination
+              page={safePage}
+              pageSize={pageSize}
+              total={records.length}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+              unitLabel="requests"
+            />
+            </>
           )}
         </div>
       </div>

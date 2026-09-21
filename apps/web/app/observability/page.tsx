@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
 import AppShell from '../../components/AppShell';
+import Pagination from '../../components/ui/pagination';
 import TrendChart from '../../components/TrendChart';
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -103,6 +104,12 @@ export default function ObservabilityPage() {
   const [lastRefresh, setLastRefresh] = useState<string>('');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [tab, setTab] = useState<'overview' | 'errors' | 'agents' | 'tokens'>('overview');
+  const [errPage, setErrPage] = useState(1);
+  const [errPageSize, setErrPageSize] = useState(25);
+  const [agentPage, setAgentPage] = useState(1);
+  const [agentPageSize, setAgentPageSize] = useState(25);
+  const [modelPage, setModelPage] = useState(1);
+  const [modelPageSize, setModelPageSize] = useState(25);
 
   const fetchData = useCallback(async () => {
     // Fetch + parse each endpoint independently, tracking HTTP status so we
@@ -214,6 +221,21 @@ export default function ObservabilityPage() {
   const requests = metrics?.requests;
   const models = supervisor?.models;
   const agents = supervisor?.agents;
+
+  // Paged windows for the long tables (errors / agents / models).
+  const errPageCount = Math.max(1, Math.ceil(errors.length / errPageSize));
+  const safeErrPage = Math.min(errPage, errPageCount);
+  const visibleErrors = errors.slice((safeErrPage - 1) * errPageSize, safeErrPage * errPageSize);
+
+  const agentList = agents ?? [];
+  const agentPageCount = Math.max(1, Math.ceil(agentList.length / agentPageSize));
+  const safeAgentPage = Math.min(agentPage, agentPageCount);
+  const visibleAgents = agentList.slice((safeAgentPage - 1) * agentPageSize, safeAgentPage * agentPageSize);
+
+  const modelList = models ?? [];
+  const modelPageCount = Math.max(1, Math.ceil(modelList.length / modelPageSize));
+  const safeModelPage = Math.min(modelPage, modelPageCount);
+  const visibleModels = modelList.slice((safeModelPage - 1) * modelPageSize, safeModelPage * modelPageSize);
 
   const totalRequests = requests
     ? Object.values(requests).reduce((sum, statuses) =>
@@ -496,7 +518,7 @@ export default function ObservabilityPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {errors.map((err) => (
+                      {visibleErrors.map((err) => (
                         <tr key={err.id}>
                           <td><code>{new Date(err.timestamp).toLocaleTimeString()}</code></td>
                           <td><strong>{err.source}</strong></td>
@@ -512,6 +534,16 @@ export default function ObservabilityPage() {
                       ))}
                     </tbody>
                   </table>
+                  {errors.length > 0 && (
+                    <Pagination
+                      page={safeErrPage}
+                      pageSize={errPageSize}
+                      total={errors.length}
+                      onPageChange={setErrPage}
+                      onPageSizeChange={setErrPageSize}
+                      unitLabel="errors"
+                    />
+                  )}
                 </div>
               )}
 
@@ -576,7 +608,7 @@ export default function ObservabilityPage() {
                   <tbody>
                     {!agents || agents.length === 0 ? (
                       <tr><td colSpan={5} className={styles.emptyRow}>Belum ada agent data</td></tr>
-                    ) : agents.map((agent) => (
+                    ) : visibleAgents.map((agent) => (
                       <tr key={agent.name}>
                         <td><strong>{agent.name}</strong></td>
                         <td>{agent.type}</td>
@@ -593,6 +625,14 @@ export default function ObservabilityPage() {
                     ))}
                   </tbody>
                 </table>
+                <Pagination
+                  page={safeAgentPage}
+                  pageSize={agentPageSize}
+                  total={agentList.length}
+                  onPageChange={setAgentPage}
+                  onPageSizeChange={setAgentPageSize}
+                  unitLabel="agents"
+                />
               </div>
             </section>
           )}
@@ -630,7 +670,7 @@ export default function ObservabilityPage() {
                   <tbody>
                     {!models || models.length === 0 ? (
                       <tr><td colSpan={7} className={styles.emptyRow}>Belum ada data model</td></tr>
-                    ) : models.map((model) => (
+                    ) : visibleModels.map((model) => (
                       <tr key={model.model}>
                         <td><strong>{model.model}</strong></td>
                         <td>{model.provider}</td>
@@ -651,6 +691,14 @@ export default function ObservabilityPage() {
                     ))}
                   </tbody>
                 </table>
+                <Pagination
+                  page={safeModelPage}
+                  pageSize={modelPageSize}
+                  total={modelList.length}
+                  onPageChange={setModelPage}
+                  onPageSizeChange={setModelPageSize}
+                  unitLabel="models"
+                />
               </div>
             </section>
           )}

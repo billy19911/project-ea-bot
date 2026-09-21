@@ -246,6 +246,100 @@
   flex-wrap: wrap;
 }
 
+/* Certification gates ------------------------------------------------------ */
+
+.gateBlock {
+  margin-bottom: var(--sp-4);
+}
+
+.gateBlock:last-child {
+  margin-bottom: 0;
+}
+
+.gateHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+
+.gateTitle {
+  font-size: var(--fs-md);
+  color: var(--text);
+}
+
+/* Compact chip grid — checks read as pass/fail at a glance instead of tall
+ * oversized cards. Consistent height keeps the gate list dense and scannable. */
+.checkGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 6px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  min-height: 36px;
+}
+
+.checkIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: var(--r-full);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.checkLabel {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkOk {
+  border-color: var(--success-border);
+  background: var(--success-soft);
+}
+
+.checkOk .checkIcon {
+  background: var(--success);
+  color: var(--on-primary);
+}
+
+.checkMiss {
+  border-color: var(--border);
+  background: var(--surface-muted);
+}
+
+.checkMiss .checkIcon {
+  background: var(--neutral-muted);
+  color: var(--text-muted);
+}
+
+.gateFailed {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--danger);
+}
+
 .error {
   padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--danger-border);
