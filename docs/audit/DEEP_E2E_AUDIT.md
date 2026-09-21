@@ -16,6 +16,12 @@
 > **THIRD UPDATE (same session):** **P2-1 … P2-14** were then **fixed** (isolated changes + tests); **P2-15** (durable order-state persistence) is **DEFERRED** as low-priority and needing a DB write path. Test count 1904 → **1935** (all green); Node 46/46; web tsc/lint clean. Remaining open: **P3** only. See §13 "P2 fixes applied".
 >
 > **FOURTH UPDATE (same session):** All six **P3** cleanup items were then **fixed**. Test count 1935 → **1943** (all green). **The only remaining open item is P2-15 (deferred).** See §14 "P3 fixes applied".
+>
+> **RELEASE-CANDIDATE RE-VERIFICATION (commit `cfc8551`):** A later independent RC audit re-checked the "FIXED" claims against actual source. Most hold, but **two claims do not survive re-verification** and are corrected inline below:
+> - **P1-6 (trade-close → review → learning) — NOT FIXED at runtime.** `PositionCloseDetector` and `PositionMonitor` are defined and have a hook, but **neither is instantiated anywhere in `src/`** (grep-verified). The only `on_position_closed` caller is the unwired `paper` engine. No runtime producer emits `TRADE_CLOSE`/`POST_TRADE_REVIEW`. The learning loop is therefore **inert in production**.
+> - **P2-1 (AppShell fake realtime) — the "faked" note is STALE.** `apps/web/components/AppShell.tsx` now polls the real `/health` endpoint for its LIVE/DEGRADED/OFFLINE badge.
+>
+> See `docs/audit/RELEASE_READINESS_REPORT.md` for the full re-verification and `docs/audit/RELEASE_BLOCKERS.md` for the live-readiness blockers.
 
 ---
 
@@ -322,7 +328,7 @@ docs/audit/          CURRENT_STATE.md, PRD_V2_CONFORMANCE_AUDIT.md, + this audit
 
 **P1-6. Trade-close → review → learning is not driven by live trades.**
 - Evidence: production `ExecutionEngine` has no close path; paper engine (the only auto-close path) is unwired in prod. The "learning loop from live trades" is **UNKNOWN — NOT VERIFIED**.
-- **STATUS: FIXED (observation-only bridge).** `PositionCloseDetector` diffs successive open-position snapshots and, when a ticket disappears, fires the review hook → lesson store. No orders are placed/closed. Test: `test_position_close_detector.py`.
+- **STATUS: PARTIAL / NOT-WIRED (corrected by RC re-verification, commit `cfc8551`).** `PositionCloseDetector` (`review/close_detector.py`) and a hook in `monitoring/position_monitor.py:378` were **added**, but **neither `PositionCloseDetector` nor `PositionMonitor` is instantiated anywhere in `src/`** (grep-verified). The bridge exists as code only; it is **not connected to the runtime**, so no live/simulated trade reaches review. Test `test_position_close_detector.py` exercises the class in isolation, not the wired loop. **Open blocker B-6** in `RELEASE_BLOCKERS.md`.
 
 ### P2 — MEDIUM
 

@@ -11,8 +11,18 @@
 
 ## Ringkasan EPIC 00 (Audit Compliance)
 
-- ✅ **Compliance verified**: 577 tests passing (including new department, registry, supervisor, permission tests)
-- ✅ **Safety boundary 5/5**: Risk Gate, token budget, concurrency, duplicate prevention, permission guards
+> **Status catatan (revisi audit RC):** Angka test di bawah disinkronkan dengan hasil eksekusi
+> release-candidate terakhir — **Python 1943 passed** (`pytest tests/`), **Node API 46/46**,
+> **Web `tsc` + lint bersih**. Lihat `docs/audit/RELEASE_READINESS_REPORT.md` untuk audit RC
+> terkini. Klaim "safety boundary" di catatan lama terlalu kuat: beberapa gate bersifat
+> *caller-enforced* dan sebagian modul governance/learning belum ter-wire ke runtime — detail
+> di laporan RC (bagian Component Verification & Dead/Orphaned Code).
+
+- ✅ **Tests**: 1943 Python + 46 Node passing; Web typecheck/lint bersih
+- ⚠️ **Safety boundary**: Risk Gate deterministik ter-wire di pipeline (fail-closed), **tetapi**
+  tidak ditegakkan di dalam executor (`ExecutionEngine.execute_order`) dan sebagian guard
+  (permission guards, `MT5WriteGuard`, `MultiLevelBreaker` di jalur trade) **belum ter-wire** ke
+  runtime produksi. Lihat `docs/audit/RELEASE_READINESS_REPORT.md`.
 - ✅ **DevOps and linting:** Black, isort, flake8 passing, CI/CD blueprint integrated
 - ✅ **Documentation:** README, CHANGELOG, PRD V2, ARCHITECTURE_MAP dibuat
 
@@ -26,7 +36,7 @@
 | EPIC 01 | Department Model | `src/agents/departments.py`, `src/agents/permissions.py` | **Complete** |
 | EPIC 02 | Agent Registry metadata (ditambahkan ke `base.py`) | `src/agents/base.py` | **Complete** |
 | EPIC 03 | Supervisor routing to department leads | `src/agents/supervisor.py` | **Complete** |
-|| EPIC 04 | Market Intelligence Department (analyst aggregation & consensus) | `src/market/` | **Complete**
+| EPIC 04 | Market Intelligence Department (analyst aggregation & consensus) | `src/market/` | **Complete** |
 | EPIC 05 | Risk Intelligence Department (advisory only) | `src/risk/intelligence.py` | **Complete** |
 | EPIC 07 | Deterministic Risk & Safety (KillSwitch, CircuitBreaker) | `src/risk/` | **Complete** |
 | EPIC 08 | Execution Engine (OrderBuilder, RecoveryEngine) | `src/execution/` | **Complete** |
@@ -49,8 +59,8 @@
 ### Keputusan Desain
 
 - **Department Lead**: Dipilih melalui skema `role = "department_lead"` → Supervisor rutes ke leads terlebih dahulu.
-- **Agent metadata**: `role`, `permissions`, `dependencies`, `model_policy`, `timeout_seconds` dEFINISI sebagai atribut `BaseAgent` sehingga direktori agen di registry dapat diQuery (get_by_role, get_by_permission).
-- **Permission guards**: Dekorator `require_permission` yang kuat (Lemari besi bisa melakukan operasi Dangerous.
+- **Agent metadata**: `role`, `permissions`, `dependencies`, `model_policy`, `timeout_seconds` didefinisikan sebagai atribut `BaseAgent` sehingga direktori agen di registry dapat di-query (get_by_role, get_by_permission).
+- **Permission guards**: Helper `require_permission` tersedia (`src/agents/permissions.py`). **Catatan:** guard ini saat ini **tidak dipanggil** dari jalur runtime produksi (dipakai di test) — lihat laporan RC (Dead/Orphaned Code).
 
 ### Nama Modul / Entry Points
 
@@ -117,16 +127,21 @@ Direkomendasikan untuk memungkinkan scanner-kode QR (di aplikasi web dashboard) 
 
 ---
 
-## Keputusan Lintas EPIC (TINGGAL)
+## Keputusan Lintas EPIC
 
-- **Orkestrasi:** Supervisor sebagai router utama
-- **Enforcement:** Hard-coded `RiskGate` mandatory (bahkan LLM tidak bisa bypass)
-- **Dependency:** Saat ini, semua agent tests memverifikasi dan menjalankan melalui pytest
-- **Integrasi:** Headers Node + backend + frontend — dirakit melalui NPM workspaces, Docker Compose opsional
+- **Orkestrasi:** Supervisor sebagai router utama (policy default `all_match`).
+- **Enforcement:** `RiskGate` deterministik **wajib dipanggil di pipeline** sebelum eksekusi (fail-closed).
+  **Catatan akurasi (revisi audit RC):** gate ditegakkan oleh *caller* (`TradingPipeline.run`), **bukan**
+  oleh executor (`ExecutionEngine.execute_order`). Ada jalur order lain (mis. `POST /mt5/orders/execute`,
+  `agents.permissions.send_to_mt5`) yang tidak melalui gate. Klaim "bahkan LLM tidak bisa bypass"
+  benar **di dalam pipeline**, tetapi belum menjadi jaminan non-bypassable di level executor. Detail:
+  `docs/audit/RELEASE_READINESS_REPORT.md` (Risk Gate Verification).
+- **Dependency:** Semua agent test diverifikasi lewat pytest.
+- **Integrasi:** Node backend + frontend — dirakit melalui NPM workspaces, Docker Compose opsional.
 
 ---
 
-## Next EPIC (EPIC 02) Quick View
+## Next EPIC Quick View
 
 | Tasks |
 |-------|
@@ -139,4 +154,4 @@ Direkomendasikan untuk memungkinkan scanner-kode QR (di aplikasi web dashboard) 
 
 **Author:** [ChatCohere]  
 **Date:** 2026-09-14  
-**Updated by:** [Anda dapat mengedit]
+**Revisi audit RC:** disinkronkan dengan source & test commit `cfc8551` (lihat `docs/audit/RELEASE_READINESS_REPORT.md`)
