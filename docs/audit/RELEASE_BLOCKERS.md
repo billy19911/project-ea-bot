@@ -97,6 +97,32 @@
 
 ---
 
+## B-7 — Native `order_send` could be reached without the arm gate (found during entry investigation)
+
+- **ID:** B-7
+- **Severity:** P0 (safety, latent)
+- **Component:** `services/python/src/execution/engine.py`
+- **Status:** ✅ **FIXED** (commit `a2a9258`)
+- **Discovery:** While investigating whether a supervisor "command to entry" could execute, the executor's native path was observed to call `mt5.order_send()` on a machine with a **real MetaTrader 5 terminal installed**. The previous guard only blocked the native send when `mt5.connector.is_live_mode()` was True. When the connector was not attached (read-only live-data OFF) but `MetaTrader5` was importable, the engine called `order_send` **without the operator arm gate and without `initialize()`** — returning `None` → `error_code=0, message=''` (a misleading failure), and, in the general case, an un-armed opportunity to reach the broker.
+- **Impact:** On any host with a real MT5 terminal, the native send path was not gated by the operator arm switch. This contradicts the "execution requires an explicit arm" safety claim.
+- **Fix applied:** `_send_to_mt5` now requires `mt5.terminals.execution_permitted()` (the operator arm switch, itself fail-closed) **before any native `mt5.order_send`, regardless of live-data mode**. Not armed → explicit `error_code=403` "EXECUTION NOT ARMED". Simulation is only reached when native `MetaTrader5` is genuinely unimportable.
+- **Tests:** `tests/test_entry_completion.py::test_native_send_requires_armed_terminal`; updated `tests/test_mt5_live_data_mode.py` wording.
+
+---
+
+## B-8 — Entry proposal lacked SL/TP/size → never reached execution
+
+- **ID:** B-8
+- **Severity:** P1 (core entry functionality)
+- **Component:** `services/python/src/orchestration/pipeline.py`
+- **Status:** ✅ **FIXED** (commit `a2a9258`)
+- **Discovery:** A supervisor "command to entry" produced a proposal with a direction but **no SL/TP and no size**. The Risk Gate correctly rejected the missing SL/TP; once provided, execution then failed with `Volume must be positive, got 0.0` because nothing sized the position. `MoneyManager.calculate_lot_size`/`calculate_sl_tp` existed but were not called in the pipeline.
+- **Impact:** No entry could complete end to end, even when the committee voted a direction and the gate approved.
+- **Fix applied:** The pipeline deterministically **completes** missing `entry_price`/`stop_loss`/`take_profit`/`size` from `market_state` (ATR) + account equity via `MoneyManager`. Values the proposal already provides are **never overridden**; any completion error is swallowed so the gate still fails closed. Verified end to end: `supervisor (SELL) → risk OK → guards OK → execution EXECUTED (simulated)`.
+- **Tests:** `tests/test_entry_completion.py` (completion, no-override, full path).
+
+---
+
 ## Summary
 
 | ID | Severity | Status |
@@ -107,5 +133,7 @@
 | B-4 | P0 | Open (operational: live broker validation) |
 | B-5 | P1 | Open (durable state) |
 | B-6 | P1 | ✅ Fixed (`02a577c`) |
+| B-7 | P0 (safety, latent) | ✅ Fixed (`a2a9258`) |
+| B-8 | P1 (entry functionality) | ✅ Fixed (`a2a9258`) |
 
 **Remaining open blockers (B-1, B-2, B-4, B-5)** are operational/deployment actions (authentication enforcement, key forwarding, live validation, durable persistence) that require production configuration or a real broker — they are not code defects that can be safely fixed in an isolated change.

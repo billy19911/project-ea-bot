@@ -34,7 +34,7 @@ Using factual stages (no numerical score):
 | Stage | Status | Basis |
 |---|---|---|
 | **Implemented** | ✅ YES | Full multi-service monorepo: FastAPI brain, Node API, Next.js dashboard, Telegram, infra. |
-| **Unit-tested** | ✅ YES | 1953 Python tests pass; 46 Node tests pass; web typecheck + lint clean. |
+| **Unit-tested** | ✅ YES | 1957 Python tests pass; 46 Node tests pass; web typecheck + lint clean. |
 | **Integration-tested** | ✅ YES (broad) | Pipeline orchestration, supervisor routing, reconciliation wiring, runtime settings, system endpoints all covered. |
 | **End-to-end verified** | ⚠️ PARTIAL | Autonomous feed→decision loop verified by tests + CHANGELOG E2E note; **execution leg is simulated**; trade-close→learning leg now wired (B-6) but not validated against a live account. |
 | **Staging / DEMO validated** | ⚠️ PARTIAL | Read-only MT5 live-data mode + paper simulation are coherent; no operator-run DEMO-account validation evidence in repo. |
@@ -103,7 +103,7 @@ Using factual stages (no numerical score):
 | **Risk Engine (deterministic)** | **VERIFIED** | `risk/engine.py` thresholds; pure arithmetic; no LLM path | `test_risk_engine.py` | — |
 | **Risk Gate** | **VERIFIED (in-pipeline) / PARTIAL (as boundary)** | `risk/gate.py` 8 hard checks; enforced at `pipeline.py:310` fail-closed | `test_risk_gate.py` | **Gate is caller-enforced, not executor-enforced**; zeroed account state in some paths fails safe by rejecting |
 | Execution Engine | **PARTIAL** | Idempotency, validation, retry, honest failure (`engine.py:761-793`); simulated default | `test_execution_engine.py`, `test_execution_retry_idempotency.py` | **No gate/guard/kill-switch check inside `execute_order`**; shipped default `simulation_mode=True` |
-| MT5 Integration | **VERIFIED (read-only)** | `connector.py` real `MetaTrader5` lib, lazy; `terminals.py` fail-closed arm gate | `test_mt5_*.py` | No live broker validation ever performed |
+| MT5 Integration | **VERIFIED (read-only)** | `connector.py` real `MetaTrader5` lib, lazy; `terminals.py` fail-closed arm gate; native send now arm-gated unconditionally (B-7, `a2a9258`) | `test_mt5_*.py`, `test_entry_completion.py` | No live broker validation ever performed |
 | Terminal arm/disarm | **VERIFIED** | `terminals.py:498-668`; disarms before **and** after switch; all config `execution:false` | `temp_pytest` / `test_mt5_terminals*.py` | Endpoint unauthenticated (see Security) |
 | Reconciliation | **PARTIAL** | Comparator real (`reconciliation.py`); gate real (`pipeline.py:366`) | `test_reconciliation*.py` | Providers are **no-ops unless MT5 live mode**; internal ledger in-memory; `internal_orders()` always `[]` |
 | Position Monitoring | **PARTIAL** | `position_monitor.py` snapshotting + change detection; **now wired** in runtime (B-6 fix, `02a577c`) | `test_position_monitor*.py`, `test_rc_fixes_b3_b6.py` | In-memory, no restart recovery; change detection still partial |
@@ -150,13 +150,13 @@ Un-gated order-dispatch surfaces (status after the `02a577c` fix):
 
 - Real `MetaTrader5` Python binding, lazily imported (`connector.py:77`, `retrieval.py:19`). No live connection until explicitly activated; otherwise simulated data (`_constants.py:25-40`).
 - **Fail-safe chain (verified):**
-  - Live-data mode (`is_live_mode()`) + not armed → `_send_to_mt5` **blocks** native send (`engine.py:673-713`).
+  - **A native `mt5.order_send` requires an operator-armed terminal — unconditionally** (B-7 fix, `a2a9258`). `_send_to_mt5` calls `_native_execution_armed()` → `mt5.terminals.execution_permitted()` before ANY native send, regardless of read-only live-data mode. Not armed → explicit `error_code=403` "EXECUTION NOT ARMED". This closed a latent hole where an importable `MetaTrader5` (real terminal present) allowed `order_send` without arming.
   - `execution_permitted()` (`terminals.py:656-668`) is fail-closed: requires armed + selected + `execution_allowed` + running + attached. Any doubt → `False`.
-  - Native send exceptions **never fabricate success** (`engine.py:747-757`); no-broker + simulation-off → honest failure (`:777-793`).
+  - Native send exceptions **never fabricate success**; no-broker + simulation-off → honest failure. Simulation is only reached when native `MetaTrader5` is genuinely unimportable.
 - **Terminal switching cannot leave the previous terminal armed:** `_select_terminal_locked` disarms **before** (`terminals.py:546`) and **after** (`:563`) the switch; failed attach returns disarmed + detached (`:558`).
 - **Config ships with all terminals `execution:false`** (`services/python/mt5_terminals.json`). Arming requires an operator action and never inherits state.
 - **LIVE OFF → no live execution:** enforced by the arm gate + read-only connector. Confirmed.
-- **GAP:** the shipped runtime wires `ExecutionEngine(mt5_connector=None, simulation_mode=True)` (`runtime.py:279`). In pure paper mode (live-data OFF) a missing broker yields a **labelled simulated fill**; in the shipped config `MT5_LIVE_DATA=true`, so the live-data block takes precedence and blocks native sends unless armed.
+- **Entry path:** a supervisor "command to entry" is now completed deterministically (SL/TP from ATR, size from risk-% via `MoneyManager`) and flows `supervisor → risk gate → guards → execution`; it fails closed with an explicit 403 when no terminal is armed (B-8 fix, `a2a9258`).
 
 ---
 
@@ -222,10 +222,10 @@ All commands executed on the audited checkout.
 ### Python (`services/python`)
 ```
 Command : .venv\Scripts\python.exe -m pytest tests/ -q -p no:cacheprovider
-Result  : 1953 passed, 1 warning in 21.69s
-Passed  : 1953    Failed: 0    Skipped: 0    Warnings: 1 (starlette DeprecationWarning)
+Result  : 1957 passed, 1 warning in 21.41s
+Passed  : 1957    Failed: 0    Skipped: 0    Warnings: 1 (starlette DeprecationWarning)
 ```
-Baseline at `cfc8551` was **1943**; the RC fix commit `02a577c` added **+10** (test_rc_fixes_b3_b6.py + approval-token/executor cases). All green. `black`/`isort`/`flake8` clean on the changed files.
+Baseline at `cfc8551` was **1943**; RC fix commits `02a577c` (+10) and `a2a9258` (+4) added **+14** (test_rc_fixes_b3_b6.py + approval-token/executor cases). All green. `black`/`isort`/`flake8` clean on the changed files.
 
 ### Node / API (`apps/api`)
 ```
@@ -248,7 +248,7 @@ Result  : clean (no errors)
 ### Infrastructure
 - CI workflow present (`.github/workflows/ci.yml`, `config-validation.yml`). Prior audit recorded 8/8 jobs green on `51e6470`. Not re-executed here (offline); CI `node` availability warnings exist in the workflow.
 
-**Test quality note:** the 1953 passing tests validate **components**, not inter-gate enforcement. There is still **no adversarial test that proves an AI/agent cannot reach MT5 without the gate**, and no live-terminal E2E test. This is why "all green" and "gates wired" are different claims.
+**Test quality note:** the 1957 passing tests validate **components**, not inter-gate enforcement. There is still **no adversarial test that proves an AI/agent cannot reach MT5 without the gate**, and no live-terminal E2E test. This is why "all green" and "gates wired" are different claims.
 
 ---
 
@@ -315,6 +315,8 @@ Classification (none deleted — documented only):
 - **B-2 (P0): Node→Python trust chain broken** — auth cannot be enabled without breaking the control plane until the header is forwarded.
 - **B-3 (P0, structural): the Risk Gate is now enforced inside the executor.** ✅ **FIXED in commit `02a577c`**: `ExecutionEngine(require_approval=True)` refuses any order lacking a gate-issued `approval_token` (fail-closed, `error_code=403`), and the pipeline stamps `gate:<decision_id>` only after the gate approves. The production runtime opts in. Residual: `POST /mt5/orders/execute` still targets the connector's paper/refusing surface rather than the executor.
 - **B-4 (P0 for live): no live broker validation has ever been performed.** Execution is simulated or blocked; there is no evidence of a real order, fill, or reconciliation against a live account.
+- **B-7 (P0, safety, latent): native `order_send` could be reached without the arm gate.** ✅ **FIXED in commit `a2a9258`**: the native send now requires `execution_permitted()` unconditionally (fail-closed 403 when not armed), closing the hole where an importable `MetaTrader5` (real terminal present) allowed `order_send` without arming.
+- **B-8 (P1, entry functionality): entry proposals lacked SL/TP/size and could not execute.** ✅ **FIXED in commit `a2a9258`**: the pipeline completes missing fields deterministically from ATR + equity; verified end to end.
 
 A separate machine-readable blocker file is provided in `docs/audit/RELEASE_BLOCKERS.md`.
 
@@ -341,11 +343,11 @@ Non-blocking but requiring operational attention:
 RELEASE CANDIDATE — PARTIALLY VERIFIED
 ```
 
-**Rationale:** The system is genuinely integrated and operational as an **analysis + deterministic-decision + fail-closed gating engine**, with strong test evidence (1953 Python + 46 Node passing, web clean) and real runtime wiring for the core pipeline. It is **CODE-READY** and suitable for **STAGING / PAPER / read-only DEMO** operation.
+**Rationale:** The system is genuinely integrated and operational as an **analysis + deterministic-decision + fail-closed gating engine**, with strong test evidence (1957 Python + 46 Node passing, web clean) and real runtime wiring for the core pipeline. It is **CODE-READY** and suitable for **STAGING / PAPER / read-only DEMO** operation.
 
 It is **NOT LIVE-READY**: there is no live broker validation, the shipped execution mode is simulated/blocked, and the control surface is unauthenticated in the shipped config. The deterministic Risk Gate is now enforced within the pipeline **and** at the executor (B-3 fix, `02a577c`), closing the structural non-bypassable-boundary gap. The remaining items (B-1/B-2 auth enforcement, B-4 live validation, B-5 durable state) are concrete, bounded operational actions (see `RELEASE_BLOCKERS.md`), not architecture failures.
 
-**Fixes applied during this audit session:** commit `02a577c` (B-3 executor-enforced approval token + B-6 close→review wiring; +10 tests, full suite 1943 → 1953 green) and commit `1ab9f13` (documentation corrections + RC report).
+**Fixes applied during this audit session:** commit `02a577c` (B-3 executor-enforced approval token + B-6 close→review wiring; +10 tests), commit `a2a9258` (B-7 arm-gate native send + B-8 entry-proposal completion; +4 tests), and commit `1ab9f13` (documentation corrections + RC report). Full Python suite 1943 → 1957 green.
 
 ---
 
