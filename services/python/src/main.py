@@ -205,6 +205,17 @@ async def lifespan(app: FastAPI):
             # arm switch itself always starts OFF.
             from .mt5 import terminals as terminal_manager
 
+            # Prefer the operator's LAST selected terminal (persisted); falls
+            # back to whatever MT5 attached to. This prevents the "charts /
+            # backtests empty after restart" issue where the binding lands on a
+            # different broker whose symbols are suffixed (XAUUSDc vs XAUUSD).
+            restored = None
+            try:
+                restored = terminal_manager.restore_saved_selection()
+            except Exception:  # noqa: BLE001 - startup must never fail here
+                logger.warning("Could not restore saved terminal selection")
+            if restored:
+                logger.info("Re-attached to saved terminal: %s", restored)
             terminal_manager.sync_selection_from_attached()
         logger.info("MT5 live data mode startup: %s", live_data_started)
 

@@ -169,12 +169,20 @@ def _metrics_dict(result: BacktestResult | None) -> dict[str, Any] | None:
 
 
 def _experiment_row(engine: ResearchEngine, experiment: Experiment) -> dict[str, Any]:
-    """One experiment as a UI row (with result summary when it exists)."""
+    """One experiment as a UI row (with result summary when it exists).
+
+    ``parameters`` shows the *effective* grid: the strategy version's
+    parameters merged with any per-experiment overrides, so the UI can display
+    the full configuration (EMA pair + ATR + stop + RR), not just overrides.
+    """
     result = engine.get_backtest_result(experiment.id)
+    effective: dict[str, Any] = {}
+    version = engine.get_strategy_version(experiment.strategy_version)
+    if version is not None:
+        effective.update(version.parameters)
+    effective.update(experiment.parameters)
     parameters = {
-        key: value
-        for key, value in experiment.parameters.items()
-        if isinstance(value, (int, float, str, bool))
+        key: value for key, value in effective.items() if isinstance(value, (int, float, str, bool))
     }
     return {
         "id": experiment.id,

@@ -266,6 +266,65 @@ def sync_selection_from_attached() -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Selected-terminal persistence (so restarts re-attach to the operator's choice)
+# ---------------------------------------------------------------------------
+
+
+def _selection_state_path() -> Path:
+    """Path of the tiny file remembering the last selected terminal id."""
+    override = os.environ.get("MT5_SELECTION_STATE", "").strip()
+    if override:
+        return Path(override)
+    # Next to the terminals config by default.
+    return _config_path().with_name("mt5_selected.json")
+
+
+def save_selection(terminal_id: str) -> None:
+    """Persist the selected terminal id (fail-safe)."""
+    try:
+        path = _selection_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"selected_id": terminal_id}), encoding="utf-8")
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Could not persist terminal selection: %s", exc)
+
+
+def load_saved_selection() -> Optional[str]:
+    """Return the persisted selected terminal id, or None."""
+    try:
+        raw = json.loads(_selection_state_path().read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except Exception:  # pragma: no cover - defensive
+        return None
+    sid = raw.get("selected_id") if isinstance(raw, dict) else None
+    return str(sid) if sid else None
+
+
+def restore_saved_selection() -> Optional[str]:
+    """Startup helper: re-attach to the persisted terminal if it is running.
+
+    This fixes the "charts/backtests silently empty after restart" problem:
+    without it, the binding attaches to whatever terminal MT5 last used, which
+    may be a different broker/symbol set (e.g. suffixed ``XAUUSDc`` vs plain
+    ``XAUUSD``). Returns the selected id, or None if it could not be restored.
+    """
+    saved = load_saved_selection()
+    if not saved:
+        return None
+    with _binding_lock:
+        view = list_terminals()
+        entry = next((e for e in view["terminals"] if e["id"] == saved), None)
+        if entry is None or not entry["running"]:
+            return None
+        # Already attached to the right terminal — nothing to do.
+        if entry["attached"] and _selected_id == saved:
+            return saved
+        result = _select_terminal_locked(saved)
+        return result.get("selected_id") if result.get("ok") else None
+
+
+# ---------------------------------------------------------------------------
 # Account probe (F3) — read-only, restores the binding in a ``finally``
 # ---------------------------------------------------------------------------
 
@@ -502,6 +561,7 @@ def _select_terminal_locked(terminal_id: str) -> dict[str, Any]:
 
     _selected_id = terminal_id
     _execution_armed = False  # never inherit an arm state across terminals
+    save_selection(terminal_id)
     attached = _detect_attached_path()
     return {
         "ok": True,
