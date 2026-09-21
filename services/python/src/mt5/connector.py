@@ -251,12 +251,15 @@ def get_symbols() -> list[SymbolInfo]:
 
 
 def get_symbol_info(symbol: str) -> Optional[SymbolInfo]:
-    """Return symbol info for a specific symbol."""
+    """Return symbol info for a specific symbol (auto-resolves broker suffix)."""
     if _live_mode:
         try:
             import MetaTrader5 as mt5
 
-            raw = mt5.symbols_get(symbol)
+            from .symbol_resolver import resolve_symbol
+
+            resolved = resolve_symbol(symbol)
+            raw = mt5.symbols_get(resolved)
             if raw is None:
                 return None
             s = raw[0] if isinstance(raw, (list, tuple)) else raw
@@ -296,16 +299,19 @@ def get_symbol_info(symbol: str) -> Optional[SymbolInfo]:
 
 
 def get_tick(symbol: str) -> Optional[Tick]:
-    """Return latest tick for a symbol."""
+    """Return latest tick for a symbol (auto-resolves broker suffix)."""
     if _live_mode:
         try:
             import MetaTrader5 as mt5
 
-            t = mt5.symbol_info_tick(symbol)
+            from .symbol_resolver import resolve_symbol
+
+            resolved = resolve_symbol(symbol)
+            t = mt5.symbol_info_tick(resolved)
             if t is None:
                 return None
             return Tick(
-                symbol=symbol,
+                symbol=resolved,
                 bid=t.bid,
                 ask=t.ask,
                 last=t.last,
@@ -347,22 +353,38 @@ def get_ohlc(symbol: str, timeframe: str = "H1", count: int = 100) -> list[OHLC]
                 "MN1": mt5.TIMEFRAME_MN1,
             }
             tf = _TF_MAP.get(str(timeframe).upper(), mt5.TIMEFRAME_H1)
-            rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
-            if rates is None:
-                return []
-            return [
-                OHLC(
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    open=r["open"],
-                    high=r["high"],
-                    low=r["low"],
-                    close=r["close"],
-                    volume=float(r["tick_volume"]),
-                    time=datetime.fromtimestamp(r["time"]),
-                )
-                for r in rates
-            ]
+            # Auto-resolve the broker's symbol name, then try the best
+            # candidates in order until one returns bars. This makes charts and
+            # backtests work regardless of suffix (XAUUSDc / XAUUSD247c / …).
+            from .symbol_resolver import candidate_matches, resolve_symbol
+
+            resolved = resolve_symbol(symbol)
+            candidates = [resolved]
+            try:
+                all_syms = [str(s.name).upper() for s in (mt5.symbols_get() or [])]
+                for cand in candidate_matches(symbol, all_syms):
+                    if cand not in candidates:
+                        candidates.append(cand)
+            except Exception:  # noqa: BLE001 - enumeration is best-effort
+                pass
+
+            for cand in candidates:
+                rates = mt5.copy_rates_from_pos(cand, tf, 0, count)
+                if rates is not None and len(rates) > 0:
+                    return [
+                        OHLC(
+                            symbol=cand,
+                            timeframe=timeframe,
+                            open=r["open"],
+                            high=r["high"],
+                            low=r["low"],
+                            close=r["close"],
+                            volume=float(r["tick_volume"]),
+                            time=datetime.fromtimestamp(r["time"]),
+                        )
+                        for r in rates
+                    ]
+            return []
         except Exception:
             return []
 

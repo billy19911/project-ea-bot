@@ -12,7 +12,6 @@ import { ThemeToggle } from './ui/theme-toggle';
 import styles from './AppShell.module.css';
 
 type NavKey = string;
-type IconName = 'grid' | 'activity' | 'cpu' | 'trend' | 'flask' | 'candles' | 'sliders';
 
 type AccountMode = 'LIVE' | 'DEMO' | 'CONTEST';
 
@@ -30,23 +29,29 @@ function mapTradeMode(raw: unknown): AccountMode | null {
 
 const NAV_GROUPS = [
   {
-    label: 'Operasional',
+    label: 'Command',
     items: [
+      { key: 'overview', label: 'Overview', href: '/', icon: 'gauge' },
       { key: 'control-plane', label: 'Control Plane', href: '/control-plane', icon: 'grid' },
       { key: 'market', label: 'Market', href: '/market', icon: 'candles' },
-      { key: 'observability', label: 'Observability', href: '/observability', icon: 'activity' },
-      { key: 'news', label: 'News', href: '/news', icon: 'candles' },
-      { key: 'circuit-breaker', label: 'Circuit Breaker', href: '/circuit-breaker', icon: 'activity' },
-      { key: 'incidents', label: 'Incidents', href: '/incidents', icon: 'activity' },
-      { key: 'execution-quality', label: 'Execution Quality', href: '/execution-quality', icon: 'trend' },
-      { key: 'slo', label: 'System SLO', href: '/slo', icon: 'activity' },
+      { key: 'news', label: 'News', href: '/news', icon: 'news' },
     ],
   },
   {
-    label: 'AI',
+    label: 'Risk & Ops',
+    items: [
+      { key: 'circuit-breaker', label: 'Circuit Breaker', href: '/circuit-breaker', icon: 'shield' },
+      { key: 'incidents', label: 'Incidents', href: '/incidents', icon: 'alert' },
+      { key: 'execution-quality', label: 'Execution Quality', href: '/execution-quality', icon: 'bolt' },
+      { key: 'observability', label: 'Observability', href: '/observability', icon: 'activity' },
+      { key: 'slo', label: 'System SLO', href: '/slo', icon: 'clock' },
+    ],
+  },
+  {
+    label: 'Intelligence',
     items: [
       { key: 'ai-control', label: 'AI Control', href: '/ai-control', icon: 'cpu' },
-      { key: 'models', label: 'Models', href: '/models', icon: 'cpu' },
+      { key: 'models', label: 'Models', href: '/models', icon: 'layers' },
       { key: 'strategy', label: 'Strategy', href: '/strategy', icon: 'trend' },
     ],
   },
@@ -57,20 +62,17 @@ const NAV_GROUPS = [
   {
     label: 'System',
     items: [
-      { key: 'overview', label: 'Overview', href: '/', icon: 'grid' },
-      { key: 'environment', label: 'Environment', href: '/environment', icon: 'sliders' },
-      { key: 'accounts', label: 'Accounts', href: '/accounts', icon: 'grid' },
-      { key: 'certification', label: 'Certification', href: '/certification', icon: 'grid' },
-      { key: 'system-readiness', label: 'System Readiness', href: '/system-readiness', icon: 'grid' },
+      { key: 'environment', label: 'Environment', href: '/environment', icon: 'server' },
+      { key: 'accounts', label: 'Accounts', href: '/accounts', icon: 'layers' },
+      { key: 'certification', label: 'Certification', href: '/certification', icon: 'check-badge' },
+      { key: 'system-readiness', label: 'Readiness', href: '/system-readiness', icon: 'shield' },
       { key: 'settings', label: 'Settings', href: '/settings', icon: 'sliders' },
     ],
   },
 ];
 
-type IconProps = { name: IconName };
-function Icon({ name }: any) {
-  // Reuse inline SVG definitions from the original AppShell file.
-  // For brevity we keep the same paths.
+type IconProps = { name: string };
+function Icon({ name }: IconProps) {
   return (
     <svg
       className={styles.icon}
@@ -85,6 +87,13 @@ function Icon({ name }: any) {
       aria-hidden="true"
     >
       {name === 'grid' && <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" />}
+      {name === 'gauge' && (
+        <>
+          <path d="M12 14l4-4" />
+          <path d="M3.5 18a9 9 0 1 1 17 0" />
+          <circle cx="12" cy="14" r="1" />
+        </>
+      )}
       {name === 'activity' && <path d="M22 12h-4l-3 9L9 3l-3 9H2" />}
       {name === 'cpu' && (
         <>
@@ -116,6 +125,50 @@ function Icon({ name }: any) {
           <path d="M7 4v3M7 17v3M17 4v3M17 15v5" />
           <rect x="4.5" y="7" width="5" height="10" rx="0.8" />
           <rect x="14.5" y="9" width="5" height="6" rx="0.8" />
+        </>
+      )}
+      {name === 'shield' && (
+        <>
+          <path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z" />
+          <path d="M9 12l2 2 4-4" />
+        </>
+      )}
+      {name === 'bolt' && <path d="M13 2L3 14h7l-1 8 10-12h-7z" />}
+      {name === 'alert' && (
+        <>
+          <path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+          <path d="M12 9v4M12 17h.01" />
+        </>
+      )}
+      {name === 'clock' && (
+        <>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </>
+      )}
+      {name === 'server' && (
+        <>
+          <rect x="2" y="3" width="20" height="7" rx="1.5" />
+          <rect x="2" y="14" width="20" height="7" rx="1.5" />
+          <path d="M6 6.5h.01M6 17.5h.01" />
+        </>
+      )}
+      {name === 'layers' && (
+        <>
+          <path d="M12 2l9 5-9 5-9-5z" />
+          <path d="M3 12l9 5 9-5M3 17l9 5 9-5" />
+        </>
+      )}
+      {name === 'check-badge' && (
+        <>
+          <path d="M12 2l2.4 1.8 3-.2 1 2.8 2.6 1.5-1 2.9 1 2.9-2.6 1.5-1 2.8-3-.2L12 22l-2.4-1.8-3 .2-1-2.8L3 16.1l1-2.9-1-2.9 2.6-1.5 1-2.8 3 .2z" />
+          <path d="M9 12l2 2 4-4" />
+        </>
+      )}
+      {name === 'news' && (
+        <>
+          <path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+          <path d="M8 7h8M8 11h8M8 15h5" />
         </>
       )}
     </svg>
@@ -309,7 +362,7 @@ export default function AppShell({
                   aria-current={activeKey === item.key ? 'page' : undefined}
                   onClick={() => setDrawerOpen(false)}
                 >
-                  <Icon name={item.icon as IconName} />
+                  <Icon name={item.icon} />
                   <span>{item.label}</span>
                 </Link>
               ))}

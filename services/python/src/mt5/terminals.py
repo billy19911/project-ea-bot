@@ -562,6 +562,13 @@ def _select_terminal_locked(terminal_id: str) -> dict[str, Any]:
     _selected_id = terminal_id
     _execution_armed = False  # never inherit an arm state across terminals
     save_selection(terminal_id)
+    # Symbols differ per broker (XAUUSD vs XAUUSDc) — drop the resolution cache.
+    try:
+        from .symbol_resolver import clear_symbol_cache
+
+        clear_symbol_cache()
+    except Exception:  # noqa: BLE001
+        pass
     attached = _detect_attached_path()
     return {
         "ok": True,
