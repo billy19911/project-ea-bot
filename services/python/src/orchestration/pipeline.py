@@ -188,6 +188,10 @@ class TradingPipeline:
         lesson_provider: Optional learning-feedback provider (Phase 7) exposing
             ``summarize_for_symbol(symbol)``; when present, prior lessons are
             attached to the analysis context (advisory only).
+        reconciliation_guard: Optional execution-critical guard (audit P0-3)
+            exposing ``check_can_execute() -> (bool, reason)``. When supplied and
+            it reports a critical internal↔MT5 mismatch, new orders are BLOCKED
+            (fail-closed). Optional so existing callers are unaffected.
     """
 
     def __init__(
@@ -200,6 +204,7 @@ class TradingPipeline:
         dependency_guard: Optional[Any] = None,
         result_hook: Optional[Callable[[PipelineResult], None]] = None,
         lesson_provider: Optional[Any] = None,
+        reconciliation_guard: Optional[Any] = None,
     ) -> None:
         self.supervisor = supervisor
         self.risk_gate = risk_gate
@@ -211,6 +216,9 @@ class TradingPipeline:
         # orders at the execution check-point. Optional so existing callers and
         # tests are unaffected.
         self.dependency_guard = dependency_guard
+        # Optional reconciliation gate (audit P0-3). Same ``check_can_execute``
+        # contract; a critical internal↔MT5 mismatch blocks new orders.
+        self.reconciliation_guard = reconciliation_guard
         # Optional per-cycle result hook (Phase 5). Invoked exactly once per
         # cycle with the finished PipelineResult — the reporting seam used to
         # deliver Telegram reports. A broken hook is swallowed: reporting must
@@ -350,6 +358,25 @@ class TradingPipeline:
                 self._finalise(result)
                 return result
             result.add_stage("dependency_guard", STAGE_OK, "execution-critical deps healthy")
+
+        # ── Step B3: Reconciliation gate (audit P0-3) ───────────────────
+        # A critical internal↔MT5 mismatch (missing/orphan position, volume
+        # drift, …) must BLOCK new orders until the state is reconciled.
+        # Fail-closed: a broken guard blocks. Only runs when injected.
+        if self.reconciliation_guard is not None:
+            try:
+                allowed, rec_reason = self.reconciliation_guard.check_can_execute()
+            except Exception as exc:  # fail-closed: a broken guard blocks
+                allowed, rec_reason = False, f"reconciliation guard error: {exc}"
+            if not allowed:
+                result.status = STATUS_BLOCKED
+                result.risk_reason = rec_reason or "execution blocked by reconciliation"
+                result.error = rec_reason or "execution blocked by reconciliation"
+                result.add_stage("reconciliation", STAGE_BLOCKED, result.risk_reason)
+                result.add_stage("execution", STAGE_SKIPPED, "reconciliation blocked")
+                self._finalise(result)
+                return result
+            result.add_stage("reconciliation", STAGE_OK, "internal state matches MT5")
 
         # ── Step C: Execution (only when explicitly approved) ───────────
         if self.execution_engine is None:

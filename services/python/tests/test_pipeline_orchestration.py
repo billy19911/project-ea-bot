@@ -366,5 +366,72 @@ def test_pipeline_import_and_defaults():
     assert p is not None
 
 
+# ---------------------------------------------------------------------------
+# Audit P0-3 — reconciliation gate blocks new orders
+# ---------------------------------------------------------------------------
+class TestReconciliationGate:
+    def test_critical_mismatch_blocks_execution(self):
+        """A blocked reconciliation guard must prevent the order from being sent."""
+        engine = FakeExecutionEngine(_ExecResult())
+
+        class BlockedGuard:
+            def check_can_execute(self):
+                return False, "execution blocked — reconciliation mismatch"
+
+        pipeline = TradingPipeline(
+            supervisor=FakeSupervisor(_synthesis()),
+            risk_gate=FakeRiskGate(_approved()),
+            execution_engine=engine,
+            reconciliation_guard=BlockedGuard(),
+        )
+
+        result = pipeline.run(_event(), _context())
+
+        assert result.status == "BLOCKED"
+        assert result.executed is False
+        assert engine.calls == []  # never reached the broker
+        assert any(stage["stage"] == "reconciliation" for stage in result.trace)
+
+    def test_healthy_reconciliation_allows_execution(self):
+        """A clean reconciliation guard must not block an approved order."""
+        engine = FakeExecutionEngine(_ExecResult())
+
+        class HealthyGuard:
+            def check_can_execute(self):
+                return True, ""
+
+        pipeline = TradingPipeline(
+            supervisor=FakeSupervisor(_synthesis()),
+            risk_gate=FakeRiskGate(_approved()),
+            execution_engine=engine,
+            reconciliation_guard=HealthyGuard(),
+        )
+
+        result = pipeline.run(_event(), _context())
+
+        assert result.status == "EXECUTED"
+        assert len(engine.calls) == 1
+
+    def test_broken_reconciliation_guard_fails_closed(self):
+        """A guard that raises must block (fail-closed), never allow."""
+        engine = FakeExecutionEngine(_ExecResult())
+
+        class BrokenGuard:
+            def check_can_execute(self):
+                raise RuntimeError("guard exploded")
+
+        pipeline = TradingPipeline(
+            supervisor=FakeSupervisor(_synthesis()),
+            risk_gate=FakeRiskGate(_approved()),
+            execution_engine=engine,
+            reconciliation_guard=BrokenGuard(),
+        )
+
+        result = pipeline.run(_event(), _context())
+
+        assert result.status == "BLOCKED"
+        assert engine.calls == []
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))

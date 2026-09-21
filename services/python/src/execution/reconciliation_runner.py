@@ -27,7 +27,7 @@ from .reconciliation import Reconciler, ReconciliationReport
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ReconciliationProviders", "ReconciliationRunner"]
+__all__ = ["ReconciliationProviders", "ReconciliationRunner", "ReconciliationGuard"]
 
 # Default reconciliation cadence (in pipeline cycles).
 DEFAULT_RECONCILIATION_INTERVAL = 30
@@ -183,3 +183,30 @@ class ReconciliationRunner:
             "last_reconciliation_ok": self._last_ok,
             "reconciliation_errors": self._errors,
         }
+
+
+class ReconciliationGuard:
+    """Execution gate over a :class:`ReconciliationRunner` (audit P0-3).
+
+    Exposes ``check_can_execute() -> (allowed, reason)`` — the same shape the
+    :class:`~orchestration.pipeline.TradingPipeline` ``dependency_guard`` uses —
+    so a **critical** reconciliation mismatch (missing/orphan position, volume
+    drift, …) blocks NEW orders instead of being a read-only observation.
+
+    Fail-closed policy: once a critical mismatch is observed, execution stays
+    blocked until a later reconciliation run comes back clean. Before the first
+    run the guard allows execution (there is no evidence of mismatch yet), so
+    wiring it does not freeze a freshly started system.
+    """
+
+    def __init__(self, runner: ReconciliationRunner) -> None:
+        self._runner = runner
+
+    def check_can_execute(self) -> tuple[bool, str]:
+        """Return ``(allowed, reason)``; blocked while last reconciliation is bad."""
+        if self._runner.last_ok:
+            return True, ""
+        return (
+            False,
+            "execution blocked — reconciliation mismatch (internal state != MT5)",
+        )

@@ -190,5 +190,64 @@ class TestReconciliationStatusEndpoint:
             set_runtime(None)
 
 
+# ---------------------------------------------------------------------------
+# Audit P0-3 — ReconciliationGuard blocks new orders on a critical mismatch
+# ---------------------------------------------------------------------------
+class TestReconciliationGuard:
+    def _runner_with(self, internal, broker):
+        from execution.reconciliation_runner import ReconciliationRunner
+
+        providers = _CountingProviders(internal, broker)
+        return ReconciliationRunner(interval=1, providers=providers)
+
+    def test_guard_allows_before_any_run(self) -> None:
+        from execution.reconciliation_runner import ReconciliationGuard
+
+        guard = ReconciliationGuard(self._runner_with([], []))
+        allowed, reason = guard.check_can_execute()
+        assert allowed is True
+        assert reason == ""
+
+    def test_guard_blocks_after_critical_mismatch(self) -> None:
+        from execution.reconciliation_runner import ReconciliationGuard
+
+        internal = [
+            {"ticket": 1, "symbol": "EURUSD", "volume": 0.1, "sl": 1.0, "tp": 2.0, "magic": 1}
+        ]
+        broker = []  # position missing on the broker → critical
+        runner = self._runner_with(internal, broker)
+        runner.run_once()
+
+        guard = ReconciliationGuard(runner)
+        allowed, reason = guard.check_can_execute()
+        assert allowed is False
+        assert "reconciliation" in reason
+
+    def test_guard_unblocks_after_clean_run(self) -> None:
+        from execution.reconciliation_runner import ReconciliationGuard
+
+        internal = [
+            {"ticket": 1, "symbol": "EURUSD", "volume": 0.1, "sl": 1.0, "tp": 2.0, "magic": 1}
+        ]
+        providers = _CountingProviders(internal, [])
+
+        from execution.reconciliation_runner import ReconciliationRunner
+
+        runner = ReconciliationRunner(interval=1, providers=providers)
+        runner.run_once()  # critical (broker empty)
+        guard = ReconciliationGuard(runner)
+        assert guard.check_can_execute()[0] is False
+
+        # Now the broker matches → clean run clears the block.
+        providers._broker_positions = list(internal)
+        runner.run_once()
+        assert guard.check_can_execute()[0] is True
+
+    def test_runtime_pipeline_has_reconciliation_guard(self) -> None:
+        runtime = OrchestrationRuntime(reconciliation_interval=1)
+        assert runtime.pipeline.reconciliation_guard is not None
+        assert runtime.pipeline.reconciliation_guard.check_can_execute()[0] is True
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))

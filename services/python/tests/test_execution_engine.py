@@ -463,3 +463,67 @@ def test_full_execution_lifecycle(mock_connector):
     pos = engine.sync_position("EURUSD")
     assert pos["positions_count"] == 1
     assert pos["total_volume"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Audit P0-2 — no fabricated fill when there is no broker path
+# ---------------------------------------------------------------------------
+
+
+def test_no_connector_does_not_fabricate_fill_by_default(monkeypatch):
+    """With no connector and no native MT5, execution must NOT fake success.
+
+    Regression guard for audit finding P0-2: the engine previously returned
+    ``success=True`` with a fabricated ticket when the broker path was absent,
+    which made the pipeline record phantom EXECUTED trades.
+    """
+    import sys
+
+    engine = ExecutionEngine(mt5_connector=None)  # simulation_mode defaults False
+    # Force the native `import MetaTrader5` inside _send_to_mt5 to raise
+    # ImportError so the fallback branch runs deterministically.
+    monkeypatch.setitem(sys.modules, "MetaTrader5", None)
+
+    req = OrderRequest(symbol="EURUSD", order_type="BUY", volume=1.0)
+    result = engine.execute_order(req)
+
+    assert result.success is False
+    assert result.ticket is None
+    assert result.error_code == 1
+    assert "simulation_mode" in result.error_message
+
+
+def test_simulation_mode_is_explicit_and_labelled(monkeypatch):
+    """Simulation must be opt-in and the fabricated ticket must be labelled."""
+    import sys
+
+    engine = ExecutionEngine(mt5_connector=None, simulation_mode=True)
+    monkeypatch.setitem(sys.modules, "MetaTrader5", None)
+    req = OrderRequest(symbol="EURUSD", order_type="BUY", volume=1.0)
+
+    result = engine.execute_order(req)
+
+    assert result.success is True
+    assert result.ticket is not None
+
+
+def test_native_send_error_is_reported_not_simulated():
+    """A failing native connector must surface the real error, never fake success."""
+
+    class FailingConnector:
+        def order_send(self, payload):
+            raise RuntimeError("broker exploded")
+
+        # Provide a valid symbol lookup so pre-flight validation passes and the
+        # failure is the raised broker error (not a validation reject).
+        def get_symbol_info(self, symbol):
+            return {"symbol": symbol, "volume_min": 0.01, "volume_max": 100.0}
+
+    engine = ExecutionEngine(mt5_connector=FailingConnector())
+    req = OrderRequest(symbol="EURUSD", order_type="BUY", volume=1.0)
+
+    result = engine.execute_order(req)
+
+    assert result.success is False
+    assert result.ticket is None
+    assert "broker exploded" in result.error_message

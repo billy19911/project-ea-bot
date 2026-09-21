@@ -12,8 +12,20 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False, alias="DEBUG")
 
     # Server
-    host: str = Field(default="0.0.0.0", alias="HOST")
+    host: str = Field(default="127.0.0.1", alias="HOST")
     port: int = Field(default=8000, alias="PORT")
+
+    # API authentication (audit P0-1). When ``PYTHON_API_KEY`` is set, every
+    # request except the health/read-only probes below must present a matching
+    # ``X-API-Key`` header (or ``Authorization: Bearer <key>``). When unset the
+    # service runs unauthenticated — acceptable ONLY for local dev on a
+    # loopback bind. Production MUST set this key.
+    python_api_key: str = Field(default="", alias="PYTHON_API_KEY")
+    # Public paths that never require the API key (liveness/readiness probes).
+    api_public_paths: str = Field(
+        default="/health,/metrics,/",
+        alias="PYTHON_API_PUBLIC_PATHS",
+    )
 
     # CORS (PRD_V2 §28 Security) — comma-separated explicit origins. Never use
     # a wildcard together with credentials.

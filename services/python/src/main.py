@@ -285,6 +285,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# API-key authentication (audit P0-1). Enforced only when PYTHON_API_KEY is set;
+# when unset the service stays open for local dev (loopback bind by default).
+# This closes the hole where the order-arming switch and pipeline trigger were
+# reachable unauthenticated on a routable interface.
+from .security.api_key import ApiKeyMiddleware, parse_public_paths  # noqa: E402
+
+if settings.python_api_key:
+    app.add_middleware(
+        ApiKeyMiddleware,
+        api_key=settings.python_api_key,
+        public_paths=parse_public_paths(settings.api_public_paths),
+    )
+    logger.info(
+        "Python API-key authentication ENABLED (public paths: %s)",
+        settings.api_public_paths,
+    )
+else:
+    logger.warning(
+        "PYTHON_API_KEY is not set — Python API is UNAUTHENTICATED (dev mode). "
+        "Set it before exposing this service beyond localhost."
+    )
+
 app.include_router(mt5_router)
 app.include_router(charting_router)
 app.include_router(trading_router)

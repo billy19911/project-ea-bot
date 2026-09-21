@@ -22,7 +22,11 @@ from agents.supervisor import SupervisorAgent
 from execution.engine import ExecutionEngine
 from execution.order_builder import OrderBuilder
 from execution.reconciliation import ReconciliationReport
-from execution.reconciliation_runner import DEFAULT_RECONCILIATION_INTERVAL, ReconciliationRunner
+from execution.reconciliation_runner import (
+    DEFAULT_RECONCILIATION_INTERVAL,
+    ReconciliationGuard,
+    ReconciliationRunner,
+)
 from market.news_feed import get_news_feed_provider
 from observability.traces import TraceCollector
 from risk.engine import RiskEngine
@@ -113,16 +117,28 @@ class OrchestrationRuntime:
         reconciliation_interval: int = DEFAULT_RECONCILIATION_INTERVAL,
         reconciliation_providers: Optional[Any] = None,
         reconciliation_history_limit: int = RECONCILIATION_HISTORY_LIMIT,
+        reconciliation_runner: Optional[ReconciliationRunner] = None,
     ) -> None:
         self.queue = queue if queue is not None else EventQueue()
-        self.pipeline = pipeline if pipeline is not None else self._build_pipeline()
         # Periodic reconciliation (PRD_V2 §14). Providers default to safe no-ops
         # so production wiring can inject MT5-backed providers without forcing
         # tests to spin up MT5.
-        self.reconciliation = ReconciliationRunner(
-            interval=reconciliation_interval,
-            providers=reconciliation_providers,
-            history_limit=reconciliation_history_limit,
+        self.reconciliation = (
+            reconciliation_runner
+            if reconciliation_runner is not None
+            else ReconciliationRunner(
+                interval=reconciliation_interval,
+                providers=reconciliation_providers,
+                history_limit=reconciliation_history_limit,
+            )
+        )
+        # Audit P0-3: a critical reconciliation mismatch BLOCKS new orders. The
+        # guard wraps the runner and is injected into the pipeline below.
+        self._reconciliation_guard = ReconciliationGuard(self.reconciliation)
+        self.pipeline = (
+            pipeline
+            if pipeline is not None
+            else self._build_pipeline(reconciliation_guard=self._reconciliation_guard)
         )
         self.scheduler = (
             scheduler
@@ -157,13 +173,17 @@ class OrchestrationRuntime:
         return getattr(self.scheduler, "reconciliation_runner", None) or self.reconciliation
 
     @staticmethod
-    def _build_pipeline() -> TradingPipeline:
+    def _build_pipeline(reconciliation_guard: Optional[Any] = None) -> TradingPipeline:
         """Build the production pipeline from the registered agents + risk gate."""
         supervisor = SupervisorAgent()
         # The registry is used by the supervisor for dynamic delegation.
         supervisor._registry_cache = agent_registry
         risk_gate = RiskGate(RiskEngine(), MoneyManager())
-        execution_engine = ExecutionEngine(mt5_connector=None)
+        # No MT5 connector is wired in the default runtime, so the engine keeps
+        # its existing paper behaviour — but ONLY via an explicit, clearly
+        # labelled simulation (audit P0-2). Without this flag a missing broker
+        # path would now return an honest failure instead of a fabricated fill.
+        execution_engine = ExecutionEngine(mt5_connector=None, simulation_mode=True)
         order_builder = OrderBuilder()
         # Fase 7: prior lessons are summarised into the analysis context
         # (advisory only). Fail-safe — a missing/broken store simply disables
@@ -183,6 +203,7 @@ class OrchestrationRuntime:
             order_builder=order_builder,
             result_hook=_notify_cycle_result,
             lesson_provider=lesson_provider,
+            reconciliation_guard=reconciliation_guard,
         )
 
     def run_cycle(

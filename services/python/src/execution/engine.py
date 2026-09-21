@@ -123,6 +123,7 @@ class ExecutionEngine:
         spread_tolerance: float = 0.005,
         min_volume: float = 0.01,
         max_volume: float = 100.0,
+        simulation_mode: bool = False,
     ) -> None:
         """Initialize the Execution Engine.
 
@@ -133,6 +134,12 @@ class ExecutionEngine:
             spread_tolerance: Maximum allowable price deviation from current market quote.
             min_volume: Minimum allowable lot volume.
             max_volume: Maximum allowable lot volume.
+            simulation_mode: When True and no real broker path exists, a *clearly
+                labelled* simulated fill is returned (``success=True`` with
+                ``simulated=True``). Defaults to **False**: with no connector and
+                no native MetaTrader5, ``execute_order`` returns an honest
+                ``success=False`` (never a fabricated ticket). Autonomy must
+                opt in to simulation explicitly.
         """
         self.mt5_connector = mt5_connector
         self.max_retries = max(0, max_retries)
@@ -140,6 +147,7 @@ class ExecutionEngine:
         self.spread_tolerance = spread_tolerance
         self.min_volume = min_volume
         self.max_volume = max_volume
+        self.simulation_mode = bool(simulation_mode)
 
         # In-memory tracking for pending and completed orders
         self._pending_orders: dict[str, float] = {}
@@ -670,16 +678,57 @@ class ExecutionEngine:
             res = mt5.order_send(payload)
             return self._parse_send_result(res)
 
-        except (ImportError, Exception) as exc:
-            logger.debug("Native MT5 send failed or unavailable: %s", exc)
+        except ImportError:
+            # Native MetaTrader5 is genuinely unavailable (no terminal). This is
+            # NOT a broker error — fall through to the simulation/honest-failure
+            # decision below.
+            logger.debug("Native MT5 library not available; no live broker path.")
+        except Exception as exc:
+            # The native send was attempted AND raised. NEVER fabricate success
+            # here: report the real failure so the caller/risk layer sees it.
+            logger.warning("Native MT5 order_send raised: %s", exc)
+            return {
+                "success": False,
+                "ticket": None,
+                "error_code": -1,
+                "message": f"Native MT5 send failed: {exc}",
+                "price": None,
+            }
 
-        # 3. Default simulated execution when no live MT5 connection exists
+        # 3. No live broker path. Simulation is EXPLICIT opt-in only; default is
+        # an honest failure with no fabricated ticket (audit P0-2).
+        if self.simulation_mode:
+            logger.info(
+                "ExecutionEngine in simulation_mode — returning a labelled "
+                "SIMULATED fill for %s %s.",
+                request.symbol,
+                request.order_type,
+            )
+            return {
+                "success": True,
+                "ticket": int(time.time() * 1000) % 1_000_000,
+                "error_code": 0,
+                "message": "Simulated order execution successful",
+                "price": request.price or 1.0850,
+                "simulated": True,
+            }
+
+        logger.error(
+            "No broker path available and simulation_mode is off — refusing to "
+            "fabricate a fill for %s %s.",
+            request.symbol,
+            request.order_type,
+        )
         return {
-            "success": True,
-            "ticket": int(time.time() * 1000) % 1_000_000,
-            "error_code": 0,
-            "message": "Simulated order execution successful",
-            "price": request.price or 1.0850,
+            "success": False,
+            "ticket": None,
+            "error_code": 1,
+            "message": (
+                "No live MT5 connection and simulation_mode is disabled — order "
+                "not sent (no fabricated fill)."
+            ),
+            "price": None,
+            "simulated": False,
         }
 
     def _parse_send_result(self, res: Any) -> dict[str, Any]:

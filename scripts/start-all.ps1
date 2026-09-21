@@ -62,6 +62,7 @@ $tgDigestOn = EnvOr 'TELEGRAM_DIGEST_ENABLED' 'true'
 $tgDigestWin = EnvOr 'TELEGRAM_DIGEST_WINDOW_S' '600'
 $tgDigestMax = EnvOr 'TELEGRAM_DIGEST_MAX_ITEMS' '15'
 $lessonP  = EnvOr 'LESSON_STORE_PATH' ''
+$pyApiKey = EnvOr 'PYTHON_API_KEY' ''
 
 if (-not $jwt) {
   $bytes = New-Object byte[] 24
@@ -108,6 +109,7 @@ function Export-CommonEnv {
   $env:TELEGRAM_DIGEST_WINDOW_S = $tgDigestWin
   $env:TELEGRAM_DIGEST_MAX_ITEMS = $tgDigestMax
   if ($lessonP) { $env:LESSON_STORE_PATH = $lessonP }
+  if ($pyApiKey) { $env:PYTHON_API_KEY = $pyApiKey }
 }
 
 $logDir = Join-Path $root 'logs'
