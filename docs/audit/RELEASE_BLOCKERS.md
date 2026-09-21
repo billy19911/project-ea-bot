@@ -39,16 +39,19 @@
 ## B-3 — Deterministic Risk Gate is not enforced inside the executor (structural boundary gap)
 
 - **ID:** B-3
-- **Severity:** P0 (structural) — latent in the shipped config
+- **Severity:** P0 (structural)
 - **Component:** `services/python/src/execution/engine.py`, `services/python/src/mt5/endpoints.py`, `services/python/src/agents/permissions.py`
-- **Evidence:**
-  - `ExecutionEngine.execute_order()` (`execution/engine.py:314-476`) references no `RiskGate`, `MT5WriteGuard`, `KillSwitch`, or `ExecutionGuard`.
+- **Status:** ✅ **FIXED** (commit `02a577c`)
+- **Evidence (before fix):**
+  - `ExecutionEngine.execute_order()` (`execution/engine.py:314-476`) referenced no `RiskGate`, `MT5WriteGuard`, `KillSwitch`, or `ExecutionGuard`.
   - `POST /mt5/orders/execute` (`mt5/endpoints.py:204-218`) → `connector.execute_order()` with no gate/guard/permission check.
   - `agents.permissions.send_to_mt5` → `guarded_execute_order` enforces WriteGuard but no RiskGate, and is never called from `src/`.
-  - `MT5WriteGuard` is only reachable via `guarded_execute_order`, which production never calls.
-- **Impact:** Order dispatch is reachable without the deterministic gate. Currently mitigated because the read-only connector refuses in live mode and the shipped engine is simulated; but the "non-bypassable gate" is enforced by orchestration discipline, not by the executor.
-- **Reproduction:** Call `ExecutionEngine.execute_order(request)` directly (or `POST /mt5/orders/execute` with live mode off) — no gate runs.
-- **Recommended Fix:** Make the executor require a gate-issued approval token (signed decision id / risk-approved flag) before `_send_to_mt5`, and gate `/mt5/orders/execute` behind the same path. Fail closed if the token is absent. Keep the change minimal (a pre-flight assertion inside `execute_order`).
+- **Fix applied:**
+  - `OrderRequest` gained an `approval_token` field; `ExecutionEngine(require_approval=True)` **refuses to dispatch** any order whose token is empty (fail-closed, `error_code=403`), before any MT5 call.
+  - `TradingPipeline.run` stamps `approval_token = "gate:<decision_id>"` **only after** the Risk Gate approves and both guards pass.
+  - The production runtime (`runtime.py`) opts in with `require_approval=True`; the default is `False` to keep existing direct/test usage compatible.
+  - Tests: `tests/test_rc_fixes_b3_b6.py`, `tests/test_execution_engine.py` (Audit B-3 section), `tests/test_pipeline_orchestration.py` (`TestApprovalToken`).
+- **Residual:** `/mt5/orders/execute` still calls the *connector* (which refuses in live mode); it does not call the executor, so it remains a paper/simulated surface. Gating that endpoint behind the same approval path is optional hardening. The executor-enforced boundary now closes the structural gap for the executor itself.
 
 ---
 
@@ -82,21 +85,27 @@
 
 - **ID:** B-6
 - **Severity:** P1 (governance/learning claim)
-- **Component:** `services/python/src/review/close_detector.py`, `services/python/src/monitoring/position_monitor.py`, `services/python/src/review/auto_trigger.py`, `services/python/src/paper/simulated_execution.py`
-- **Evidence:** No runtime producer emits `TRADE_CLOSE`/`POST_TRADE_REVIEW`; `PositionCloseDetector` and `PositionMonitor` are never instantiated in `src/`; the only `on_position_closed` caller is the unwired `paper` engine. The persistent `JsonlLessonStore` therefore stays empty in normal operation.
-- **Impact:** The claimed "learning loop" is inert at runtime; the P1-6 "FIXED" status in `DEEP_E2E_AUDIT.md` is not substantiated by current source.
-- **Reproduction:** Run the autonomous loop to a closed trade (simulated) and observe no lesson is written to `logs/lessons.jsonl`.
-- **Recommended Fix:** Instantiate `PositionMonitor` (with a `PositionCloseDetector`) in the runtime and drive it from the scheduler so a disappeared ticket fires `ReviewAutoTrigger.on_position_closed` (observation-only). Add an integration test.
+- **Component:** `services/python/src/review/close_detector.py`, `services/python/src/monitoring/position_monitor.py`, `services/python/src/review/auto_trigger.py`, `services/python/src/orchestration/runtime.py`
+- **Status:** ✅ **FIXED** (commit `02a577c`)
+- **Evidence (before fix):** No runtime producer emitted `TRADE_CLOSE`/`POST_TRADE_REVIEW`; `PositionCloseDetector` and `PositionMonitor` were never instantiated in `src/`; the only `on_position_closed` caller was the unwired `paper` engine. The persistent `JsonlLessonStore` therefore stayed empty in normal operation.
+- **Fix applied:**
+  - The runtime builds a read-only `PositionMonitor` with a `PositionCloseDetector` whose `on_close` fires the process-wide `ReviewAutoTrigger` (configured in `main.py` to persist lessons).
+  - It observes open positions **once per cycle** (both HTTP-triggered `run_cycle` and scheduler-driven `_RecordingPipelineProxy.run`).
+  - **Observation only** — reads positions, detects disappeared tickets; never places, modifies, or closes anything.
+  - Tests: `tests/test_rc_fixes_b3_b6.py` (wiring + disappeared-ticket-fires-hook).
+- **Residual:** The close price for a disappeared ticket is the last-seen current price (honest best-effort). Review quality depends on position data quality; a real broker close event would be richer.
 
 ---
 
 ## Summary
 
-| ID | Severity | Blocks live? | Blocks paper/staging? |
-|---|---|---|---|
-| B-1 | P0 | Yes | No |
-| B-2 | P0 | Yes | No |
-| B-3 | P0 (structural) | Yes | No (mitigated) |
-| B-4 | P0 | Yes | No |
-| B-5 | P1 | Yes | No |
-| B-6 | P1 | No | No |
+| ID | Severity | Status |
+|---|---|---|
+| B-1 | P0 | Open (operational: set `PYTHON_API_KEY`) |
+| B-2 | P0 | Open (operational: forward key from Node) |
+| B-3 | P0 (structural) | ✅ Fixed (`02a577c`) |
+| B-4 | P0 | Open (operational: live broker validation) |
+| B-5 | P1 | Open (durable state) |
+| B-6 | P1 | ✅ Fixed (`02a577c`) |
+
+**Remaining open blockers (B-1, B-2, B-4, B-5)** are operational/deployment actions (authentication enforcement, key forwarding, live validation, durable persistence) that require production configuration or a real broker — they are not code defects that can be safely fixed in an isolated change.

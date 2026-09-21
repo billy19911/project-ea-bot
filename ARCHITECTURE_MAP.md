@@ -18,11 +18,8 @@
 > *caller-enforced* dan sebagian modul governance/learning belum ter-wire ke runtime — detail
 > di laporan RC (bagian Component Verification & Dead/Orphaned Code).
 
-- ✅ **Tests**: 1943 Python + 46 Node passing; Web typecheck/lint bersih
-- ⚠️ **Safety boundary**: Risk Gate deterministik ter-wire di pipeline (fail-closed), **tetapi**
-  tidak ditegakkan di dalam executor (`ExecutionEngine.execute_order`) dan sebagian guard
-  (permission guards, `MT5WriteGuard`, `MultiLevelBreaker` di jalur trade) **belum ter-wire** ke
-  runtime produksi. Lihat `docs/audit/RELEASE_READINESS_REPORT.md`.
+- ✅ **Tests**: 1943 Python + 46 Node passing; Web typecheck/lint bersih (**+10 test RC → 1953** setelah perbaikan B-3/B-6, commit `02a577c`)
+- ✅ **Safety boundary**: Risk Gate deterministik ter-wire di pipeline (fail-closed) **dan** kini ditegakkan di executor: `ExecutionEngine(require_approval=True)` menolak order tanpa `approval_token` (fail-closed). Sebagian guard lain (permission guards, `MT5WriteGuard`, `MultiLevelBreaker` di jalur trade) **belum ter-wire** ke runtime produksi. Lihat `docs/audit/RELEASE_READINESS_REPORT.md`.
 - ✅ **DevOps and linting:** Black, isort, flake8 passing, CI/CD blueprint integrated
 - ✅ **Documentation:** README, CHANGELOG, PRD V2, ARCHITECTURE_MAP dibuat
 
@@ -130,12 +127,10 @@ Direkomendasikan untuk memungkinkan scanner-kode QR (di aplikasi web dashboard) 
 ## Keputusan Lintas EPIC
 
 - **Orkestrasi:** Supervisor sebagai router utama (policy default `all_match`).
-- **Enforcement:** `RiskGate` deterministik **wajib dipanggil di pipeline** sebelum eksekusi (fail-closed).
-  **Catatan akurasi (revisi audit RC):** gate ditegakkan oleh *caller* (`TradingPipeline.run`), **bukan**
-  oleh executor (`ExecutionEngine.execute_order`). Ada jalur order lain (mis. `POST /mt5/orders/execute`,
-  `agents.permissions.send_to_mt5`) yang tidak melalui gate. Klaim "bahkan LLM tidak bisa bypass"
-  benar **di dalam pipeline**, tetapi belum menjadi jaminan non-bypassable di level executor. Detail:
-  `docs/audit/RELEASE_READINESS_REPORT.md` (Risk Gate Verification).
+- **Enforcement:** `RiskGate` deterministik **wajib dipanggil di pipeline** sebelum eksekusi (fail-closed),
+  **dan kini ditegakkan di executor** (fix B-3, commit `02a577c`): `ExecutionEngine(require_approval=True)`
+  menolak order tanpa `approval_token` (fail-closed). Catatan: `POST /mt5/orders/execute` masih menuju
+  permukaan paper/refusing connector (bukan executor). Detail: `docs/audit/RELEASE_READINESS_REPORT.md`.
 - **Dependency:** Semua agent test diverifikasi lewat pytest.
 - **Integrasi:** Node backend + frontend — dirakit melalui NPM workspaces, Docker Compose opsional.
 

@@ -17,11 +17,11 @@ XynnBot is a **substantially real, coherent, fail-closed analysis + decision + d
 
 The system is **NOT a bag of disconnected interfaces** in its core decision path. However, the audit found a real boundary problem and several material disconnects between documented "safety gates" and what the runtime actually enforces:
 
-1. **The deterministic Risk Gate is enforced by the *caller* (pipeline), not by the *executor*.** `ExecutionEngine.execute_order()` contains no reference to the Risk Gate, the `MT5WriteGuard`, or the kill switch. Other reachable call sites (`POST /mt5/orders/execute`, `agents.permissions.send_to_mt5`, `DemoTradingManager.measure_latency`) reach order dispatch without the gate. This is **latent** in the shipped config because the endpoint is read-only/refusing and the write guard is not wired — but it is not a *non-bypassable* boundary in the executor.
+1. **The deterministic Risk Gate was enforced by the *caller* (pipeline), not by the *executor*.** ✅ **Addressed in commit `02a577c`**: `ExecutionEngine(require_approval=True)` now refuses any order lacking a gate-issued `approval_token`, and the pipeline stamps it after approval. The executor is now itself a fail-closed boundary. Residual: `POST /mt5/orders/execute` still targets the connector's paper/refusing surface.
 2. **The Python API is unauthenticated in the shipped runtime.** The `ApiKeyMiddleware` is only installed when `PYTHON_API_KEY` is set; it is **not set** in `.env.runtime`. The **arm-execution switch** (`POST /mt5/terminals/arm`) and all mutating endpoints are therefore reachable unauthenticated (mitigated only by the loopback bind).
 3. **The Node→Python trust chain is broken.** The Node API never forwards `X-API-Key`; setting `PYTHON_API_KEY` (as production guidance requires) would make every proxy call 401. Auth does not compose.
-4. **Substantial governance/learning/research scaffolding is orphaned** — defined and unit-tested but never instantiated in the production runtime (`ModelRouter`, `LearningEngineV2`, `ExecutionRecoveryEngine`, `PositionCloseDetector`/`PositionMonitor`, `MultiLevelBreaker`/`CapitalAllocator` in the trade path, the entire `memory` package, `Task`/`DecisionState`/`EvidenceItem` contracts, the permission guards).
-5. **The trade-close → review → learning leg does not fire from runtime trades** (the P1-6 "fix" is an uninstantiated bridge).
+4. **Substantial governance/learning/research scaffolding is orphaned** — defined and unit-tested but never instantiated in the production runtime (`ModelRouter`, `LearningEngineV2`, `ExecutionRecoveryEngine`, `MultiLevelBreaker`/`CapitalAllocator` in the trade path, the entire `memory` package, `Task`/`DecisionState`/`EvidenceItem` contracts, the permission guards). (`PositionCloseDetector`/`PositionMonitor` were also orphaned; now wired — see #5.)
+5. **The trade-close → review → learning leg did not fire from runtime trades.** ✅ **Addressed in commit `02a577c`**: the runtime now drives a read-only `PositionMonitor` + `PositionCloseDetector` once per cycle so a disappeared ticket fires the review auto-trigger → lesson store.
 
 **Verdict: the system is CODE-READY and STAGING/PAPER-READY for analysis + deterministic decisioning, but it is NOT LIVE-READY for real-money execution.** No live broker validation has ever been performed; execution in the shipped runtime is either blocked (live read-only, unless armed) or simulated. The single largest structural concern for any future live deployment is finding #1 above.
 
@@ -34,9 +34,9 @@ Using factual stages (no numerical score):
 | Stage | Status | Basis |
 |---|---|---|
 | **Implemented** | ✅ YES | Full multi-service monorepo: FastAPI brain, Node API, Next.js dashboard, Telegram, infra. |
-| **Unit-tested** | ✅ YES | 1943 Python tests pass; 46 Node tests pass; web typecheck + lint clean. |
+| **Unit-tested** | ✅ YES | 1953 Python tests pass; 46 Node tests pass; web typecheck + lint clean. |
 | **Integration-tested** | ✅ YES (broad) | Pipeline orchestration, supervisor routing, reconciliation wiring, runtime settings, system endpoints all covered. |
-| **End-to-end verified** | ⚠️ PARTIAL | Autonomous feed→decision loop verified by tests + CHANGELOG E2E note; **execution leg is simulated**; trade-close→learning leg does not fire. |
+| **End-to-end verified** | ⚠️ PARTIAL | Autonomous feed→decision loop verified by tests + CHANGELOG E2E note; **execution leg is simulated**; trade-close→learning leg now wired (B-6) but not validated against a live account. |
 | **Staging / DEMO validated** | ⚠️ PARTIAL | Read-only MT5 live-data mode + paper simulation are coherent; no operator-run DEMO-account validation evidence in repo. |
 | **LIVE validated** | ❌ NO | No real broker order has ever been placed by this system in validation. Execution is simulated or blocked. **Do not claim live readiness.** |
 
@@ -106,9 +106,9 @@ Using factual stages (no numerical score):
 | MT5 Integration | **VERIFIED (read-only)** | `connector.py` real `MetaTrader5` lib, lazy; `terminals.py` fail-closed arm gate | `test_mt5_*.py` | No live broker validation ever performed |
 | Terminal arm/disarm | **VERIFIED** | `terminals.py:498-668`; disarms before **and** after switch; all config `execution:false` | `temp_pytest` / `test_mt5_terminals*.py` | Endpoint unauthenticated (see Security) |
 | Reconciliation | **PARTIAL** | Comparator real (`reconciliation.py`); gate real (`pipeline.py:366`) | `test_reconciliation*.py` | Providers are **no-ops unless MT5 live mode**; internal ledger in-memory; `internal_orders()` always `[]` |
-| Position Monitoring | **PARTIAL** | `position_monitor.py` snapshotting + change detection | `test_position_monitor*.py` | **`PositionMonitor` never instantiated in production**; in-memory, no restart recovery |
-| Trade Review | **PARTIAL** | `review_agent.py` good/bad-decision rules; `advanced_review.classify_root_cause` real | `test_review_agent.py` | Only `classify_root_cause` reachable; other advanced review classes orphaned |
-| **Learning Loop** | **PARTIAL / INERT** | `JsonlLessonStore` persistent + wired (`main.py:97-107`); advisory feedback wired (`runtime.py:287-292`) | `test_jsonl_lesson_store.py`, `test_learning_feedback.py` | **No runtime producer emits `TRADE_CLOSE`/`POST_TRADE_REVIEW`** → store stays empty in normal operation. `LearningEngineV2`, `LearningLoop`, `PerformanceTracker`, `PatternHypothesisPipeline` are **orphaned (test-only)** |
+| Position Monitoring | **PARTIAL** | `position_monitor.py` snapshotting + change detection; **now wired** in runtime (B-6 fix, `02a577c`) | `test_position_monitor*.py`, `test_rc_fixes_b3_b6.py` | In-memory, no restart recovery; change detection still partial |
+| Trade Review | **PARTIAL** | `review_agent.py` good/bad-decision rules; `advanced_review.classify_root_cause` real | `test_review_agent.py` | Only `classify_root_cause` reachable in other paths; other advanced review classes orphaned |
+| **Learning Loop** | **PARTIAL (now wired)** | `JsonlLessonStore` persistent + advisory feedback wired; **close detector now drives review in runtime** (B-6 fix, `02a577c`) | `test_jsonl_lesson_store.py`, `test_learning_feedback.py`, `test_rc_fixes_b3_b6.py` | `LearningEngineV2`, `LearningLoop`, `PerformanceTracker`, `PatternHypothesisPipeline` remain orphaned (test-only); close price is best-effort |
 | Research | **PARTIAL** | `/research/*` endpoints + `ResearchEngine` wired | `test_research*.py` | `backtest_v2`/`walk_forward_v2`/`monte_carlo`/`ResearchScheduler` **orphaned** |
 | Strategy Versioning + Promotion | **PARTIAL (governance-only)** | `strategy/registry.py`; `PromotionGate.can_promote` **is** called at `registry.py:301` via the HTTP endpoint with `enforce_evidence=True` | `test_strategy_promotion_gate.py` | `enforce_evidence` **defaults False**; bootstrap `register_live_strategy()` activates ungated; no rollback API; `LifecycleGovernor.propose` orphaned. Activation does **not** change what the engine runs |
 | 9Router / LLM | **VERIFIED (advisory)** | `llm/nine_router.py` discovery, cache, health, fallback, labels; safe failure | `test_model_discovery.py`, `test_model_router.py` | **`ModelRouter` is dead code** (never instantiated); discovered-model cost always 0.0; no structured-output validation; `advisor.py:_PREFERRED_FREE_MODELS` env-specific hardcode |
@@ -131,18 +131,18 @@ Confirmed facts:
 - The **production autonomous path** enforces the gate: `pipeline.py:310` → `execute_order` at `:403`. Fail-closed on exception (`:316-325`) and on rejection (`:330-336`).
 - The gate runs **8 deterministic checks** in `risk/gate.py:87-157`; `approved = all(checks.values())`.
 
-Un-gated order-dispatch surfaces:
+Un-gated order-dispatch surfaces (status after the `02a577c` fix):
 | Path | Gate? | Reachable in shipped config? | Evidence |
 |---|---|---|---|
-| `TradingPipeline.run` | ✅ Yes | ✅ (the normal path) | `pipeline.py:310,403` |
-| `POST /mt5/orders/execute` | ❌ No | ⚠️ Endpoint reachable, but `connector.execute_order` **refuses** when `_live_mode` (`connector.py:587-595`); shipped `MT5_LIVE_DATA=true` → refuses | `mt5/endpoints.py:204-218` |
+| `TradingPipeline.run` | ✅ Yes | ✅ (the normal path) | `pipeline.py:310,403`; stamps `approval_token` |
+| `POST /mt5/orders/execute` | ❌ No RiskGate (targets the connector's paper/refusing surface) | ⚠️ Endpoint reachable, but `connector.execute_order` **refuses** when `_live_mode` (`connector.py:587-595`); shipped `MT5_LIVE_DATA=true` → refuses | `mt5/endpoints.py:204-218` |
 | `agents.permissions.send_to_mt5` → `guarded_execute_order` | ❌ No RiskGate (WriteGuard only) | ❌ Not called from `src/` (test-only) | `agents/permissions.py:104-129` |
 | `DemoTradingManager.measure_latency` | ❌ No gate | ❌ Not instantiated in `src/` | `demo/demo_trading.py:198-213` |
-| Direct `ExecutionEngine.execute_order()` | ❌ No gate/guard/kill-switch | Reachable by any caller; the method itself never checks | `execution/engine.py:314-476` |
+| Direct `ExecutionEngine.execute_order()` | ✅ **Now refuses without a token** when `require_approval=True` (production opts in) | Reachable but **fail-closed (403)** | `execution/engine.py:344-363` |
 
 **The `MT5WriteGuard` "second boundary" is NOT on the production path** — `ExecutionEngine` never invokes it; only `guarded_execute_order` does, which production never calls.
 
-**Verdict: the gate is genuinely non-bypassable *within the pipeline*, and the shipped config is additionally protected by the read-only MT5 refusal. But the executor is a bare dispatcher — the boundary rests on orchestration discipline, not on a hard, executor-level guarantee.** For a release candidate claiming a non-bypassable gate, the executor should fail closed if invoked without an approval token.
+**Verdict (after fix):** the gate is non-bypassable *within the pipeline* **and now also at the executor** — `ExecutionEngine(require_approval=True)` fails closed for any direct/ungated caller, closing the structural gap. The remaining un-gated surface (`POST /mt5/orders/execute`) targets the connector's paper/refusing path (not the executor) and is safe in the shipped config; hardening it is optional.
 
 ---
 
@@ -222,10 +222,10 @@ All commands executed on the audited checkout.
 ### Python (`services/python`)
 ```
 Command : .venv\Scripts\python.exe -m pytest tests/ -q -p no:cacheprovider
-Result  : 1943 passed, 1 warning in 23.04s
-Passed  : 1943    Failed: 0    Skipped: 0    Warnings: 1 (starlette DeprecationWarning)
+Result  : 1953 passed, 1 warning in 21.69s
+Passed  : 1953    Failed: 0    Skipped: 0    Warnings: 1 (starlette DeprecationWarning)
 ```
-Matches the count documented in `DEEP_E2E_AUDIT.md` (1943). **Verified.**
+Baseline at `cfc8551` was **1943**; the RC fix commit `02a577c` added **+10** (test_rc_fixes_b3_b6.py + approval-token/executor cases). All green. `black`/`isort`/`flake8` clean on the changed files.
 
 ### Node / API (`apps/api`)
 ```
@@ -248,7 +248,7 @@ Result  : clean (no errors)
 ### Infrastructure
 - CI workflow present (`.github/workflows/ci.yml`, `config-validation.yml`). Prior audit recorded 8/8 jobs green on `51e6470`. Not re-executed here (offline); CI `node` availability warnings exist in the workflow.
 
-**Test quality note:** the 1943 passing tests validate **components**, not inter-gate enforcement. There is still **no adversarial test that proves an AI/agent cannot reach MT5 without the gate**, and no live-terminal E2E test. This is why "all green" and "gates wired" are different claims.
+**Test quality note:** the 1953 passing tests validate **components**, not inter-gate enforcement. There is still **no adversarial test that proves an AI/agent cannot reach MT5 without the gate**, and no live-terminal E2E test. This is why "all green" and "gates wired" are different claims.
 
 ---
 
@@ -277,8 +277,8 @@ Classification (none deleted — documented only):
 | `LearningEngineV2` | `learning/engine_v2.py` | **TEST-ONLY** (verified) |
 | `LearningLoop`, `LearningMemory`, `PerformanceTracker`, `PatternHypothesisPipeline` | `learning/*` | **TEST-ONLY** |
 | `ExecutionRecoveryEngine` | `execution/order_builder.py` | **ORPHANED** (verified) |
-| `PositionCloseDetector` | `review/close_detector.py` | **ORPHANED** — hook exists in `position_monitor.py:378` but neither is instantiated in `src/` |
-| `PositionMonitor` | `monitoring/position_monitor.py` | **ORPHANED** in production |
+| `PositionCloseDetector` | `review/close_detector.py` | **NOW WIRED** (B-6 fix, `02a577c`) — driven per cycle by the runtime |
+| `PositionMonitor` | `monitoring/position_monitor.py` | **NOW WIRED** (B-6 fix, `02a577c`) — read-only, per-cycle |
 | `SimulatedExecutionEngine` | `paper/simulated_execution.py` | **ORPHANED** |
 | `memory/*` package | `src/memory/` | **ORPHANED** (no `src/` importers) |
 | `Task`/`TaskStatus`/`TaskPriority` | `agents/task.py` | **ORPHANED** |
@@ -313,7 +313,7 @@ Classification (none deleted — documented only):
 
 - **B-1 (P0): Python control surface unauthenticated in the shipped config**, including the arm switch. Fix: set `PYTHON_API_KEY` and forward it from the Node client (or restrict to a private socket).
 - **B-2 (P0): Node→Python trust chain broken** — auth cannot be enabled without breaking the control plane until the header is forwarded.
-- **B-3 (P0, structural): the Risk Gate is not enforced inside the executor.** `ExecutionEngine.execute_order()` and `/mt5/orders/execute` reach order dispatch without a gate/guard/kill-switch check. Currently latent (read-only refuses; simulation labelled), but it means the "non-bypassable gate" claim is not structurally guaranteed.
+- **B-3 (P0, structural): the Risk Gate is now enforced inside the executor.** ✅ **FIXED in commit `02a577c`**: `ExecutionEngine(require_approval=True)` refuses any order lacking a gate-issued `approval_token` (fail-closed, `error_code=403`), and the pipeline stamps `gate:<decision_id>` only after the gate approves. The production runtime opts in. Residual: `POST /mt5/orders/execute` still targets the connector's paper/refusing surface rather than the executor.
 - **B-4 (P0 for live): no live broker validation has ever been performed.** Execution is simulated or blocked; there is no evidence of a real order, fill, or reconciliation against a live account.
 
 A separate machine-readable blocker file is provided in `docs/audit/RELEASE_BLOCKERS.md`.
@@ -327,7 +327,7 @@ Non-blocking but requiring operational attention:
 - Agent `timeout_seconds` is stored but never enforced → a hung specialist can stall a cycle.
 - Order state machine, intents, kill switch, and position monitor are **all in-memory** → restart loses execution/risk state (P2-15, deferred).
 - Reconciliation and monitoring supply no protection in paper mode (no-op providers / uninstantiated monitor).
-- The learning loop is effectively inert (no runtime `TRADE_CLOSE` producer) → "self-improving" claims are not demonstrated at runtime.
+- The learning loop's close leg is now wired (B-6, `02a577c`), but it reads broker position snapshots (best-effort close price) and `LearningEngineV2`/`LearningLoop` remain test-only; "self-improving" behavior is still not demonstrated end-to-end against a live account.
 - Two divergent `RiskGate` classes exist (`risk/gate.py` authoritative; `trading/risk_gate.py` used by `/health`) — a confusion hazard.
 - Dashboard has hardcoded mock `orders`/`positions` tables and 14 stub pages.
 - LLM discovered-model cost is always 0.0; no structured-output validation; `ModelRouter` (documented safety routing) is dead.
@@ -341,9 +341,11 @@ Non-blocking but requiring operational attention:
 RELEASE CANDIDATE — PARTIALLY VERIFIED
 ```
 
-**Rationale:** The system is genuinely integrated and operational as an **analysis + deterministic-decision + fail-closed gating engine**, with strong test evidence (1943 Python + 46 Node passing, web clean) and real runtime wiring for the core pipeline. It is **CODE-READY** and suitable for **STAGING / PAPER / read-only DEMO** operation.
+**Rationale:** The system is genuinely integrated and operational as an **analysis + deterministic-decision + fail-closed gating engine**, with strong test evidence (1953 Python + 46 Node passing, web clean) and real runtime wiring for the core pipeline. It is **CODE-READY** and suitable for **STAGING / PAPER / read-only DEMO** operation.
 
-It is **NOT LIVE-READY**: there is no live broker validation, the shipped execution mode is simulated/blocked, the control surface is unauthenticated in the shipped config, and the deterministic Risk Gate — while enforced within the pipeline — is not enforced inside the executor, so it is not yet a structurally non-bypassable boundary. Those are concrete, bounded items (see `RELEASE_BLOCKERS.md`), not architecture failures.
+It is **NOT LIVE-READY**: there is no live broker validation, the shipped execution mode is simulated/blocked, and the control surface is unauthenticated in the shipped config. The deterministic Risk Gate is now enforced within the pipeline **and** at the executor (B-3 fix, `02a577c`), closing the structural non-bypassable-boundary gap. The remaining items (B-1/B-2 auth enforcement, B-4 live validation, B-5 durable state) are concrete, bounded operational actions (see `RELEASE_BLOCKERS.md`), not architecture failures.
+
+**Fixes applied during this audit session:** commit `02a577c` (B-3 executor-enforced approval token + B-6 close→review wiring; +10 tests, full suite 1943 → 1953 green) and commit `1ab9f13` (documentation corrections + RC report).
 
 ---
 

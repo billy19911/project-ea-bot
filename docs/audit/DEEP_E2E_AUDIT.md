@@ -17,11 +17,11 @@
 >
 > **FOURTH UPDATE (same session):** All six **P3** cleanup items were then **fixed**. Test count 1935 → **1943** (all green). **The only remaining open item is P2-15 (deferred).** See §14 "P3 fixes applied".
 >
-> **RELEASE-CANDIDATE RE-VERIFICATION (commit `cfc8551`):** A later independent RC audit re-checked the "FIXED" claims against actual source. Most hold, but **two claims do not survive re-verification** and are corrected inline below:
-> - **P1-6 (trade-close → review → learning) — NOT FIXED at runtime.** `PositionCloseDetector` and `PositionMonitor` are defined and have a hook, but **neither is instantiated anywhere in `src/`** (grep-verified). The only `on_position_closed` caller is the unwired `paper` engine. No runtime producer emits `TRADE_CLOSE`/`POST_TRADE_REVIEW`. The learning loop is therefore **inert in production**.
+> **RELEASE-CANDIDATE RE-VERIFICATION (commit `cfc8551`):** A later independent RC audit re-checked the "FIXED" claims against actual source. Most hold, but **two claims did not survive re-verification** and were corrected inline below:
+> - **P1-6 (trade-close → review → learning) — was NOT wired at runtime.** `PositionCloseDetector` and `PositionMonitor` were defined but **not instantiated anywhere in `src/`**; no runtime producer emitted `TRADE_CLOSE`/`POST_TRADE_REVIEW`. **NOW FIXED** in commit `02a577c` (runtime drives the monitor + close detector per cycle).
 > - **P2-1 (AppShell fake realtime) — the "faked" note is STALE.** `apps/web/components/AppShell.tsx` now polls the real `/health` endpoint for its LIVE/DEGRADED/OFFLINE badge.
 >
-> See `docs/audit/RELEASE_READINESS_REPORT.md` for the full re-verification and `docs/audit/RELEASE_BLOCKERS.md` for the live-readiness blockers.
+> **RC fixes applied (`02a577c`):** B-3 (executor-enforced approval token) and B-6 (close→review wiring). See `docs/audit/RELEASE_READINESS_REPORT.md` and `docs/audit/RELEASE_BLOCKERS.md`.
 
 ---
 
