@@ -29,6 +29,12 @@ from execution.engine import OrderRequest
 from execution.order_builder import OrderBuilder
 from risk.gate import GateDecision
 from risk.money_management import MoneyManager
+from trading.level_plan import (
+    build_level_plan,
+    direction_from_text,
+    extract_price_atr,
+    indicative_levels,
+)
 from trading.market_snapshot import get_latest_snapshot
 
 logger = logging.getLogger(__name__)
@@ -131,6 +137,10 @@ class PipelineResult:
     # ``trace_id`` is echoed from the caller context, ``symbol`` from the event.
     trace_id: str = ""
     symbol: str = ""
+    # Entry/SL/TP1/TP2/TPmax ladder for signal reports. From the real
+    # proposal/order when one exists (source "order"), else indicative
+    # from the ATR model (source "analysis"); None when not derivable.
+    levels: Optional[dict[str, Any]] = None
 
     def add_stage(self, stage: str, status: str, detail: str = "") -> None:
         """Append a stage entry (as a plain dict) to the trace."""
@@ -159,6 +169,7 @@ class PipelineResult:
             "summary": self.summary,
             "trace_id": self.trace_id,
             "symbol": self.symbol,
+            "levels": self.levels,
         }
 
 
@@ -309,6 +320,9 @@ class TradingPipeline:
             result.decision = self._no_trade_decision(analysis)
             result.status = STATUS_WAIT if result.decision == "WAIT" else STATUS_NO_TRADE
             result.risk_reason = "no actionable proposal"
+            # Level reporting: an indicative ladder (ATR model) so the
+            # report still carries Entry/SL/TP1/TP2/TPmax for the setup.
+            result.levels = self._indicative_levels(analysis, analysis_context)
             result.add_stage("risk", STAGE_SKIPPED, "no proposal to validate")
             result.add_stage("execution", STAGE_SKIPPED, "no approved order")
             self._finalise(result)
@@ -319,6 +333,13 @@ class TradingPipeline:
 
         # ── Step B: Deterministic Risk Gate ─────────────────────────────
         validation = self._build_validation_inputs(proposal, context)
+        # Level reporting: the ladder comes from the completed proposal
+        # (real entry/SL), consistent with what the gate validates. When the
+        # proposal still lacks a usable stop (e.g. no ATR in the context) the
+        # report falls back to the indicative ATR ladder instead of nothing.
+        result.levels = self._order_levels(validation, analysis_context) or self._indicative_levels(
+            analysis, analysis_context
+        )
         try:
             decision: GateDecision = self.risk_gate.validate_proposal(
                 validation["proposal"],
@@ -594,6 +615,49 @@ class TradingPipeline:
             if signal == "NEUTRAL":
                 return "WAIT"
         return "NO_TRADE"
+
+    @staticmethod
+    def _indicative_levels(
+        analysis: Any,
+        analysis_context: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Indicative Entry/SL/TP1/TP2/TPmax from market evidence.
+
+        Used for no-trade cycles so the report still shows the ladder the
+        setup *would* use (project ATR model: SL = 1.5 x ATR). Never
+        fabricates: no direction / price / ATR means no ladder.
+        """
+        try:
+            summary = analysis.get("summary") if isinstance(analysis, dict) else ""
+            signal = analysis.get("overall_signal") if isinstance(analysis, dict) else ""
+            direction = direction_from_text(signal, summary)
+            if not direction:
+                return None
+            price, atr = extract_price_atr(analysis_context)
+            return indicative_levels(direction, price, atr)
+        except Exception as exc:  # noqa: BLE001 - reporting is best-effort
+            logger.debug("Indicative level plan skipped: %s", exc)
+            return None
+
+    @staticmethod
+    def _order_levels(
+        validation: dict[str, Any],
+        analysis_context: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Entry/SL/TP1/TP2/TPmax from the (completed) proposal levels."""
+        try:
+            proposal = validation.get("proposal") or {}
+            _, atr = extract_price_atr(analysis_context)
+            return build_level_plan(
+                proposal.get("direction", ""),
+                proposal.get("entry_price", 0.0),
+                proposal.get("stop_loss", 0.0),
+                take_profit=proposal.get("take_profit", 0.0),
+                atr=atr,
+            )
+        except Exception as exc:  # noqa: BLE001 - reporting is best-effort
+            logger.debug("Order level plan skipped: %s", exc)
+            return None
 
     # ------------------------------------------------------------------
     # Helpers — deterministic validation inputs
