@@ -70,6 +70,23 @@ TELEGRAM_BOT_TOKEN=<dari @BotFather>       # kosong = fitur mati, sistem tetap j
 TELEGRAM_ALLOWED_CHAT_IDS=<chat id user>   # wajib; allowlist penerima + pengirim perintah
 ```
 
+### Bot Sinyal Terpisah (opsional, bot ke-3 — mis. XynnSignal)
+
+Supaya chat bot utama tetap bersih, laporan sinyal (digest + Market Analysis)
+dapat dipindah ke bot tersendiri:
+
+```
+TELEGRAM_SIGNAL_BOT_TOKEN=<token bot ke-3 dari @BotFather>
+TELEGRAM_SIGNAL_CHAT_IDS=<chat id penerima; kosong = allowlist bot utama>
+```
+
+- Kosong → laporan kembali lewat bot utama (perilaku lama, aman).
+- Bot sinyal setengah terkonfigurasi (token ada, penerima kosong) → laporan
+  otomatis fallback ke bot utama, tidak pernah hilang.
+- **Penting:** buka chat bot sinyal dan tekan **Start** sekali — Telegram
+  melarang bot mengirim pesan ke chat yang belum pernah memulai bot.
+- Status bisa dicek di `GET /telegram/status` → `signal_bot_configured`.
+
 ## Langkah Implementasi (TDD)
 
 1. Tulis `tests/test_telegram_transport.py` (RED):

@@ -64,3 +64,6 @@ test_ea_bot.db
 
 # Runtime state (MT5 terminal selection)
 services/python/mt5_selected.json
+
+# Env backups may contain live bot tokens — never commit them.
+.env.runtime.bak-*

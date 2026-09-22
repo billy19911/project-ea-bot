@@ -3,6 +3,13 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Bot Sinyal Telegram Terpisah (bot ke-3, mis. XynnSignal)
+- **`build_signal_gateway_from_env()` / `get_signal_gateway()` / `get_report_gateway()` (`src/telegram/notifier.py`)**: Gateway **kedua** opsional lewat `TELEGRAM_SIGNAL_BOT_TOKEN` — semua laporan sinyal (digest `📊 Ringkasan Siklus` + `🧠 Market Analysis`, termasuk keputusan BUY/SELL yang bypass digest) dikirim ke bot ini sehingga **chat bot utama tetap bersih** (hanya perintah `/status` dll). `TELEGRAM_SIGNAL_CHAT_IDS` kosong = memakai allowlist bot utama.
+- **Fallback aman**: tanpa token bot sinyal — atau bot sinyal setengah terkonfigurasi (tanpa penerima) — laporan otomatis kembali lewat bot utama. Bot sinyal tidak pernah "menelan" laporan.
+- **`/telegram/status` jujur (`src/system/endpoints.py`)**: tambah `signal_bot_configured` / `signal_bot_connected` (true hanya bila token sinyal + transport nyata + penerima terisi).
+- **Operator wiring (`scripts/start-all.ps1` + `scripts/restart-py.ps1` + `.env.example` + `.env.runtime`)**: env `TELEGRAM_SIGNAL_BOT_TOKEN` / `TELEGRAM_SIGNAL_CHAT_IDS` diteruskan ke proses Python; placeholder tanpa secret di `.env.example`.
+- **Verifikasi**: 14 test baru (`test_telegram_signal_bot.py`); full suite lulus; Flake8/black/isort bersih.
+
 ### Added — Fase 7: Learning Feedback Loop (Lessons → Analisis)
 - **`JsonlLessonStore` (`services/python/src/learning/lesson_store.py`)**: Store lesson persist **append-only JSONL + cache in-memory**, API-identik `InMemoryLessonStore` (`add_lesson`/`all_lessons`/`get_lessons`/`clear`/`__len__`). Lessons **bertahan lintas restart** (dibuktikan test reload). Fail-safe: baris korup di-skip saat load, file tak bisa ditulis → degradasi cache-only; **nol dependency baru**; tidak menyentuh `memory/trade_memory.py`.
 - **`LessonFeedbackProvider` + `format_lessons_reason()` (`src/learning/feedback.py`)**: Merangkas lessons per simbol (`count`/`wins`/`losses`/`recent` newest-first; `"*"` = semua) untuk siklus analisis berikutnya. `record_review_lesson()` adalah **jembatan** `ReviewAutoTrigger.on_review` → store yang sama — sehingga **kedua jalur review** (ReviewLead events + paper-close hook) menulis ke satu sink.

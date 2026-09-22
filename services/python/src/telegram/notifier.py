@@ -10,7 +10,11 @@ Wires the read-only :class:`TelegramGateway` into the orchestration loop:
   one message per cycle (urgent trade outcomes bypass the digest),
 * ``notify_pipeline_result`` — immediate single-report delivery,
 * ``build_gateway_from_env`` / ``get_gateway`` / ``set_gateway`` — env-driven
-  gateway singleton (no token → transport stays ``None``, feature is off).
+  gateway singleton (no token → transport stays ``None``, feature is off),
+* ``build_signal_gateway_from_env`` / ``get_signal_gateway`` — a *second*,
+  optional bot (``TELEGRAM_SIGNAL_BOT_TOKEN``) that receives the signal
+  reports (digests / market analysis) so the primary bot's chat stays clean;
+  without that token reports fall back to the primary bot.
 
 Design rules:
 
@@ -38,16 +42,21 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "PipelineDigest",
     "build_gateway_from_env",
+    "build_signal_gateway_from_env",
     "flush_pipeline_digest",
     "format_pipeline_digest",
     "format_pipeline_report",
     "get_digest",
     "get_gateway",
+    "get_report_gateway",
+    "get_signal_gateway",
     "notify_pipeline_result",
     "queue_pipeline_result",
     "reset_digest",
+    "reset_signal_gateway",
     "set_digest",
     "set_gateway",
+    "set_signal_gateway",
     "summarize_pipeline_result",
 ]
 
@@ -89,7 +98,7 @@ def _shared_slot() -> dict[str, Any]:
 
     slot = getattr(builtins, _GBL_KEY, None)
     if slot is None:
-        slot = {"gateway": None, "digest": None}
+        slot = {"gateway": None, "digest": None, "signal_gateway": None}
         setattr(builtins, _GBL_KEY, slot)
     return slot
 
@@ -110,6 +119,14 @@ def _set_digest_singleton(value: Optional["PipelineDigest"]) -> None:
     _shared_slot()["digest"] = value
 
 
+def _get_signal_gateway_singleton() -> Optional[TelegramGateway]:
+    return _shared_slot().get("signal_gateway")
+
+
+def _set_signal_gateway_singleton(value: Optional[TelegramGateway]) -> None:
+    _shared_slot()["signal_gateway"] = value
+
+
 def _parse_allowlist(raw: str) -> list[str]:
     """Split a comma-separated chat-id list into trimmed non-empty items."""
     return [cid.strip() for cid in (raw or "").split(",") if cid.strip()]
@@ -122,7 +139,9 @@ def build_gateway_from_env() -> TelegramGateway:
     read-only command surface (legacy behaviour) but sends nothing.
     """
     token = os.getenv("TELEGRAM_BOT_TOKEN") or ""
-    raw_allowlist = os.getenv("TELEGRAM_ALLOWED_CHAT_IDS") or os.getenv("TELEGRAM_CHAT_IDS") or ""
+    raw_allowlist = (
+        os.getenv("TELEGRAM_ALLOWED_CHAT_IDS") or os.getenv("TELEGRAM_CHAT_IDS") or ""
+    )
     allowlist = _parse_allowlist(raw_allowlist)
 
     transport: Optional[HttpTelegramTransport] = None
@@ -148,6 +167,59 @@ def get_gateway() -> TelegramGateway:
 def set_gateway(gateway: Optional[TelegramGateway]) -> None:
     """Override the process-wide gateway (used by tests / startup wiring)."""
     _set_gateway_singleton(gateway)
+
+
+def build_signal_gateway_from_env() -> Optional[TelegramGateway]:
+    """Build the *signal* gateway from ``TELEGRAM_SIGNAL_BOT_TOKEN``.
+
+    Returns ``None`` when the token is unset — callers then fall back to the
+    primary gateway, so a missing signal bot degrades to the old behaviour
+    (reports on the primary bot) instead of silencing them.
+
+    The signal bot is deliberately *separate* from the primary bot: the user
+    wants the signal chatter (cycle digests / market analysis) in its own
+    chat while the primary bot stays clean. ``TELEGRAM_SIGNAL_CHAT_IDS``
+    defaults to the primary allowlist when unset.
+    """
+    token = (os.getenv("TELEGRAM_SIGNAL_BOT_TOKEN") or "").strip()
+    if not token:
+        return None
+    raw_allowlist = (
+        os.getenv("TELEGRAM_SIGNAL_CHAT_IDS")
+        or os.getenv("TELEGRAM_ALLOWED_CHAT_IDS")
+        or os.getenv("TELEGRAM_CHAT_IDS")
+        or ""
+    )
+    allowlist = _parse_allowlist(raw_allowlist)
+
+    transport: Optional[HttpTelegramTransport] = None
+    try:
+        transport = HttpTelegramTransport(token=token)
+    except Exception:  # pragma: no cover - defensive; blank handled above
+        logger.warning("Could not build Telegram signal transport; falling back")
+        return None
+
+    return TelegramGateway(transport=transport, allowlist=allowlist)
+
+
+def get_signal_gateway() -> Optional[TelegramGateway]:
+    """Return the process-wide signal gateway (``None`` when not configured)."""
+    gateway = _get_signal_gateway_singleton()
+    if gateway is None:
+        gateway = build_signal_gateway_from_env()
+        if gateway is not None:
+            _set_signal_gateway_singleton(gateway)
+    return gateway
+
+
+def set_signal_gateway(gateway: Optional[TelegramGateway]) -> None:
+    """Override the process-wide signal gateway (used by tests)."""
+    _set_signal_gateway_singleton(gateway)
+
+
+def reset_signal_gateway() -> None:
+    """Drop the signal gateway so the next use rebuilds it from env."""
+    _set_signal_gateway_singleton(None)
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +346,12 @@ def get_digest() -> Optional[PipelineDigest]:
         if not _digest_enabled_from_env():
             return None
         digest = PipelineDigest(
-            window_s=_float_from_env("TELEGRAM_DIGEST_WINDOW_S", _DIGEST_WINDOW_S_DEFAULT),
-            max_items=int(_float_from_env("TELEGRAM_DIGEST_MAX_ITEMS", _DIGEST_MAX_ITEMS_DEFAULT)),
+            window_s=_float_from_env(
+                "TELEGRAM_DIGEST_WINDOW_S", _DIGEST_WINDOW_S_DEFAULT
+            ),
+            max_items=int(
+                _float_from_env("TELEGRAM_DIGEST_MAX_ITEMS", _DIGEST_MAX_ITEMS_DEFAULT)
+            ),
         )
         _set_digest_singleton(digest)
     return digest
@@ -317,7 +393,9 @@ def _consensus_pct(summary: str, confidence: Any) -> str:
     ``confidence`` field.
     """
     raw = ""
-    match = _MARKET_CONF_RE.search(summary or "") or _CONFIDENCE_RE.search(summary or "")
+    match = _MARKET_CONF_RE.search(summary or "") or _CONFIDENCE_RE.search(
+        summary or ""
+    )
     if match:
         raw = match.group(1)
     else:
@@ -381,7 +459,9 @@ def format_pipeline_report(summary: dict[str, Any]) -> str:
     decision = str(summary.get("decision") or "—")
     direction = _market_direction(summary.get("summary"))
     tail = f" · arah {direction}" if direction else ""
-    consensus = _consensus_pct(str(summary.get("summary") or ""), summary.get("confidence"))
+    consensus = _consensus_pct(
+        str(summary.get("summary") or ""), summary.get("confidence")
+    )
     if consensus:
         tail += f" (konsensus {consensus})"
     lines.append(f"🎯 {decision}{tail}")
@@ -412,9 +492,13 @@ def format_pipeline_digest(items: list[dict[str, Any]]) -> str:
         label = symbols[0] if len(symbols) == 1 else f"{len(symbols)} simbol"
         header += f" · {label}"
 
-    directions = Counter(d for d in (_market_direction(item.get("summary")) for item in batch) if d)
+    directions = Counter(
+        d for d in (_market_direction(item.get("summary")) for item in batch) if d
+    )
     neutral = len(batch) - sum(directions.values())
-    direction_line = " · ".join(f"{name} ({count})" for name, count in directions.most_common())
+    direction_line = " · ".join(
+        f"{name} ({count})" for name, count in directions.most_common()
+    )
     if neutral:
         if direction_line:
             direction_line += f" · netral ({neutral})"
@@ -422,7 +506,9 @@ def format_pipeline_digest(items: list[dict[str, Any]]) -> str:
             direction_line = f"netral ({neutral})"
 
     decisions = Counter(str(item.get("decision") or "—") for item in batch)
-    decision_line = " · ".join(f"{name} ({count})" for name, count in decisions.most_common())
+    decision_line = " · ".join(
+        f"{name} ({count})" for name, count in decisions.most_common()
+    )
     executed = sum(1 for item in batch if item.get("executed"))
     execution_line = f"eksekusi {executed}" if executed else "tanpa eksekusi"
 
@@ -449,9 +535,27 @@ def format_pipeline_digest(items: list[dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------------
 # Delivery
 # ---------------------------------------------------------------------------
+def get_report_gateway() -> Optional[TelegramGateway]:
+    """Return the gateway that receives *signal* reports (digest / analysis).
+
+    Prefers the dedicated signal bot (``TELEGRAM_SIGNAL_BOT_TOKEN``) so the
+    primary bot's chat stays clean. Falls back to the primary gateway when no
+    signal bot is configured — or when it has no usable recipients — so a
+    half-configured signal bot never silences reports.
+    """
+    signal_gateway = get_signal_gateway()
+    if (
+        signal_gateway is not None
+        and getattr(signal_gateway, "transport", None) is not None
+        and getattr(signal_gateway, "allowlist", None)
+    ):
+        return signal_gateway
+    return get_gateway()
+
+
 def _send_digest(items: list[dict[str, Any]]) -> bool:
-    """Deliver one digest batch through the shared gateway (fail-safe)."""
-    gateway = get_gateway()
+    """Deliver one digest batch through the report gateway (fail-safe)."""
+    gateway = get_report_gateway()
     if gateway is None or getattr(gateway, "transport", None) is None:
         return False
     text = format_pipeline_digest(items)
@@ -464,8 +568,8 @@ def _send_digest(items: list[dict[str, Any]]) -> bool:
 
 
 def _deliver(summary: dict[str, Any]) -> bool:
-    """Send one summary through the shared gateway (fail-safe)."""
-    gateway = get_gateway()
+    """Send one summary through the report gateway (fail-safe)."""
+    gateway = get_report_gateway()
     if gateway is None or getattr(gateway, "transport", None) is None:
         return False
     return bool(gateway.notify("pipeline_result", format_pipeline_report(summary)))
@@ -516,7 +620,7 @@ def queue_pipeline_result(result: dict[str, Any]) -> bool:
     (queued or sent), False when Telegram is not configured.
     """
     try:
-        gateway = get_gateway()
+        gateway = get_report_gateway()
         if gateway is None or getattr(gateway, "transport", None) is None:
             return False
         summary = summarize_pipeline_result(result)
@@ -528,7 +632,9 @@ def queue_pipeline_result(result: dict[str, Any]) -> bool:
         summary["queued_at"] = time.time()
         return digest.add(summary)
     except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
-        logger.warning("Telegram cycle report failed (%s); cycle unaffected", type(exc).__name__)
+        logger.warning(
+            "Telegram cycle report failed (%s); cycle unaffected", type(exc).__name__
+        )
         return False
 
 
@@ -550,7 +656,7 @@ def notify_pipeline_result(
     transport / no allowlist / delivery failure — all silently degraded).
     """
     try:
-        gw = gateway if gateway is not None else get_gateway()
+        gw = gateway if gateway is not None else get_report_gateway()
         if gw is None:
             return False
         # Feature off (no bot token configured): stay quiet — a disabled
@@ -560,5 +666,7 @@ def notify_pipeline_result(
         summary = summarize_pipeline_result(result)
         return bool(gw.notify("pipeline_result", format_pipeline_report(summary)))
     except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
-        logger.warning("Telegram pipeline report failed (%s); cycle unaffected", type(exc).__name__)
+        logger.warning(
+            "Telegram pipeline report failed (%s); cycle unaffected", type(exc).__name__
+        )
         return False

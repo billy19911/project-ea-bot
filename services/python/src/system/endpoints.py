@@ -30,7 +30,7 @@ from ..orchestration.runtime import get_runtime
 from ..security.audit_log import ProtectedAuditLog
 from ..system.certification import run_certification
 from ..system.settings_store import get_settings_store
-from ..telegram.notifier import get_gateway
+from ..telegram.notifier import get_gateway, get_signal_gateway
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,8 @@ async def certify() -> dict:
 
 
 @router.get(
-    "/execution/intent/{intent_id}", summary="Get durable execution intent state (Phase 34)"
+    "/execution/intent/{intent_id}",
+    summary="Get durable execution intent state (Phase 34)",
 )
 async def execution_intent_state(intent_id: str) -> dict:
     """Return the stored intent record and current lifecycle state."""
@@ -103,7 +104,9 @@ def _telegram_configuration() -> dict[str, Any]:
     present and at least one chat id is allowlisted.
     """
     token = os.getenv("TELEGRAM_BOT_TOKEN") or ""
-    raw_allowlist = os.getenv("TELEGRAM_ALLOWED_CHAT_IDS") or os.getenv("TELEGRAM_CHAT_IDS") or ""
+    raw_allowlist = (
+        os.getenv("TELEGRAM_ALLOWED_CHAT_IDS") or os.getenv("TELEGRAM_CHAT_IDS") or ""
+    )
     allowlist = [cid.strip() for cid in raw_allowlist.split(",") if cid.strip()]
 
     gateway = get_gateway()
@@ -113,6 +116,18 @@ def _telegram_configuration() -> dict[str, Any]:
     poller_enabled = poller_raw in {"1", "true", "yes", "on"}
     poller_token = (os.getenv("TELEGRAM_POLLER_BOT_TOKEN") or "").strip()
 
+    # Signal bot (optional): when configured, cycle reports (digest / market
+    # analysis) are delivered through it instead of the primary bot, keeping
+    # the primary chat clean. Reports fall back to the primary bot otherwise.
+    signal_token = (os.getenv("TELEGRAM_SIGNAL_BOT_TOKEN") or "").strip()
+    signal_gateway = get_signal_gateway()
+    signal_configured = bool(
+        signal_token
+        and signal_gateway is not None
+        and getattr(signal_gateway, "transport", None) is not None
+        and getattr(signal_gateway, "allowlist", None)
+    )
+
     return {
         "enabled": bool(token) or bool(allowlist),
         "configured": bool(token and allowlist),
@@ -120,6 +135,8 @@ def _telegram_configuration() -> dict[str, Any]:
         "source": "live",
         "has_token": bool(token),
         "allowlist_size": len(gateway.allowlist),
+        "signal_bot_configured": signal_configured,
+        "signal_bot_connected": signal_configured,
         "commands": ["/status", "/positions", "/risk", "/why", "/review", "/help"],
         # Inbound commands (chat → bot) require a SECOND bot token: Telegram
         # allows only one getUpdates consumer per bot, and the report bot may
@@ -312,7 +329,9 @@ def _apply_to_runtime(values: dict[str, float]) -> dict[str, Any]:
     if "scheduler_poll_interval" in values:
         scheduler = getattr(runtime, "scheduler", None)
         if scheduler is not None and hasattr(scheduler, "poll_interval"):
-            scheduler.poll_interval = max(0.001, float(values["scheduler_poll_interval"]))
+            scheduler.poll_interval = max(
+                0.001, float(values["scheduler_poll_interval"])
+            )
             applied["scheduler_poll_interval"] = scheduler.poll_interval
     if "trend_sample_interval" in values:
         sampler = get_trend_sampler()
@@ -359,7 +378,9 @@ def _risk_limits_snapshot() -> dict[str, Any]:
     return {"available": True, "limits": limits}
 
 
-@router.get("/settings", summary="Runtime settings (writable allowlist + read-only risk limits)")
+@router.get(
+    "/settings", summary="Runtime settings (writable allowlist + read-only risk limits)"
+)
 async def get_settings() -> dict[str, Any]:
     """Return writable knobs plus the real, read-only risk limits.
 
@@ -451,7 +472,9 @@ async def learning_analytics() -> dict[str, Any]:
         "supervisor_kpis": None,
         "lessons": [
             {
-                "id": str(lesson.get("trade_id") or lesson.get("id") or f"lesson_{index}"),
+                "id": str(
+                    lesson.get("trade_id") or lesson.get("id") or f"lesson_{index}"
+                ),
                 "category": str(lesson.get("category") or ""),
                 "outcome": str(lesson.get("outcome") or ""),
                 "symbol": str(lesson.get("symbol") or ""),

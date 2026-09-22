@@ -51,6 +51,8 @@ $nineUrl  = EnvOr 'NINE_ROUTER_BASE_URL' 'http://127.0.0.1:20128/v1'
 $nineKey  = EnvOr 'NINE_ROUTER_API_KEY' ''
 $tgToken  = EnvOr 'TELEGRAM_BOT_TOKEN' ''
 $tgChats  = EnvOr 'TELEGRAM_ALLOWED_CHAT_IDS' ''
+$tgSigToken = EnvOr 'TELEGRAM_SIGNAL_BOT_TOKEN' ''
+$tgSigChats = EnvOr 'TELEGRAM_SIGNAL_CHAT_IDS' ''
 $feedOn   = EnvOr 'MARKET_FEED_ENABLED' 'false'
 $feedSyms = EnvOr 'MARKET_FEED_SYMBOLS' 'XAUUSD'
 $feedTf   = EnvOr 'MARKET_FEED_TIMEFRAME' 'M5'
@@ -98,6 +100,10 @@ function Export-CommonEnv {
   if ($nineKey) { $env:NINE_ROUTER_API_KEY = $nineKey }
   if ($tgToken) { $env:TELEGRAM_BOT_TOKEN = $tgToken }
   if ($tgChats) { $env:TELEGRAM_ALLOWED_CHAT_IDS = $tgChats }
+  # Signal bot (bot ke-3, mis. XynnSignal): laporan siklus dikirim ke bot ini
+  # supaya chat bot utama tetap bersih. Kosong = laporan kembali ke bot utama.
+  if ($tgSigToken) { $env:TELEGRAM_SIGNAL_BOT_TOKEN = $tgSigToken }
+  if ($tgSigChats) { $env:TELEGRAM_SIGNAL_CHAT_IDS = $tgSigChats }
   $env:MARKET_FEED_ENABLED = $feedOn
   $env:MARKET_FEED_SYMBOLS = $feedSyms
   $env:MARKET_FEED_TIMEFRAME = $feedTf
