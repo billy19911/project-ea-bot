@@ -30,6 +30,32 @@ function usePagedRows<T>(rows: T[] | undefined, initialSize = 25) {
   return { rows: slice, pager };
 }
 
+// Agent routing priority is an enum tier (100/75/50/25/10) shared by all
+// analysts, so a bare "75" reads like a dummy column. Show the tier label
+// next to the number to make the meaning explicit.
+const PRIORITY_TIERS: Record<number, string> = {
+  100: 'CRITICAL',
+  75: 'HIGH',
+  50: 'NORMAL',
+  25: 'LOW',
+  10: 'BACKGROUND',
+};
+
+function priorityLabel(value: number | null | undefined): string {
+  if (value == null) return '—';
+  const tier = PRIORITY_TIERS[value];
+  return tier ? `${tier} (${value})` : String(value);
+}
+
+// Activity timestamps arrive as ISO strings; show a compact local time and
+// fall back to the raw value when it cannot be parsed.
+function formatLastActive(value: string | null | undefined): string {
+  if (!value) return '—';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleTimeString();
+}
+
 // API routes require a Bearer token (PRD_V2 §28). The /login page mints and
 // stores the token in localStorage under this key; the "Run Cycle" action
 // tells the operator how to get one when it is missing.
@@ -624,15 +650,16 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
         <section className={s.card}>
           <h2>Agents ({aiControl.agents?.length})</h2>
           <table className={s.table}>
-            <thead><tr><th>Agent</th><th>Type</th><th>Status</th><th>Priority</th><th>Last active</th><th>Errors</th></tr></thead>
+            <thead><tr><th>Agent</th><th>Type</th><th>Status</th><th>Runs</th><th>Priority</th><th>Last active</th><th>Errors</th></tr></thead>
             <tbody>
               {agentsPage.rows.map((a: any) => (
                 <tr key={a.name}>
                   <td><strong>{a.name}</strong></td>
                   <td>{a.type}</td>
                   <td><span className={`${s.badge} ${badgeClass(a.status, s)}`}>{a.status}</span></td>
-                  <td>{a.priority}</td>
-                  <td>{a.last_active ?? '—'}</td>
+                  <td>{a.invocations ?? 0}</td>
+                  <td>{priorityLabel(a.priority)}</td>
+                  <td>{formatLastActive(a.lastActive ?? a.last_active)}</td>
                   <td>{(a.error_count ?? a.errorCount ?? 0) > 0 ? <span className={`${s.badge} ${s.warning}`}>{a.error_count ?? a.errorCount}</span> : '0'}</td>
                 </tr>
               ))}

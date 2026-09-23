@@ -24,6 +24,24 @@ from learning.feedback import format_lessons_reason
 logger = logging.getLogger(__name__)
 
 
+def _record_specialist_activity(
+    name: str, signal: str, confidence: Any, error: bool = False
+) -> None:
+    """Best-effort realtime activity record for a specialist (fail-safe).
+
+    The production path runs specialists through :meth:`MarketLead.analyze`
+    (it bypasses ``DepartmentLead``), so it must record their runs itself —
+    otherwise the AI Control page shows every specialist as ``idle`` although
+    they run on every cycle.
+    """
+    try:
+        from agents.activity import get_activity_tracker
+
+        get_activity_tracker().record(name, signal, confidence, error=error)
+    except Exception:  # noqa: BLE001 - metrics must never break analysis
+        pass
+
+
 @dataclass
 class AnalystReport:
     """Result of specialist analysis."""
@@ -689,9 +707,15 @@ class MarketLead(BaseAgent):
                     "confidence": 0.0,
                     "reasons": [f"Specialist failed: {exc}"],
                 }
+                _record_specialist_activity(name, "NEUTRAL", 0.0, error=True)
                 continue
             if isinstance(raw, dict):
                 specialist_results[name] = raw
+                _record_specialist_activity(
+                    name,
+                    str(raw.get("signal") or "NEUTRAL"),
+                    raw.get("confidence", 0.0),
+                )
             else:
                 specialist_results[name] = {
                     "agent": name,
@@ -700,6 +724,7 @@ class MarketLead(BaseAgent):
                     "confidence": 0.0,
                     "reasons": ["Specialist returned an unsupported result type"],
                 }
+                _record_specialist_activity(name, "NEUTRAL", 0.0, error=True)
 
         votes: dict[str, float] = {}
         contributors: dict[str, list[str]] = {}
