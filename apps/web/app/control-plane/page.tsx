@@ -660,7 +660,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                   <td>{a.invocations ?? 0}</td>
                   <td>{priorityLabel(a.priority)}</td>
                   <td>{formatLastActive(a.lastActive ?? a.last_active)}</td>
-                  <td>{(a.error_count ?? a.errorCount ?? 0) > 0 ? <span className={`${s.badge} ${s.warning}`}>{a.error_count ?? a.errorCount}</span> : '0'}</td>
+                  <td>{(a.errors ?? a.error_count ?? a.errorCount ?? 0) > 0 ? <span className={`${s.badge} ${s.warning}`}>{a.errors ?? a.error_count ?? a.errorCount}</span> : '0'}</td>
                 </tr>
               ))}
             </tbody>
