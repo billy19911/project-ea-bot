@@ -154,9 +154,16 @@ def test_proposal_cycle_gets_order_ladder() -> None:
     assert result.to_dict()["levels"]["source"] == "order"
 
 
-def test_proposal_without_stop_falls_back_to_indicative_ladder() -> None:
-    """A live proposal without a usable stop (no ATR to complete it) is
-    blocked by the gate — the report must still carry the indicative ladder."""
+def test_proposal_without_stop_is_completed_from_market_evidence() -> None:
+    """A live proposal without SL/TP is completed from the ATR in the market
+    evidence (``volatility.atr``), so the report ladder reflects the completed
+    order values — consistent with what the gate validates.
+
+    Regression: previously the completion step could not see the ATR living in
+    ``volatility`` (feed-loop shape), the gate rejected ``stop_loss``, and the
+    report fell back to an indicative ladder. Now completion succeeds and the
+    ladder source is ``order``.
+    """
     analysis = {
         "agent": "supervisor",
         "overall_signal": "BULLISH",
@@ -166,8 +173,7 @@ def test_proposal_without_stop_falls_back_to_indicative_ladder() -> None:
             "symbol": "XAUUSD",
             "direction": "BUY",
             "entry_price": 2000.0,
-            # no stop_loss / take_profit, and no market_state/atr to complete
-            # them → the gate rejects stop_loss (real live situation).
+            # no stop_loss / take_profit → completed from volatility ATR below.
         },
     }
     rejected = GateDecision(
@@ -183,9 +189,32 @@ def test_proposal_without_stop_falls_back_to_indicative_ladder() -> None:
     assert result.risk_approved is False
     levels = result.levels
     assert levels is not None
-    assert levels["source"] == "analysis"  # indicative fallback, not fabricated order
+    assert levels["source"] == "order"  # completed from the volatility ATR
     assert levels["entry"] == 2000.0
-    assert levels["sl"] == 1997.0  # 1.5 x ATR from volatility snapshot
+    assert levels["sl"] == 1997.0  # 1.5 x ATR completed into the proposal
+
+
+def test_proposal_stop_is_never_overridden_by_completion() -> None:
+    """A proposal that already carries a stop keeps it verbatim in the ladder."""
+    analysis = {
+        "agent": "supervisor",
+        "overall_signal": "BULLISH",
+        "overall_confidence": 0.7,
+        "summary": "market_lead: BULLISH (conf=0.70)",
+        "proposal": {
+            "symbol": "XAUUSD",
+            "direction": "BUY",
+            "entry_price": 2000.0,
+            "stop_loss": 1998.5,  # explicit stop, must never be overridden
+        },
+    }
+    result = _pipeline(FakeSupervisor(analysis), FakeRiskGate(_approved())).run(
+        {"event_id": "e3", "event_type": "BREAKOUT", "symbol": "XAUUSD"}, _context()
+    )
+
+    levels = result.levels
+    assert levels is not None
+    assert levels["sl"] == 1998.5  # the exact proposal stop, not the ATR stop
 
 
 def test_no_levels_without_market_evidence() -> None:

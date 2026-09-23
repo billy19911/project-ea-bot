@@ -145,6 +145,89 @@ def test_entry_reaches_execution_when_no_terminal(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Market-evidence shapes (feed-loop regression)
+# ---------------------------------------------------------------------------
+class _MarketStateObject:
+    """Mimics the market detector state OBJECT the feed loop caches.
+
+    The feed loop stores a ``MarketState`` *dataclass instance* (not a dict),
+    so ``market_state.get(...)``/``market_state["atr"]`` cannot be used.
+    """
+
+    def __init__(self, close: float, atr: float):
+        self.close = close
+        self.price = close
+        self.atr = atr
+
+
+def test_completion_reads_atr_from_volatility_when_state_is_object():
+    """ATR living in ``volatility.atr`` (feed-loop shape) must reach the gate.
+
+    Regression: ``_complete_proposal`` used to read only
+    ``market_state["atr"]``/``context["atr"]``. With an object state and ATR
+    only under ``volatility``, SL/TP stayed 0 and the gate rejected
+    ``risk_reward`` + ``stop_loss`` — exactly the live production failure.
+    """
+    gate = _ApproveGate()
+    pipeline = TradingPipeline(
+        supervisor=_bearish_supervisor(), risk_gate=gate, execution_engine=None
+    )
+
+    context = {
+        "symbol": "XAUUSD",
+        "account_state": {"equity": 10000.0, "balance": 10000.0},
+        "current_positions": [],
+        "market_info": {"bid": 4333.3, "ask": 4333.44, "spread_pips": 0.14},
+        # Object state (no dict access) + ATR ONLY in the volatility block.
+        "market_state": _MarketStateObject(close=4333.37, atr=3.05),
+        "volatility": {"atr": 3.05, "price": 4333.37},
+    }
+
+    pipeline.run({"event_type": "MOMENTUM_BEARISH", "symbol": "XAUUSD"}, context)
+
+    assert gate.seen is not None
+    assert gate.seen["entry_price"] > 0
+    assert gate.seen["stop_loss"] > 0
+    assert gate.seen["take_profit"] > 0
+
+
+def test_run_validation_uses_merged_snapshot_evidence():
+    """A snapshot attached to the event must reach the gate's completion step.
+
+    Regression: ``run()`` passed the RAW caller context to
+    ``_build_validation_inputs`` — the merged snapshot (ATR/volatility) only
+    lived in ``analysis_context``, so completion ran blind. Here the caller
+    context has NO ATR at all; only the event snapshot carries it.
+    """
+    gate = _ApproveGate()
+    pipeline = TradingPipeline(
+        supervisor=_bearish_supervisor(), risk_gate=gate, execution_engine=None
+    )
+
+    context = {
+        "symbol": "XAUUSD",
+        "account_state": {"equity": 10000.0, "balance": 10000.0},
+        "current_positions": [],
+        "market_info": {"bid": 4333.3, "ask": 4333.44, "spread_pips": 0.14},
+    }
+    event = {
+        "event_type": "MOMENTUM_BEARISH",
+        "symbol": "XAUUSD",
+        "market_snapshot": {
+            "symbol": "XAUUSD",
+            "market_state": _MarketStateObject(close=4333.37, atr=3.05),
+            "volatility": {"atr": 3.05, "price": 4333.37},
+        },
+    }
+
+    pipeline.run(event, context)
+
+    assert gate.seen is not None
+    assert gate.seen["entry_price"] > 0
+    assert gate.seen["stop_loss"] > 0, "snapshot ATR must complete SL via the gate inputs"
+
+
+# ---------------------------------------------------------------------------
 # Arm-gated native send
 # ---------------------------------------------------------------------------
 def test_native_send_requires_armed_terminal():

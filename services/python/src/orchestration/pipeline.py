@@ -332,7 +332,11 @@ class TradingPipeline:
         result.proposal_id = str(proposal.get("proposal_id") or _new_id("prop"))
 
         # ── Step B: Deterministic Risk Gate ─────────────────────────────
-        validation = self._build_validation_inputs(proposal, context)
+        # Use the *analysis* context (caller context + merged market snapshot)
+        # so deterministic completion can see the market evidence (ATR in
+        # ``volatility.atr`` / ``market_state``) — the raw scheduler context
+        # only carries account/positions/market_info.
+        validation = self._build_validation_inputs(proposal, analysis_context)
         # Level reporting: the ladder comes from the completed proposal
         # (real entry/SL), consistent with what the gate validates. When the
         # proposal still lacks a usable stop (e.g. no ATR in the context) the
@@ -744,10 +748,15 @@ class TradingPipeline:
         market_state = context.get("market_state")
         if not isinstance(market_state, dict):
             market_state = {}
+        # Market evidence fallback: understands the shapes the feed loop
+        # actually emits — ``volatility.price``, a ``market_state`` object or
+        # dict (close/atr), and the ``prices`` series tail.
+        evidence_price, evidence_atr = extract_price_atr(context)
         if entry <= 0:
             for candidate in (
                 market_state.get("close"),
                 market_state.get("price"),
+                evidence_price,
                 market_info.get("ask") if direction == "BUY" else market_info.get("bid"),
                 market_info.get("price"),
                 context.get("close"),
@@ -764,11 +773,13 @@ class TradingPipeline:
         proposal["entry_price"] = entry
 
         # --- Resolve ATR (for SL/TP) and point/contract values ----------
-        atr = market_state.get("atr", context.get("atr"))
-        try:
-            atr = float(atr) if atr else 0.0
-        except (TypeError, ValueError):
-            atr = 0.0
+        atr = evidence_atr
+        if atr <= 0:
+            atr = market_state.get("atr", context.get("atr"))
+            try:
+                atr = float(atr) if atr else 0.0
+            except (TypeError, ValueError):
+                atr = 0.0
 
         # --- Complete SL/TP via ATR when both are missing ---------------
         sl = float(proposal.get("stop_loss") or 0.0)
