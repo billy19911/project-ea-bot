@@ -54,6 +54,14 @@ TRACE_HISTORY_LIMIT = 200
 # Bound on the in-process reconciliation history retained for the control plane.
 RECONCILIATION_HISTORY_LIMIT = 50
 
+# Execution-engine error codes for refusals issued BEFORE any broker dispatch
+# (see execution/engine.py): 403 = not armed / missing approval token,
+# 400 = validation, 409 = duplicate. These are safety/policy refusals, not
+# dependency failures — in the default read-only state (no armed terminal)
+# every valid signal produces a 403, so counting them would trip the EXECUTION
+# breaker → lock the kill switch after three signals and dead-end the loop.
+_PRE_DISPATCH_REFUSAL_CODES = frozenset({400, 403, 409})
+
 
 def _default_symbol_spec_provider():
     """Return a callable ``(symbol) -> spec dict`` for order normalisation.
@@ -160,6 +168,22 @@ class _RecordingPipelineProxy:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._pipeline, name)
+
+
+def _is_pre_dispatch_refusal(record: dict[str, Any]) -> bool:
+    """True when an ERROR outcome was refused before any broker dispatch.
+
+    The execution engine uses dedicated error codes for refusals that never
+    reached the broker (``_PRE_DISPATCH_REFUSAL_CODES``). Those must not count
+    toward the EXECUTION breaker — the dependency was never exercised.
+    """
+    outcome = record.get("execution_result")
+    if not isinstance(outcome, dict):
+        return False
+    try:
+        return int(outcome.get("error_code")) in _PRE_DISPATCH_REFUSAL_CODES
+    except (TypeError, ValueError):
+        return False
 
 
 class OrchestrationRuntime:
@@ -398,6 +422,9 @@ class OrchestrationRuntime:
         Audit P1-2: a completed execution (``status == EXECUTED``) resets the
         EXECUTION breaker; an execution that was attempted but errored counts as
         a failure so repeated failures trip the breaker → kill switch → block.
+        A pre-dispatch safety/policy refusal (e.g. no armed terminal in the
+        default read-only state) is NOT an execution failure — the broker was
+        never contacted — and must not count toward the breaker.
         Cycles that never attempted execution (WAIT/BLOCKED/NO_TRADE) do not
         affect the breaker. Fail-safe: bookkeeping must never break a cycle.
         """
@@ -406,6 +433,12 @@ class OrchestrationRuntime:
             if status == "EXECUTED":
                 self.execution_guard.record_execution_result(True)
             elif status == "ERROR" and record.get("execution_id"):
+                if _is_pre_dispatch_refusal(record):
+                    # Refused by the safety layer before any dispatch (e.g.
+                    # "EXECUTION NOT ARMED") — expected while unarmed; counting
+                    # it would self-lock the loop after three valid signals.
+                    logger.info("Execution refused before dispatch — breaker unaffected.")
+                    return
                 # An order build/execution error — count toward the breaker.
                 detail = str(record.get("error") or "execution error")
                 self.execution_guard.record_execution_result(False, detail=detail)

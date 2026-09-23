@@ -89,6 +89,80 @@ def test_execution_dependency_name_is_used() -> None:
     assert Dependency.EXECUTION.value in snapshot
 
 
+def test_pre_dispatch_refusal_does_not_trip_breaker() -> None:
+    """A refusal that never reached the broker (e.g. no armed terminal) must
+    not count as an EXECUTION failure — otherwise the default read-only state
+    would self-lock after three valid signals (breaker → kill switch)."""
+    kill = KillSwitch()
+    guard = ExecutionGuard(breakers=DependencyBreakers(failure_threshold=3, kill_switch=kill))
+    runtime = OrchestrationRuntime(execution_guard=guard)
+
+    refusal = {
+        "status": "ERROR",
+        "execution_id": "exec_refused",
+        "error": "EXECUTION NOT ARMED — no operator-armed terminal; order_send is disabled.",
+        "execution_result": {
+            "success": False,
+            "ticket": None,
+            "error_code": 403,
+            "error_message": "EXECUTION NOT ARMED — no operator-armed terminal.",
+            "retries": 0,
+            "position_opened": None,
+        },
+    }
+    for _ in range(5):
+        runtime._record_execution_outcome(refusal)
+
+    allowed, reason = runtime.execution_guard.check_can_execute()
+    assert allowed is True
+    assert reason == ""
+    snapshot = runtime.execution_guard.breakers.snapshot()
+    assert snapshot[Dependency.EXECUTION.value]["consecutive_failures"] == 0
+
+
+def test_genuine_execution_failure_still_trips_breaker() -> None:
+    """Real dispatch failures (broker error codes) still feed the breaker."""
+    kill = KillSwitch()
+    guard = ExecutionGuard(breakers=DependencyBreakers(failure_threshold=1, kill_switch=kill))
+    runtime = OrchestrationRuntime(execution_guard=guard)
+
+    runtime._record_execution_outcome(
+        {
+            "status": "ERROR",
+            "execution_id": "exec_failed",
+            "error": "broker rejected",
+            "execution_result": {
+                "success": False,
+                "ticket": None,
+                "error_code": 10006,
+                "error_message": "broker rejected",
+                "retries": 0,
+                "position_opened": None,
+            },
+        }
+    )
+
+    assert runtime.execution_guard.check_can_execute()[0] is False
+
+
+def test_execution_exception_still_counts_as_failure() -> None:
+    """An engine exception (no execution_result dict) still counts."""
+    kill = KillSwitch()
+    guard = ExecutionGuard(breakers=DependencyBreakers(failure_threshold=1, kill_switch=kill))
+    runtime = OrchestrationRuntime(execution_guard=guard)
+
+    runtime._record_execution_outcome(
+        {
+            "status": "ERROR",
+            "execution_id": "exec_exc",
+            "error": "execution error: boom",
+            "execution_result": None,
+        }
+    )
+
+    assert runtime.execution_guard.check_can_execute()[0] is False
+
+
 if __name__ == "__main__":  # pragma: no cover
     import pytest
 
