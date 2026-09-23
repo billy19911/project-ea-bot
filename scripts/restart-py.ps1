@@ -1,6 +1,8 @@
-# EA Bot - restart HANYA service Python API (:8000), memuat .env.runtime.
+# EA Bot - restart HANYA service Python API, memuat .env.runtime.
 # Dipakai setelah perubahan kode Python agar kode baru aktif tanpa restart
-# service lain. Pola sama dengan killweb.ps1 (kill listener + start ulang).
+# service lain. Port ditentukan dari -Port, atau PY_PORT di .env.runtime
+# (fallback 8000). Pola sama dengan killweb.ps1 (kill listener + start ulang).
+param([int]$Port = 0)
 $ErrorActionPreference = 'SilentlyContinue'
 $root = 'C:\xampp\htdocs\project-ea-bot'
 
@@ -15,8 +17,14 @@ Get-Content (Join-Path $root '.env.runtime') | ForEach-Object {
 }
 Write-Host ('[env] ' + $envMap.Count + ' entri dimuat')
 
-# 2) Kill listener :8000 (dan hanya itu)
-$pids = (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue).OwningProcess | Sort-Object -Unique
+# Resolve port: explicit -Port > PY_PORT di .env.runtime > 8000
+if ($Port -le 0) {
+  if ($envMap['PY_PORT']) { $Port = [int]$envMap['PY_PORT'] } else { $Port = 8000 }
+}
+Write-Host ('[port] restart Python API :' + $Port)
+
+# 2) Kill listener port tsb (dan hanya itu)
+$pids = (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue).OwningProcess | Sort-Object -Unique
 foreach ($p in $pids) {
   Write-Host ('[kill] pid ' + $p)
   Stop-Process -Id $p -Force -ErrorAction SilentlyContinue
@@ -45,7 +53,7 @@ $pyDir = Join-Path $root 'services\python'
 $pyExe = Join-Path $pyDir '.venv\Scripts\python.exe'
 $logDir = Join-Path $root 'logs'
 Start-Process -FilePath $pyExe `
-  -ArgumentList '-m', 'uvicorn', 'src.main:app', '--host', '127.0.0.1', '--port', '8000' `
+  -ArgumentList '-m', 'uvicorn', 'src.main:app', '--host', '127.0.0.1', '--port', "$Port" `
   -WorkingDirectory $pyDir -WindowStyle Hidden `
   -RedirectStandardOutput (Join-Path $logDir 'python.log') `
   -RedirectStandardError (Join-Path $logDir 'python.err.log')
@@ -56,8 +64,8 @@ $deadline = (Get-Date).AddSeconds(45)
 $ok = $false
 while ((Get-Date) -lt $deadline) {
   try {
-    $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8000/health' -UseBasicParsing -TimeoutSec 3
+    $r = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -UseBasicParsing -TimeoutSec 3
     if ($r.StatusCode -eq 200) { $ok = $true; break }
   } catch { Start-Sleep -Milliseconds 800 }
 }
-if ($ok) { Write-Host '[OK] python :8000 sehat' } else { Write-Host '[X] python :8000 TIDAK sehat - cek logs\python.err.log' }
+if ($ok) { Write-Host "[OK] python :$Port sehat" } else { Write-Host "[X] python :$Port TIDAK sehat - cek logs\python.err.log" }
