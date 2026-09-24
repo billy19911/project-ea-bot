@@ -128,7 +128,7 @@
 | ID | Severity | Status |
 |---|---|---|
 | B-1 | P0 | Open (operational: set `PYTHON_API_KEY`) |
-| B-2 | P0 | Open (operational: forward key from Node) |
+| B-2 | P0 | ✅ Fixed (`021565e`) |
 | B-3 | P0 (structural) | ✅ Fixed (`02a577c`) |
 | B-4 | P0 | Open (operational: live broker validation) |
 | B-5 | P1 | Open (durable state) |
@@ -136,4 +136,4 @@
 | B-7 | P0 (safety, latent) | ✅ Fixed (`a2a9258`) |
 | B-8 | P1 (entry functionality) | ✅ Fixed (`a2a9258`) |
 
-**Remaining open blockers (B-1, B-2, B-4, B-5)** are operational/deployment actions (authentication enforcement, key forwarding, live validation, durable persistence) that require production configuration or a real broker — they are not code defects that can be safely fixed in an isolated change.
+**Remaining open blockers (B-1, B-4, B-5)** are operational/deployment actions (authentication enforcement, live validation, durable persistence) that require production configuration or a real broker — they are not code defects that can be safely fixed in an isolated change. **B-2 (Node→Python key forwarding) fixed in commit `021565e`.**
