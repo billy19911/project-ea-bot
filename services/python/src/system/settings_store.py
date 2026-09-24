@@ -81,7 +81,9 @@ class Knob:
         if value != value:  # NaN
             raise ValueError(f"{self.key}: bukan angka")
         if value < self.minimum or value > self.maximum:
-            raise ValueError(f"{self.key}: di luar rentang {self.minimum}–{self.maximum}")
+            raise ValueError(
+                f"{self.key}: di luar rentang {self.minimum}–{self.maximum}"
+            )
         return value
 
 
@@ -127,6 +129,24 @@ KNOBS: tuple[Knob, ...] = (
         description="Jeda antar-sampel grafik tren (detik). Lebih besar = riwayat lebih panjang.",
         applied_to="TrendSampler.interval",
     ),
+    Knob(
+        key="risk_per_trade_pct",
+        kind="float",
+        minimum=0.1,
+        maximum=5.0,
+        default=1.0,
+        description="Risiko per entry (% dari equity/balance). Lot dihitung dari jarak SL.",
+        applied_to="TradingPipeline.default_risk_pct",
+    ),
+    Knob(
+        key="max_lot_per_trade",
+        kind="float",
+        minimum=0.01,
+        maximum=10.0,
+        default=1.0,
+        description="Batas maksimum lot per entry (cap keamanan).",
+        applied_to="TradingPipeline.max_lot_per_trade",
+    ),
 )
 
 _BY_KEY = {k.key: k for k in KNOBS}
@@ -153,7 +173,9 @@ class RuntimeSettingsStore:
         self._lock = threading.Lock()
         if path is None:
             base = os.path.dirname(os.path.abspath(__file__))
-            path = os.path.normpath(os.path.join(base, "..", "..", "runtime_settings.json"))
+            path = os.path.normpath(
+                os.path.join(base, "..", "..", "runtime_settings.json")
+            )
         self._path = path
         self._values: dict[str, float] = {k.key: k.default for k in KNOBS}
         self._loaded = False
@@ -170,7 +192,9 @@ class RuntimeSettingsStore:
                 with open(self._path, encoding="utf-8") as fh:
                     raw = json.load(fh)
             except (OSError, ValueError) as exc:
-                logger.warning("runtime_settings: file tidak terbaca (%s) — pakai default", exc)
+                logger.warning(
+                    "runtime_settings: file tidak terbaca (%s) — pakai default", exc
+                )
                 return
             if not isinstance(raw, dict):
                 return

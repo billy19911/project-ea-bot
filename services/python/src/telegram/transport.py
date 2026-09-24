@@ -56,8 +56,13 @@ class HttpTelegramTransport:
         self._client = client
         self._timeout = float(timeout)
 
-    def send_message(self, chat_id: Any, text: str) -> None:
-        """Send ``text`` to ``chat_id``. Raises on failure (never leaks token)."""
+    def send_message(self, chat_id: Any, text: str) -> Optional[int]:
+        """Send ``text`` to ``chat_id``; return the new ``message_id`` (if any).
+
+        Raises on failure (never leaks token). When Telegram's response body
+        carries ``result.message_id`` that integer is returned so the caller can
+        later *edit* the same message; otherwise ``None``.
+        """
         url = f"{_API_BASE}/bot{self._token}/sendMessage"
         payload = {"chat_id": str(chat_id), "text": text}
         try:
@@ -74,3 +79,46 @@ class HttpTelegramTransport:
             raise TelegramTransportError(
                 f"Telegram sendMessage failed ({type(exc).__name__})"
             ) from None
+        return self._extract_message_id(response)
+
+    def edit_message_text(self, chat_id: Any, message_id: int, text: str) -> bool:
+        """Edit a previously sent message in place. Raises on real failure.
+
+        Telegram returns HTTP 400 with "message is not modified" when the new
+        body is byte-identical to the current one — that is idempotent success,
+        not an error, so it is reported as ``True``.
+        """
+        url = f"{_API_BASE}/bot{self._token}/editMessageText"
+        payload = {
+            "chat_id": str(chat_id),
+            "message_id": int(message_id),
+            "text": text,
+        }
+        try:
+            if self._client is not None:
+                response = self._client.post(url, json=payload, timeout=self._timeout)
+            else:
+                response = httpx.post(url, json=payload, timeout=self._timeout)
+            if (
+                response.status_code == 400
+                and "message is not modified" in response.text.lower()
+            ):
+                return True
+            response.raise_for_status()
+        except TelegramTransportError:
+            raise
+        except Exception as exc:
+            raise TelegramTransportError(
+                f"Telegram editMessageText failed ({type(exc).__name__})"
+            ) from None
+        return True
+
+    @staticmethod
+    def _extract_message_id(response: Any) -> Optional[int]:
+        """Read ``result.message_id`` from a send response (fail-safe ``None``)."""
+        try:
+            body = response.json()
+            message_id = body.get("result", {}).get("message_id")
+            return int(message_id) if message_id is not None else None
+        except Exception:  # noqa: BLE001 - a missing id must never break a send
+            return None

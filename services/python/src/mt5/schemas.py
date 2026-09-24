@@ -68,6 +68,7 @@ class Position(BaseModel):
     profit: float
     unrealized_pnl: float
     margin: float
+    magic: Optional[int] = None  # EA magic number; None when not attributed
     sl: Optional[float] = None  # stop-loss price; None when not placed
     tp: Optional[float] = None  # take-profit price; None when not placed
     entry: str  # POSITION_ENTRY_IN / OUT

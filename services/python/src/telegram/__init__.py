@@ -18,6 +18,7 @@ from src.telegram.notifier import (
     set_signal_gateway,
     summarize_pipeline_result,
 )
+from src.telegram.signal_lifecycle import get_signal_lifecycle, reset_signal_lifecycle
 from src.telegram.transport import HttpTelegramTransport
 
 __all__ = [
@@ -38,4 +39,6 @@ __all__ = [
     "set_digest",
     "reset_digest",
     "summarize_pipeline_result",
+    "get_signal_lifecycle",
+    "reset_signal_lifecycle",
 ]

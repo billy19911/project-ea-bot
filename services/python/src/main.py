@@ -5,9 +5,6 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
 from agents.analysts import (
     FundamentalAnalystAgent,
     MomentumAnalystAgent,
@@ -17,6 +14,8 @@ from agents.analysts import (
 )
 from agents.base import TechnicalAnalystAgent
 from agents.registry import agent_registry
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from .charting.endpoints import router as charting_router
 from .config import settings
@@ -100,12 +99,28 @@ async def lifespan(app: FastAPI):
         from learning.lesson_store import JsonlLessonStore
         from review.auto_trigger import ReviewAutoTrigger, set_auto_trigger
 
+        def _on_review(record) -> None:
+            # 1) Persist the lesson (existing behaviour), then
+            # 2) append the review to the edit-in-place signal message.
+            try:
+                record_review_lesson(get_lesson_store(), record)
+            except Exception:  # noqa: BLE001 - persistence must never break review
+                logger.warning("Review lesson recording failed (review continues)")
+            try:
+                try:
+                    from telegram.signal_lifecycle import get_signal_lifecycle
+                except ImportError:
+                    from .telegram.signal_lifecycle import (
+                        get_signal_lifecycle,  # type: ignore
+                    )
+
+                payload = record.to_dict() if hasattr(record, "to_dict") else record
+                get_signal_lifecycle().on_review(payload)
+            except Exception:  # noqa: BLE001 - reporting must never break review
+                logger.warning("Signal review update failed (review continues)")
+
         set_lesson_store(JsonlLessonStore())
-        set_auto_trigger(
-            ReviewAutoTrigger(
-                on_review=lambda record: record_review_lesson(get_lesson_store(), record)
-            )
-        )
+        set_auto_trigger(ReviewAutoTrigger(on_review=_on_review))
         logger.info("Learning feedback wired: persistent lesson store + review bridge")
     except Exception:  # pragma: no cover - defensive, never block startup
         logger.exception("Learning feedback wiring failed (system continues)")
@@ -161,7 +176,9 @@ async def lifespan(app: FastAPI):
         runtime = get_runtime()
         feed = MarketFeedLoop(
             queue=runtime.queue,
-            symbols=[s.strip() for s in settings.market_feed_symbols.split(",") if s.strip()],
+            symbols=[
+                s.strip() for s in settings.market_feed_symbols.split(",") if s.strip()
+            ],
             timeframe=settings.market_feed_timeframe,
             interval_s=settings.market_feed_interval_s,
             event_cooldown_s=settings.market_feed_event_cooldown_s,
@@ -201,6 +218,37 @@ async def lifespan(app: FastAPI):
     trend_sampler = get_trend_sampler()
     await trend_sampler.start()
 
+    # Signal price watch — marks TP1/TP2/TPmax/SL hits on the edit-in-place
+    # signal message by polling the live tick (read-only). Runs only while a
+    # signal is active; every iteration is fail-safe (Telegram/MT5 hiccups must
+    # never break the app). Cancelled on shutdown.
+    async def _signal_price_watch() -> None:
+        try:
+            from .telegram.signal_lifecycle import get_signal_lifecycle
+        except ImportError:  # pragma: no cover - alternate import identity
+            from telegram.signal_lifecycle import get_signal_lifecycle  # type: ignore
+
+        while True:
+            await asyncio.sleep(15)
+            try:
+                tracker = get_signal_lifecycle()
+                for symbol in tracker.active_symbols():
+                    try:
+                        tick = connector.get_tick(symbol)
+                        if tick is None:
+                            continue
+                        price = float(getattr(tick, "bid", 0.0) or 0.0)
+                        if price <= 0:
+                            price = float(getattr(tick, "ask", 0.0) or 0.0)
+                        if price > 0:
+                            tracker.observe_price(symbol, price)
+                    except Exception:  # noqa: BLE001 - per-symbol best-effort
+                        logger.debug("Signal price watch failed for %s", symbol)
+            except Exception:  # noqa: BLE001 - the watch loop must survive
+                logger.warning("Signal price watch iteration failed")
+
+    price_watch_task = asyncio.create_task(_signal_price_watch())
+
     if settings.mt5_live_data:
         live_data_started = connector.use_live_data_mode()
         if live_data_started:
@@ -230,6 +278,15 @@ async def lifespan(app: FastAPI):
         await trend_sampler.stop()
     except Exception:  # pragma: no cover - defensive
         logger.exception("Error stopping trend sampler")
+
+    if price_watch_task is not None:
+        price_watch_task.cancel()
+        try:
+            await asyncio.wait_for(price_watch_task, timeout=5.0)
+        except asyncio.CancelledError:
+            pass  # expected — the task was cancelled on shutdown
+        except Exception:  # noqa: BLE001 - defensive
+            logger.exception("Error stopping signal price watch")
 
     if feed_task is not None:
         try:
@@ -279,7 +336,9 @@ app = FastAPI(
 # site. We therefore always declare explicit origins from CORS_ALLOWED_ORIGINS
 # (comma-separated) and keep credentials enabled only against those origins.
 _cors_origins = [
-    origin.strip() for origin in settings.cors_allowed_origins.split(",") if origin.strip()
+    origin.strip()
+    for origin in settings.cors_allowed_origins.split(",")
+    if origin.strip()
 ]
 app.add_middleware(
     CORSMiddleware,

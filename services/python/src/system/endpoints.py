@@ -309,6 +309,8 @@ class SettingsPatch(BaseModel):
     scheduler_poll_interval: float | None = None
     trend_sample_interval: float | None = None
     llm_advisor_enabled: bool | None = None
+    risk_per_trade_pct: float | None = None
+    max_lot_per_trade: float | None = None
 
 
 def _apply_to_runtime(values: dict[str, float]) -> dict[str, Any]:
@@ -337,6 +339,16 @@ def _apply_to_runtime(values: dict[str, float]) -> dict[str, Any]:
         sampler = get_trend_sampler()
         sampler.interval = float(values["trend_sample_interval"])
         applied["trend_sample_interval"] = sampler.interval
+    if "risk_per_trade_pct" in values:
+        pipeline = getattr(runtime, "pipeline", None)
+        if pipeline is not None and hasattr(pipeline, "default_risk_pct"):
+            pipeline.default_risk_pct = float(values["risk_per_trade_pct"])
+            applied["risk_per_trade_pct"] = pipeline.default_risk_pct
+    if "max_lot_per_trade" in values:
+        pipeline = getattr(runtime, "pipeline", None)
+        if pipeline is not None and hasattr(pipeline, "max_lot_per_trade"):
+            pipeline.max_lot_per_trade = float(values["max_lot_per_trade"])
+            applied["max_lot_per_trade"] = pipeline.max_lot_per_trade
     if "llm_advisor_enabled" in values:
         # The advisor reads the store directly on every call, so the value is
         # already live; report it so the UI can confirm what was applied.

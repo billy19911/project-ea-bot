@@ -45,3 +45,52 @@ needed; only the routing destination must be set.
 - Skills auto-register `/<name>` slash commands from frontmatter `name:`
 - `hermes --profile <name>` selects profile (pre-parsed, sets HERMES_HOME)
 - Gateway constraint: only ONE getUpdates consumer per bot token
+- `skills.disabled: [...]` in a profile's `config.yaml` disables skills
+  (honoured by the skill loader; also removes their slash commands)
+
+---
+
+# POST-CHANGE STATE (final verification)
+
+## Routing (all three legs live-tested)
+
+| Leg | Mechanism | Test | Result |
+|---|---|---|---|
+| Main → Xynn | default profile | `hermes send --to telegram` | PASS (message_id 2683) |
+| Trading → XynnSignal | `TELEGRAM_SIGNAL_BOT_TOKEN` in `.env.runtime` | `scripts/test_signal_delivery.py` via real `notify()` | PASS (`notify() returned: True`, token fp `885198…p4w0` = XynnSignal) |
+| Research → Popoy | cron job `11c1fbc7c261` deliver telegram | real daily run | PASS (`delivered to telegram:926385109`, 10 findings) |
+
+## Changes made
+
+1. `/c/xampp/htdocs/project-ea-bot/.env.runtime` — set `TELEGRAM_SIGNAL_BOT_TOKEN`
+   to XynnSignal's token (written programmatically by `scripts/wire_signal_bot.py`;
+   never printed; file is gitignored).
+2. `profiles/popoy/SOUL.md` — replaced coding persona with research-intelligence
+   persona (old file backed up as `SOUL.md.bak-<ts>`).
+3. `profiles/popoy/skills/research/{popoy-research,discover,xscan,trends,github-research}/SKILL.md`
+   — new supervisor/specialist/fact-checker pipeline + command entry points.
+4. `profiles/popoy/config.yaml` — added `skills.disabled: [github-research]`
+   (GitHub researcher paused; backup `config.yaml.bak-<ts>`).
+5. `profiles/popoy/cron` job `11c1fbc7c261` — daily 08:00 Asia/Jakarta briefing,
+   prompt updated to skip the paused GitHub specialist.
+6. `/c/xampp/htdocs/project-ea-bot/scripts/` — `wire_signal_bot.py`,
+   `verify_signal_routing.py`, `restart-py-signal.ps1`, `test_signal_delivery.py`.
+
+## Files NOT modified
+
+- Xynn's token/config/workflows (`.env`, `config.yaml` telegram block) — untouched.
+- Trading routing code (`orchestration/runtime.py`, `notifier.py`) — untouched;
+  the pre-existing `TELEGRAM_SIGNAL_BOT_TOKEN` hook was used as designed.
+- Existing `github` skill in Popoy — untouched; research command is
+  `/github-research` to avoid the name clash.
+- `restart-py.ps1` — left as-is (stale port 8000); a dedicated
+  `restart-py-signal.ps1` was added instead.
+- MT5 execution mode — still `disabled (read-only)`; no trading config changed.
+
+## Known issue (historical, not reproduced)
+
+`logs/python-8787.log:100` had one `Failed to send Telegram alert to 926385109:
+Telegram sendMessage failed (ConnectError)` before the service restart
+(21:19). After the restart the same code path succeeds live
+(`test_signal_delivery.py` → DELIVERED). Treated as a transient network error.
+

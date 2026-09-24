@@ -117,22 +117,39 @@ def _notify_cycle_result(result: Any) -> None:
 
     Wired into :class:`TradingPipeline` as its ``result_hook`` so *both* the
     HTTP-triggered cycles and the scheduler-driven cycles report to the user.
-    Reports go through the anti-spam digest: a burst of autonomous cycles
-    becomes ONE compact message per window instead of one message per cycle
-    (urgent trade outcomes are still delivered immediately).
+
+    Signal lifecycle first: a finished BUY/SELL cycle becomes ONE edit-in-place
+    signal message (rejected signals are consumed silently). Non-actionable
+    cycles fall back to the anti-spam digest (one compact message per window).
+
     Any failure here — import, conversion, delivery — is swallowed: reporting
     must never break the autonomous loop.
     """
     try:
         try:
+            from telegram.signal_lifecycle import get_signal_lifecycle
+        except ImportError:
+            from ..telegram.signal_lifecycle import get_signal_lifecycle  # type: ignore
+
+        payload = result.to_dict() if hasattr(result, "to_dict") else result
+        try:
+            if get_signal_lifecycle().observe_cycle_result(payload):
+                return
+        except Exception as exc:  # noqa: BLE001 - fall back to the digest
+            logger.warning(
+                "Signal lifecycle failed (%s); using digest", type(exc).__name__
+            )
+
+        try:
             from telegram.notifier import queue_pipeline_result
         except ImportError:
             from ..telegram.notifier import queue_pipeline_result  # type: ignore
 
-        payload = result.to_dict() if hasattr(result, "to_dict") else result
         queue_pipeline_result(payload)
     except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
-        logger.warning("Telegram cycle report failed (%s); cycle unaffected", type(exc).__name__)
+        logger.warning(
+            "Telegram cycle report failed (%s); cycle unaffected", type(exc).__name__
+        )
 
 
 class _RecordingPipelineProxy:
@@ -146,7 +163,9 @@ class _RecordingPipelineProxy:
     recording failure never affects the cycle).
     """
 
-    def __init__(self, pipeline: TradingPipeline, runtime: "OrchestrationRuntime") -> None:
+    def __init__(
+        self, pipeline: TradingPipeline, runtime: "OrchestrationRuntime"
+    ) -> None:
         self._pipeline = pipeline
         self._runtime = runtime
 
@@ -227,7 +246,9 @@ class OrchestrationRuntime:
         # Audit P1-2: per-dependency circuit breakers (§24) + kill switch, wired
         # into the pipeline as the execution-critical dependency guard. An open
         # EXECUTION breaker or an engaged kill switch blocks new orders.
-        self.execution_guard = execution_guard if execution_guard is not None else ExecutionGuard()
+        self.execution_guard = (
+            execution_guard if execution_guard is not None else ExecutionGuard()
+        )
         self.pipeline = (
             pipeline
             if pipeline is not None
@@ -279,7 +300,10 @@ class OrchestrationRuntime:
         Prefers the scheduler's runner (kept in sync in production) but falls back
         to the runtime-owned runner when a custom scheduler was injected.
         """
-        return getattr(self.scheduler, "reconciliation_runner", None) or self.reconciliation
+        return (
+            getattr(self.scheduler, "reconciliation_runner", None)
+            or self.reconciliation
+        )
 
     @staticmethod
     def _default_reconciliation_providers() -> Any:
@@ -329,7 +353,20 @@ class OrchestrationRuntime:
         supervisor = SupervisorAgent(routing_policy=policy)
         # The registry is used by the supervisor for dynamic delegation.
         supervisor._registry_cache = agent_registry
-        risk_gate = RiskGate(RiskEngine(), MoneyManager())
+        # Operator-tunable concurrent-position cap. A demo account shared with
+        # another EA (which holds its own positions) needs headroom, otherwise
+        # the gate counts foreign positions and our bot can never get a slot.
+        # Fail-safe: missing/invalid env keeps the production default of 5.
+        max_positions = 5
+        try:
+            import os
+
+            max_positions = int(os.getenv("RISK_MAX_POSITIONS", "") or 5)
+            if max_positions < 1:
+                max_positions = 5
+        except (TypeError, ValueError):
+            max_positions = 5
+        risk_gate = RiskGate(RiskEngine(max_positions=max_positions), MoneyManager())
         # No MT5 connector is wired in the default runtime, so the engine keeps
         # its existing paper behaviour — but ONLY via an explicit, clearly
         # labelled simulation (audit P0-2). Without this flag a missing broker
@@ -345,7 +382,23 @@ class OrchestrationRuntime:
         # Audit P1-4: normalise volume to the broker's lot step and round prices
         # to the symbol digits when a spec is available. Fail-safe: a spec lookup
         # failure leaves the order unchanged.
-        order_builder = OrderBuilder(symbol_spec_provider=_default_symbol_spec_provider())
+        order_builder = OrderBuilder(
+            symbol_spec_provider=_default_symbol_spec_provider()
+        )
+        # One-entry policy (default ON): while one of OUR positions (matched by
+        # entry magic) is open, new entries are blocked. The magic id labels our
+        # orders so we never count a foreign EA's positions.
+        one_entry_policy = True
+        entry_magic = 70000
+        try:
+            import os
+
+            raw_policy = (os.getenv("ONE_ENTRY_POLICY") or "true").strip().lower()
+            one_entry_policy = raw_policy not in {"0", "false", "no", "off"}
+            entry_magic = int(os.getenv("ENTRY_MAGIC", "") or 70000)
+        except (TypeError, ValueError):
+            one_entry_policy = True
+            entry_magic = 70000
         # Fase 7: prior lessons are summarised into the analysis context
         # (advisory only). Fail-safe — a missing/broken store simply disables
         # feedback without affecting the pipeline.
@@ -366,6 +419,8 @@ class OrchestrationRuntime:
             lesson_provider=lesson_provider,
             reconciliation_guard=reconciliation_guard,
             dependency_guard=execution_guard,
+            single_entry_policy=one_entry_policy,
+            entry_magic=entry_magic,
         )
 
     def run_cycle(
@@ -437,7 +492,9 @@ class OrchestrationRuntime:
                     # Refused by the safety layer before any dispatch (e.g.
                     # "EXECUTION NOT ARMED") — expected while unarmed; counting
                     # it would self-lock the loop after three valid signals.
-                    logger.info("Execution refused before dispatch — breaker unaffected.")
+                    logger.info(
+                        "Execution refused before dispatch — breaker unaffected."
+                    )
                     return
                 # An order build/execution error — count toward the breaker.
                 detail = str(record.get("error") or "execution error")
@@ -449,17 +506,57 @@ class OrchestrationRuntime:
         """Observe open positions once per cycle to drive the review loop.
 
         Audit B-6: feeds the read-only monitor so a closed (disappeared) ticket
-        fires the review auto-trigger → lesson store. Fail-safe: monitoring must
-        never break a cycle.
+        fires the review auto-trigger → lesson store. Also feeds the signal
+        lifecycle's price observation (TP/SL markers edit the signal message in
+        place). Fail-safe: monitoring must never break a cycle.
         """
-        if self.position_monitor is None:
-            return
-        try:
-            self.position_monitor.monitor_all_positions()
-        except Exception as exc:  # noqa: BLE001 - observation is best-effort
-            logger.warning("Position monitoring failed: %s", exc)
+        if self.position_monitor is not None:
+            try:
+                self.position_monitor.monitor_all_positions()
+            except Exception as exc:  # noqa: BLE001 - observation is best-effort
+                logger.warning("Position monitoring failed: %s", exc)
+        # Exactly one price observation per _monitor_positions call — run_cycle
+        # and the scheduler proxy both funnel through here (no double reads).
+        self._observe_signal_prices()
 
-    def _record_trace(self, record: dict[str, Any], trace_id: Optional[str] = None) -> None:
+    def _observe_signal_prices(self) -> None:
+        """Push the latest cached market price into the signal lifecycle.
+
+        For every symbol with an active signal message, read the latest market
+        snapshot's ``volatility.price`` (when > 0) so TP1/TP2/TPmax/SL hits are
+        marked via ``editMessageText`` — never as a new message. Fail-safe.
+        """
+        try:
+            try:
+                from telegram.signal_lifecycle import get_signal_lifecycle
+            except ImportError:
+                from ..telegram.signal_lifecycle import get_signal_lifecycle  # type: ignore
+
+            from trading.market_snapshot import get_latest_snapshot
+
+            tracker = get_signal_lifecycle()
+            symbols = tracker.active_symbols()
+            if not symbols:
+                return
+            for symbol in symbols:
+                try:
+                    snapshot = get_latest_snapshot(symbol)
+                    if not isinstance(snapshot, dict):
+                        continue
+                    volatility = snapshot.get("volatility")
+                    if not isinstance(volatility, dict):
+                        continue
+                    price = float(volatility.get("price") or 0.0)
+                except Exception:  # noqa: BLE001 - per-symbol read is best-effort
+                    continue
+                if price > 0:
+                    tracker.observe_price(symbol, price)
+        except Exception as exc:  # noqa: BLE001 - never break the loop
+            logger.warning("Signal price observation failed (%s)", type(exc).__name__)
+
+    def _record_trace(
+        self, record: dict[str, Any], trace_id: Optional[str] = None
+    ) -> None:
         """Record the cycle into the bounded trace store (fail-safe)."""
         try:
             self.traces.record_pipeline_result(record, trace_id=trace_id)
@@ -492,7 +589,10 @@ class OrchestrationRuntime:
             graph.add_node(stage.EVENT, {"event_type": record.get("event_type", "")})
             graph.add_node(
                 stage.SUPERVISOR_SUMMARY,
-                {"summary": record.get("summary", ""), "confidence": record.get("confidence")},
+                {
+                    "summary": record.get("summary", ""),
+                    "confidence": record.get("confidence"),
+                },
             )
             graph.add_node(
                 stage.TRADE_PROPOSAL,
@@ -516,7 +616,9 @@ class OrchestrationRuntime:
                 },
             )
             graph.add_node(stage.RESULT, {"status": record.get("status", "")})
-        except Exception as exc:  # noqa: BLE001 - observability must never break a cycle
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - observability must never break a cycle
             logger.warning("Failed to record decision graph: %s", exc)
 
     def recent_decisions(self, limit: int = 50) -> list[dict[str, Any]]:

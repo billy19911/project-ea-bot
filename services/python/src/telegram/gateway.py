@@ -265,6 +265,55 @@ class TelegramGateway:
             try:
                 self.transport.send_message(target, message)
                 sent = True
-            except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 - Telegram must never break autonomy
                 logger.error("Failed to send Telegram alert to %s: %s", target, exc)
         return sent
+
+    # -- tracked (edit-in-place) messaging --------------------------------
+    def send_tracked(self, text: str, chat_id: Any = None) -> dict[str, Optional[int]]:
+        """Send ``text`` and return ``{chat_id: message_id}``. Never raises.
+
+        ``message_id`` is ``None`` for a target whose transport fails or does
+        not return an id. When no transport is configured an empty dict is
+        returned. Used by the signal lifecycle to edit the SAME message later.
+        """
+        if self.transport is None:
+            return {}
+        targets = [chat_id] if chat_id is not None else sorted(self.allowlist)
+        result: dict[str, Optional[int]] = {}
+        for target in targets:
+            try:
+                message_id = self.transport.send_message(target, text)
+                result[str(target)] = (
+                    int(message_id) if message_id is not None else None
+                )
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 - Telegram must never break autonomy
+                logger.error("Failed to send Telegram message to %s: %s", target, exc)
+                result[str(target)] = None
+        return result
+
+    def edit_tracked(self, message_ids: dict, text: str) -> bool:
+        """Edit every tracked message in place. Never raises.
+
+        Returns True when at least one edit was delivered. A transport without
+        ``edit_message_text`` (or no tracked ids) yields False.
+        """
+        edit = getattr(self.transport, "edit_message_text", None)
+        if self.transport is None or edit is None or not isinstance(message_ids, dict):
+            return False
+        edited = False
+        for chat_id, message_id in message_ids.items():
+            if message_id is None:
+                continue
+            try:
+                if edit(chat_id, message_id, text):
+                    edited = True
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 - Telegram must never break autonomy
+                logger.error("Failed to edit Telegram message for %s: %s", chat_id, exc)
+        return edited
