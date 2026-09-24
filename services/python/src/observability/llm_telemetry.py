@@ -195,6 +195,13 @@ class ModelGovernance:
             "unsafe_trade": False,
         }
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "states": dict(self._states),
+            "fallback_model": self.fallback_model,
+            "min_comparison_sample": self.min_comparison_sample,
+        }
+
     # ------------------------------------------------------------------
     # Comparison
     # ------------------------------------------------------------------

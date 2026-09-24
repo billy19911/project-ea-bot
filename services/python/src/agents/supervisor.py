@@ -96,12 +96,14 @@ def build_display_agent_results(results: dict[str, Any]) -> dict[str, Any]:
     return display
 
 
-def _record_activity(name: str, signal: str, confidence: float, error: bool = False) -> None:
+def _record_activity(
+    name: str, signal: str, confidence: float, error: bool = False, event_type: str = ""
+) -> None:
     """Best-effort record of one agent run for realtime metrics (fail-safe)."""
     try:
         from .activity import get_activity_tracker
 
-        get_activity_tracker().record(name, signal, confidence, error=error)
+        get_activity_tracker().record(name, signal, confidence, error=error, event_type=event_type)
     except Exception:  # noqa: BLE001 - metrics must never break the pipeline
         pass
 
@@ -483,7 +485,7 @@ class SupervisorAgent(BaseAgent):
                         "confidence": 0.0,
                         "reasons": [f"Error running agent: {exc}"],
                     }
-                    _record_activity(agent_name, "NEUTRAL", 0.0, error=True)
+                    _record_activity(agent_name, "NEUTRAL", 0.0, error=True, event_type=event_type)
                 else:
                     result = normalize_agent_output(result, agent_name)
                     _record_activity(
@@ -491,6 +493,7 @@ class SupervisorAgent(BaseAgent):
                         str(result.get("signal", "NEUTRAL")),
                         float(result.get("confidence", 0.0) or 0.0),
                         error=False,
+                        event_type=event_type,
                     )
                 return agent_name, result, True
             # Fallback: agent not registered

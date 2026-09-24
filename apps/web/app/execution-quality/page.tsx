@@ -9,6 +9,7 @@ import styles from '@/components/ops.module.css';
 type Summary = {
   metrics: Record<string, number>;
   alerts: string[];
+  count?: number;
 };
 
 export default function ExecutionQualityPage() {
@@ -33,7 +34,8 @@ export default function ExecutionQualityPage() {
   useAutoRefresh(load);
 
   const metrics = data?.metrics ?? {};
-  const num = (k: string) => (typeof metrics[k] === 'number' ? Number(metrics[k]) : null);
+  const hasRecords = (data?.count ?? 0) > 0;
+  const num = (k: string) => hasRecords && typeof metrics[k] === 'number' ? Number(metrics[k]) : null;
 
   const cards: Array<{ label: string; value: string; hint: string }> = [
     { label: 'Average Slippage', value: num('average_slippage')?.toFixed(6) ?? '—', hint: 'price units' },
@@ -65,6 +67,14 @@ export default function ExecutionQualityPage() {
             </div>
           ))}
         </div>
+
+        {data && (
+          <p className={styles.cardHint}>
+            {hasRecords
+              ? `Rekaman eksekusi: ${data.count}`
+              : 'Belum ada eksekusi tercatat — metrik ditampilkan sebagai — (bukan 0).'}
+          </p>
+        )}
 
         <div className={styles.panel}>
           <div className={styles.panelHead}>

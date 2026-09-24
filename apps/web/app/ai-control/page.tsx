@@ -19,6 +19,7 @@ type AgentNode = {
   errorRate: number;
   avgConfidence: number | null;
   lastActive: string | null;
+  last_event_type?: string | null;
   signalCounts: Record<string, number>;
 };
 type ActivityLog = { 
@@ -50,6 +51,8 @@ type SupervisorStatus = {
   agents: AgentNode[];
   models: ModelUsage[];
   errors: AgentError[];
+  activity?: ActivityLog[];
+  degraded?: Record<string, string>;
   source?: SourceState;
 };
 
@@ -100,8 +103,9 @@ type AdvisorResult = {
 
 export default function AIControlPage() {
   const [agents, setAgents] = useState<AgentNode[]>([]);
-  const activity: ActivityLog[] = [];
+  const [activity, setActivity] = useState<ActivityLog[]>([]);
   const [errors, setErrors] = useState<AgentError[]>([]);
+  const [loadError, setLoadError] = useState<number | null>(null);
   const [models, setModels] = useState<ModelUsage[]>([]);
   const [reasoning, setReasoning] = useState('');
   const [supervisorStatus, setSupervisorStatus] = useState<SupervisorStatus | null>(null);
@@ -121,17 +125,21 @@ export default function AIControlPage() {
         const res = await apiFetch(`/ai-control/status`);
         if (!res.ok) {
           setSource('unavailable');
+          setLoadError(res.status);
         } else {
-          const data = (await res.json()) as SupervisorStatus;
+          const data = (await res.json()) as SupervisorStatus & { degraded?: Record<string, string> };
           setSupervisorStatus(data);
           setAgents(Array.isArray(data.agents) ? data.agents : []);
           setModels(Array.isArray(data.models) ? data.models : []);
           setErrors(Array.isArray(data.errors) ? data.errors : []);
+          setActivity(Array.isArray(data.activity) ? data.activity : []);
           setSource(data.source === 'live' ? 'live' : 'unavailable');
+          setLoadError(null);
         }
       } catch (err) {
         console.error('Failed to fetch supervisor status:', err);
         setSource('unavailable');
+        setLoadError(0);
       }
 
       try {
@@ -182,6 +190,30 @@ export default function AIControlPage() {
     >
 
         <div className={styles.pageBody}>
+          {/* Load failure — explicit HTTP status + retry (never a silent empty UI) */}
+          {loadError !== null && (
+            <section className={styles.card}>
+              <div className={styles.empty}>
+                {loadError === 0
+                  ? 'Gagal memuat — API tidak terjangkau.'
+                  : `Gagal memuat (HTTP ${loadError})`}{' '}
+                <button type="button" className={styles.advisorRun} onClick={() => load()}>
+                  Coba lagi
+                </button>
+              </div>
+            </section>
+          )}
+
+          {/* Partial data notice (Node reports which upstreams are unavailable) */}
+          {supervisorStatus && 'degraded' in supervisorStatus && (supervisorStatus as { degraded?: Record<string, string> }).degraded ? (
+            <section className={styles.card}>
+              <div className={styles.empty}>
+                Sebagian subsistem tidak tersedia:{' '}
+                {Object.keys((supervisorStatus as { degraded: Record<string, string> }).degraded).join(', ')}
+              </div>
+            </section>
+          ) : null}
+
           {/* Supervisor Status */}
           {supervisorStatus ? (
             <section className={styles.card}>
@@ -237,6 +269,18 @@ export default function AIControlPage() {
                       </span>
                     )}
                     {agent.lastActive && <span>Last: {agent.lastActive.slice(11, 19)}</span>}
+                    {agent.last_event_type && <span>Event: {agent.last_event_type}</span>}
+                    {agent.type === 'department_lead' && agent.invocations === 0 && (
+                      <span
+                        title={
+                          agent.name.endsWith('_lead')
+                            ? `Hanya aktif saat event ${agent.name.replace('_lead', '').toUpperCase()}_* / TRADE_CLOSE* masuk`
+                            : 'Hanya aktif saat event keluarnya masuk'
+                        }
+                      >
+                        idle — hanya saat event cocok masuk
+                      </span>
+                    )}
                     {agent.errors > 0 && (
                       <span className={styles.errorBadge}>{agent.errors} error</span>
                     )}

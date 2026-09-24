@@ -298,6 +298,28 @@ async def environment_state() -> dict[str, Any]:
                     "reconciliation_healthy": guard.preconditions.reconciliation_healthy,
                     "production_strategy": guard.preconditions.production_strategy,
                 },
+                "precondition_details": {
+                    "terminal_armed": {
+                        "met": guard.preconditions.terminal_armed,
+                        "what_satisfies": "terminal terpilih aktif dan di-arm operator",
+                    },
+                    "risk_gate_healthy": {
+                        "met": guard.preconditions.risk_gate_healthy,
+                        "what_satisfies": "validasi RiskGate terakhir sehat",
+                    },
+                    "reconciliation_healthy": {
+                        "met": guard.preconditions.reconciliation_healthy,
+                        "what_satisfies": "laporan rekonsiliasi terakhir sehat",
+                    },
+                    "production_strategy": {
+                        "met": guard.preconditions.production_strategy,
+                        "what_satisfies": "strategi berstatus PRODUCTION",
+                    },
+                },
+                "arm_note": (
+                    "Arm hanya satu dari empat prasyarat; EA_ENVIRONMENT=DEV tetap "
+                    "menolak live execution meski terminal di-arm."
+                ),
             },
             "source": "live",
             "status": "OK",
@@ -313,10 +335,78 @@ async def environment_state() -> dict[str, Any]:
 
 @router.get("/accounts", summary="Broker/account registry (Phase 53)")
 async def accounts_state() -> dict[str, Any]:
+    """Registry + real attached-account snapshot (read-only, additive)."""
     try:
-        return {"value": get_account_manager().to_dict(), "source": "live", "status": "OK"}
+        registry = get_account_manager().to_dict()
+        value: dict[str, Any] = {
+            "brokers": registry.get("brokers", []),
+            "accounts": registry.get("accounts", []),
+            "source": "registry",
+            "note": (
+                "Produksi single-broker tidak memerlukan entri registry multi-account; "
+                "akun nyata yang terpasang ditampilkan di attached_account."
+            ),
+            "attached_account": None,
+        }
+        try:
+            info = _read_attached_account()
+        except Exception as exc:  # noqa: BLE001
+            info = {"available": False, "unavailable_reason": str(exc)}
+        if info and info.get("available"):
+            value["attached_account"] = info.get("account")
+            value["source"] = "mt5"
+        else:
+            value["attached_account"] = None
+            value["unavailable"] = (info or {}).get("unavailable_reason", "akun MT5 tidak tersedia")
+        return {"value": value, "source": "live", "status": "OK"}
     except Exception as exc:  # noqa: BLE001
         return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+
+
+def _read_attached_account(connector: Any = None) -> dict[str, Any]:
+    """Build a secret-free snapshot of the real attached MT5 account.
+
+    Never returns passwords/tokens/paths. Unavailable MT5 => explicit reason.
+    """
+    if connector is None:
+        from ..mt5 import connector as _connector
+
+        connector = _connector
+    if not getattr(connector, "is_live_mode", lambda: True)():
+        return {"available": False, "unavailable_reason": "MT5 tidak dalam mode live"}
+    info = connector.get_account_info()
+    if info is None:
+        return {"available": False, "unavailable_reason": "info akun MT5 kosong"}
+    if hasattr(info, "model_dump"):
+        data = info.model_dump()
+    elif hasattr(info, "to_dict"):
+        data = info.to_dict()
+    else:
+        data = dict(info)
+
+    terminal_id = ""
+    armed = False
+    try:
+        from ..mt5 import terminals as terminal_manager
+
+        armed = bool(terminal_manager.is_execution_armed())
+        view = terminal_manager.list_terminals()
+        terminal_id = view.get("selected_id") or ""
+    except Exception:  # noqa: BLE001 - terminal info is best-effort
+        pass
+
+    return {
+        "available": True,
+        "account": {
+            "login": data.get("login"),
+            "server": data.get("server"),
+            "currency": data.get("currency"),
+            "trade_mode": data.get("trade_mode"),
+            "leverage": data.get("leverage"),
+            "terminal_id": terminal_id,
+            "execution_armed": armed,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -427,7 +517,11 @@ async def execution_quality_state() -> dict[str, Any]:
     try:
         analytics = get_execution_quality()
         return {
-            "value": {"metrics": analytics.summary(), "alerts": analytics.alerts()},
+            "value": {
+                "metrics": analytics.summary(),
+                "alerts": analytics.alerts(),
+                "count": len(analytics.records()),
+            },
             "source": "live",
             "status": "OK",
         }
@@ -526,10 +620,15 @@ def _reconciliation_sync() -> Optional[dict]:
 @router.get("/certification/gate", summary="Production certification gate (Phase 50)")
 async def certification_gate() -> dict[str, Any]:
     try:
+        from ..live_readiness.certification_evidence import collect_gate_evidence
         from ..live_readiness.certification_gate import ProductionCertificationGate
 
         gate = ProductionCertificationGate(
-            critical_incident_open=get_incident_manager().has_critical_open()
+            gate_results=collect_gate_evidence(
+                execution_quality=get_execution_quality(),
+                incident_manager=get_incident_manager(),
+            ),
+            critical_incident_open=get_incident_manager().has_critical_open(),
         )
         return {"value": gate.evaluate().to_dict(), "source": "live", "status": "OK"}
     except Exception as exc:  # noqa: BLE001

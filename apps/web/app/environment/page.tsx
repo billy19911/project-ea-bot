@@ -6,12 +6,16 @@ import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
 import styles from '@/components/ops.module.css';
 
+type PreconditionDetail = { met: boolean; what_satisfies: string };
+
 type EnvState = {
   environment: string;
   is_live: boolean;
   live_allowed: boolean;
   reason: string;
   preconditions: Record<string, boolean>;
+  precondition_details?: Record<string, PreconditionDetail>;
+  arm_note?: string;
 };
 
 const PRECONDITION_LABELS: Record<string, string> = {
@@ -78,16 +82,49 @@ export default function EnvironmentPage() {
           <div className={styles.panelBody}>
             <div className={styles.grid}>
               {state &&
-                Object.entries(state.preconditions).map(([key, ok]) => (
-                  <div key={key} className={styles.card}>
-                    <span className={styles.cardLabel}>{PRECONDITION_LABELS[key] ?? key}</span>
-                    <span className={styles.cardValue}>
-                      <span className={`${styles.pill} ${ok ? styles.pillOk : styles.pillDanger}`}>
-                        {ok ? 'MET' : 'MISSING'}
+                Object.entries(state.preconditions).map(([key, ok]) => {
+                  const detail = state.precondition_details?.[key];
+                  return (
+                    <div key={key} className={styles.card}>
+                      <span className={styles.cardLabel}>{PRECONDITION_LABELS[key] ?? key}</span>
+                      <span className={styles.cardValue}>
+                        <span className={`${styles.pill} ${ok ? styles.pillOk : styles.pillDanger}`}>
+                          {ok ? 'MET' : 'MISSING'}
+                        </span>
                       </span>
-                    </span>
-                  </div>
-                ))}
+                      {detail && !detail.met && (
+                        <span className={styles.cardHint}>Memenuhi: {detail.what_satisfies}</span>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+
+            {state?.arm_note && (
+              <p className={styles.cardHint}>{state.arm_note}</p>
+            )}
+
+            <div className={styles.panel}>
+              <div className={styles.panelTitle}>Apa yang diperlukan</div>
+              <ul className={styles.panelBody}>
+                <li>
+                  Set <code>EA_ENVIRONMENT</code> ke mode yang benar — dengan <code>DEV</code>,
+                  eksekusi live selalu <strong>REJECTED</strong> tanpa peduli konfigurasi lain.
+                </li>
+                {state &&
+                  Object.entries(state.preconditions)
+                    .filter(([, ok]) => !ok)
+                    .map(([key]) => (
+                      <li key={key}>
+                        {PRECONDITION_LABELS[key] ?? key}:{' '}
+                        {state.precondition_details?.[key]?.what_satisfies ?? 'belum terpenuhi'}
+                      </li>
+                    ))}
+              </ul>
+              <p className={styles.cardHint}>
+                Halaman ini hanya menampilkan status — tidak ada tombol arm atau perubahan
+                environment di sini.
+              </p>
             </div>
           </div>
         </div>

@@ -15,11 +15,12 @@ type Strategy = {
   version: string;
   active: boolean;
   performance: {
-    winRate: number;
-    profitFactor: number;
-    sharpe: number;
-    maxDD: number;
+    winRate: number | null;
+    profitFactor: number | null;
+    sharpe: number | null;
+    maxDD: number | null;
   };
+  evidence?: { has_backtest: boolean; completed_backtests?: number };
   parameters: Record<string, string | number>;
   versions: { version: string; date: string; changes: string }[];
 };
@@ -30,7 +31,8 @@ type ApiStrategy = {
   name: string;
   version: string;
   active: boolean;
-  performance: { win_rate: number; profit_factor: number; sharpe: number; max_dd: number };
+  performance: { win_rate: number | null; profit_factor: number | null; sharpe: number | null; max_dd: number | null };
+  evidence?: { has_backtest: boolean; completed_backtests?: number };
   parameters: Record<string, string | number>;
   versions: { version: string; date: string; changes: string }[];
 };
@@ -42,14 +44,24 @@ function mapStrategy(record: ApiStrategy): Strategy {
     version: record.version,
     active: record.active,
     performance: {
-      winRate: record.performance?.win_rate ?? 0,
-      profitFactor: record.performance?.profit_factor ?? 0,
-      sharpe: record.performance?.sharpe ?? 0,
-      maxDD: record.performance?.max_dd ?? 0,
+      winRate: record.performance?.win_rate ?? null,
+      profitFactor: record.performance?.profit_factor ?? null,
+      sharpe: record.performance?.sharpe ?? null,
+      maxDD: record.performance?.max_dd ?? null,
     },
+    evidence: record.evidence,
     parameters: record.parameters ?? {},
     versions: Array.isArray(record.versions) ? record.versions : [],
   };
+}
+
+// `null`/`undefined` → '—' (no fabricated metric). Real numbers render.
+function fmtPct(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value}%` : '—';
+}
+
+function fmtNum(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '—';
 }
 
 export default function StrategyCenterPage() {
@@ -160,10 +172,10 @@ export default function StrategyCenterPage() {
                         <small>{strat.id}</small>
                       </td>
                       <td><code>{strat.version}</code></td>
-                      <td>{strat.performance.winRate > 0 ? `${strat.performance.winRate}%` : '—'}</td>
-                      <td>{strat.performance.profitFactor > 0 ? strat.performance.profitFactor.toFixed(2) : '—'}</td>
-                      <td>{strat.performance.sharpe > 0 ? strat.performance.sharpe.toFixed(2) : '—'}</td>
-                      <td>{strat.performance.maxDD > 0 ? `${strat.performance.maxDD}%` : '—'}</td>
+<td>{fmtPct(strat.performance.winRate)}</td>
+                       <td>{fmtNum(strat.performance.profitFactor)}</td>
+                       <td>{fmtNum(strat.performance.sharpe)}</td>
+                       <td>{fmtPct(strat.performance.maxDD)}</td>
                       <td>
                         <span className={`${styles.badge} ${strat.active ? styles.success : styles.muted}`}>
                           {strat.active ? 'Aktif' : 'Nonaktif'}
@@ -236,21 +248,26 @@ export default function StrategyCenterPage() {
                 <div className={styles.perfGrid}>
                   <div>
                     <small>Win rate</small>
-                    <strong>{selected.performance.winRate > 0 ? `${selected.performance.winRate}%` : '—'}</strong>
+                    <strong>{fmtPct(selected.performance.winRate)}</strong>
                   </div>
                   <div>
                     <small>Profit factor</small>
-                    <strong>{selected.performance.profitFactor > 0 ? selected.performance.profitFactor.toFixed(2) : '—'}</strong>
+                    <strong>{fmtNum(selected.performance.profitFactor)}</strong>
                   </div>
                   <div>
                     <small>Sharpe ratio</small>
-                    <strong>{selected.performance.sharpe > 0 ? selected.performance.sharpe.toFixed(2) : '—'}</strong>
+                    <strong>{fmtNum(selected.performance.sharpe)}</strong>
                   </div>
                   <div>
                     <small>Max drawdown</small>
-                    <strong className={styles.negative}>{selected.performance.maxDD > 0 ? `${selected.performance.maxDD}%` : '—'}</strong>
+                    <strong className={styles.negative}>{fmtPct(selected.performance.maxDD)}</strong>
                   </div>
                 </div>
+                {!selected.evidence?.has_backtest && (
+                  <p className={styles.empty}>
+                    Belum ada hasil backtest — jalankan di Pusat Riset.
+                  </p>
+                )}
               </section>
 
               <section className={styles.card}>

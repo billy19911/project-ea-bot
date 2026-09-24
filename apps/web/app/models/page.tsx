@@ -24,6 +24,7 @@ type Telemetry = {
 export default function ModelsPage() {
   const [records, setRecords] = useState<Telemetry[]>([]);
   const [count, setCount] = useState(0);
+  const [source, setSource] = useState('unknown');
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -33,14 +34,17 @@ export default function ModelsPage() {
       const res = await apiFetch('/v2/llm/telemetry');
       if (!res.ok) {
         setError(res.status === 503 ? 'Python service unavailable.' : `Request failed (${res.status})`);
+        setSource('unavailable');
         return;
       }
       const data = await res.json();
       setRecords(Array.isArray(data.value) ? data.value : []);
       setCount(typeof data.count === 'number' ? data.count : 0);
+      setSource(typeof data.source === 'string' ? data.source : 'unknown');
       setError(null);
     } catch {
       setError('Could not reach the API.');
+      setSource('unavailable');
     }
   }, []);
 
@@ -59,13 +63,19 @@ export default function ModelsPage() {
   return (
     <AppShell activeKey="models" eyebrow="Xynn / AI" title="Models & LLM Observability">
       <div className={styles.wrap}>
+        <p className={styles.cardHint}>
+          Observability — hanya memantau; bukan pemilih model. Halaman ini tidak mengubah
+          routing model.
+        </p>
         {error && <div className={styles.error}>{error}</div>}
 
         <div className={styles.grid}>
           <div className={styles.card}>
             <span className={styles.cardLabel}>Requests Tracked</span>
             <span className={styles.cardValue}>{count}</span>
-            <span className={styles.cardHint}>Last 100 shown</span>
+            <span className={styles.cardHint}>
+              source: {source} · menampilkan {records.length} terakhir
+            </span>
           </div>
           <div className={styles.card}>
             <span className={styles.cardLabel}>Failures (recent)</span>

@@ -25,6 +25,7 @@ import styles from '../page.module.css';
 import { apiFetch } from '../../lib/api';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
+import Pagination from '../../components/ui/pagination';
 
 type SourceState = 'live' | 'unavailable';
 
@@ -72,6 +73,8 @@ export default function SettingsPage() {
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'unauthorized' | 'unavailable'>('loading');
   const [saving, setSaving] = useState(false);
+  const [modelPage, setModelPage] = useState(1);
+  const [modelPageSize, setModelPageSize] = useState(25);
 
   const load = useCallback(async () => {
     try {
@@ -122,6 +125,18 @@ export default function SettingsPage() {
       cancelled = true;
     };
   }, []);
+
+  // Page resets whenever the model list identity changes (refresh/reconnect).
+  useEffect(() => {
+    setModelPage(1);
+  }, [modelsState.models]);
+
+  const modelPageCount = Math.max(1, Math.ceil(modelsState.models.length / modelPageSize));
+  const safeModelPage = Math.min(modelPage, modelPageCount);
+  const visibleModels = modelsState.models.slice(
+    (safeModelPage - 1) * modelPageSize,
+    safeModelPage * modelPageSize,
+  );
 
   const save = async () => {
     if (!payload) return;
@@ -281,9 +296,13 @@ export default function SettingsPage() {
               <div className={styles.formTitle}>
                 <h2>Batas risiko (read-only)</h2>
                 <p>
-                  Nilai nyata yang sedang dipakai <code>RiskEngine</code> / <code>RiskGate</code>. Sengaja tidak
-                  dapat diubah dari dashboard: ini logika safety dan hanya berubah lewat kode.
+                  Sumber: nilai efektif <code>RiskGate</code> / <code>RiskEngine</code> (kode-level).
+                  Nilai nyata yang sedang dipakai, sengaja tidak dapat diubah dari dashboard — ini
+                  logika safety dan hanya berubah lewat kode.
                 </p>
+                {payload && 'source' in payload && typeof (payload as { source?: unknown }).source === 'string' && (
+                  <p className={styles.mutedText}>source: {(payload as { source: string }).source}</p>
+                )}
               </div>
 
               {loadState === 'unavailable' && (
@@ -334,20 +353,30 @@ export default function SettingsPage() {
                     </span>
                   </div>
                 ) : (
-                  modelsState.models.map((m) => (
-                    <Fragment key={m.id}>
-                      <div>
-                        <strong>{m.id}</strong>
-                        <span>
-                          {m.provider}
-                          {m.is_free ? ' · gratis' : ' · premium'}
+                  <>
+                    {visibleModels.map((m) => (
+                      <Fragment key={m.id}>
+                        <div>
+                          <strong>{m.id}</strong>
+                          <span>
+                            {m.provider}
+                            {m.is_free ? ' · gratis' : ' · premium'}
+                          </span>
+                        </div>
+                        <span className={`${styles.badge} ${m.is_free ? styles.success : styles.muted}`}>
+                          {m.is_free ? 'Gratis' : 'Berbayar'}
                         </span>
-                      </div>
-                      <span className={`${styles.badge} ${m.is_free ? styles.success : styles.muted}`}>
-                        {m.is_free ? 'Gratis' : 'Berbayar'}
-                      </span>
-                    </Fragment>
-                  ))
+                      </Fragment>
+                    ))}
+                    <Pagination
+                      page={safeModelPage}
+                      pageSize={modelPageSize}
+                      total={modelsState.models.length}
+                      onPageChange={setModelPage}
+                      onPageSizeChange={setModelPageSize}
+                      unitLabel="models"
+                    />
+                  </>
                 )}
               </div>
             </section>

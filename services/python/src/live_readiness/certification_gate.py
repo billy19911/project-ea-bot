@@ -113,14 +113,15 @@ class GateResult:
     """Result of a single gate."""
 
     gate: str
-    checks: dict[str, bool] = field(default_factory=dict)
+    checks: dict[str, bool | None] = field(default_factory=dict)
+    reasons: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
-        return bool(self.checks) and all(self.checks.values())
+        return bool(self.checks) and all(value is True for value in self.checks.values())
 
     def failed_checks(self) -> list[str]:
-        return [name for name, ok in self.checks.items() if not ok]
+        return [name for name, ok in self.checks.items() if ok is not True]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -128,6 +129,7 @@ class GateResult:
             "passed": self.passed,
             "checks": dict(self.checks),
             "failed": self.failed_checks(),
+            "reasons": dict(self.reasons),
         }
 
 
@@ -163,10 +165,46 @@ class ProductionCertificationGate:
         self.gate_results = gate_results or {}
         self.critical_incident_open = critical_incident_open
 
+    @staticmethod
+    def _coerce(value: Any) -> bool | None:
+        """Normalise a raw evidence value to ``True``/``False``/``None``.
+
+        Only an observed ``True`` counts as passed. An explicit ``False`` is a
+        recorded failure; ``None`` (or `"UNKNOWN"`/`"NOT_RUN"`) means *not run*
+        — it is never silently promoted to a pass.
+        """
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            token = value.strip().upper()
+            if token in ("", "UNKNOWN", "NOT_RUN", "NOT RUN", "PENDING"):
+                return None
+            if token in ("TRUE", "PASS", "PASSED", "OK", "HEALTHY"):
+                return True
+            if token in ("FALSE", "FAIL", "FAILED", "DOWN", "UNHEALTHY"):
+                return False
+            return None
+        return bool(value)
+
     def _evaluate_gate(self, gate: str) -> GateResult:
         provided = self.gate_results.get(gate, {})
-        checks = {name: bool(provided.get(name, False)) for name in _gate_checks(gate)}
-        return GateResult(gate=gate, checks=checks)
+        checks: dict[str, bool | None] = {}
+        reasons: dict[str, dict[str, str]] = {}
+        for name in _gate_checks(gate):
+            raw = provided.get(name)
+            # Support both a bare verdict and a rich ``{value, reason, source}``.
+            if isinstance(raw, dict):
+                value = self._coerce(raw.get("value"))
+                checks[name] = value
+                reason = str(raw.get("reason") or "").strip()
+                source = str(raw.get("evidence_source") or raw.get("source") or "").strip()
+                if reason or source:
+                    reasons[name] = {"reason": reason, "evidence_source": source}
+            else:
+                checks[name] = self._coerce(raw)
+        return GateResult(gate=gate, checks=checks, reasons=reasons)
 
     def evaluate(self) -> CertificationReport:
         """Return the deterministic certification report (PRD §50)."""

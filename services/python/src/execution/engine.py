@@ -179,6 +179,59 @@ class ExecutionEngine:
         self._completed_orders: dict[str, ExecutionResult] = {}
 
     # ---------------------------------------------------------------------------
+    # Execution-quality analytics (PRD §47) — best-effort observability
+    # ---------------------------------------------------------------------------
+
+    def _record_execution_quality(
+        self,
+        request: OrderRequest,
+        *,
+        actual_fill: float,
+        rejected: bool = False,
+        partial: bool = False,
+        filled_ratio: float = 1.0,
+        latency_ms: float = 0.0,
+        spread: float = 0.0,
+    ) -> None:
+        """Record one observed execution into the shared analytics singleton.
+
+        Best-effort: a failure here must NEVER raise into the execution path.
+        Only REAL values are recorded — nothing is fabricated when a value is
+        unknown (missing spread/latency default to 0.0/not-measured).
+        """
+        try:
+            try:
+                from ..observability.execution_quality import ExecutionRecord
+                from ..system.v2_endpoints import get_execution_quality
+            except ImportError:
+                from src.observability.execution_quality import ExecutionRecord
+                from src.system.v2_endpoints import get_execution_quality
+
+            direction = 1
+            side = str(getattr(request, "side", "") or "").upper()
+            order_type = str(getattr(request, "order_type", "") or "").upper()
+            if "SELL" in side or side == "1" or "SELL" in order_type:
+                direction = -1
+            requested = float(getattr(request, "price", 0.0) or 0.0)
+            filled = float(actual_fill or 0.0)
+            get_execution_quality().record(
+                ExecutionRecord(
+                    requested_entry=requested,
+                    # Rejected orders have no fill — record 0.0 (real: nothing
+                    # filled), never a fabricated price.
+                    actual_fill=filled if not rejected else 0.0,
+                    direction=direction,
+                    spread=float(spread or 0.0),
+                    latency_ms=float(latency_ms or 0.0),
+                    rejected=bool(rejected),
+                    partial=bool(partial),
+                    filled_ratio=float(filled_ratio),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - analytics never breaks execution
+            logger.debug("execution-quality record skipped: %s", exc)
+
+    # ---------------------------------------------------------------------------
     # Duplicate Prevention API
     # ---------------------------------------------------------------------------
 
@@ -353,6 +406,7 @@ class ExecutionEngine:
             )
             logger.warning(msg)
             set_order(request.idempotency_key, OrderState.UNKNOWN)
+            self._record_execution_quality(request, actual_fill=0.0, rejected=True)
             return ExecutionResult(
                 success=False,
                 ticket=None,
@@ -369,6 +423,7 @@ class ExecutionEngine:
                 f"idempotency key '{request.idempotency_key}' already processed or pending"
             )
             logger.warning(msg)
+            self._record_execution_quality(request, actual_fill=0.0, rejected=True)
             return ExecutionResult(
                 success=False,
                 ticket=None,
@@ -391,6 +446,7 @@ class ExecutionEngine:
                 OrderState.UNKNOWN,
                 extra={"rejected": True, "reason": error_str},
             )
+            self._record_execution_quality(request, actual_fill=0.0, rejected=True)
             return ExecutionResult(
                 success=False,
                 ticket=None,
@@ -412,7 +468,9 @@ class ExecutionEngine:
         try:
             for attempt in range(self.max_retries + 1):
                 try:
+                    send_started = time.monotonic()
                     send_res = self._send_to_mt5(request)
+                    send_latency_ms = (time.monotonic() - send_started) * 1000.0
                     if send_res.get("success"):
                         ticket = send_res.get("ticket")
                         set_order(request.idempotency_key, OrderState.SUBMITTED, {"ticket": ticket})
@@ -431,6 +489,20 @@ class ExecutionEngine:
                         final_state = get_order(request.idempotency_key).get("state")
                         if final_state == OrderState.UNKNOWN.value:
                             set_order(request.idempotency_key, OrderState.UNKNOWN)
+                        actual_fill = float(
+                            send_res.get("price")
+                            or send_res.get("fill_price")
+                            or getattr(request, "price", 0.0)
+                            or 0.0
+                        )
+                        self._record_execution_quality(
+                            request,
+                            actual_fill=actual_fill,
+                            partial=bool(send_res.get("partial", False)),
+                            filled_ratio=float(send_res.get("filled_ratio", 1.0) or 1.0),
+                            latency_ms=send_latency_ms,
+                            spread=float(send_res.get("spread", 0.0) or 0.0),
+                        )
                         success_result = ExecutionResult(
                             success=True,
                             ticket=ticket,
@@ -503,6 +575,7 @@ class ExecutionEngine:
                 position_opened=None,
             )
             self._completed_orders[request.idempotency_key] = failure_result
+            self._record_execution_quality(request, actual_fill=0.0, rejected=True)
             logger.error(
                 "Order execution failed permanently after %d retries: %s",
                 retries,
@@ -723,6 +796,25 @@ class ExecutionEngine:
                 }
                 res = self.mt5_connector.execute_order(req_payload)
                 return self._parse_send_result(res)
+
+        # 2. Explicit simulation is selected before probing native MT5. The
+        # approval-enforced runtime still reaches the native safety guard so an
+        # unarmed terminal cannot be mistaken for a paper fill.
+        if self.simulation_mode and not self.require_approval:
+            logger.info(
+                "ExecutionEngine in simulation_mode — returning a labelled "
+                "SIMULATED fill for %s %s.",
+                request.symbol,
+                request.order_type,
+            )
+            return {
+                "success": True,
+                "ticket": int(time.time() * 1000) % 1_000_000,
+                "error_code": 0,
+                "message": "Simulated order execution successful",
+                "price": request.price,
+                "simulated": True,
+            }
 
         # 2. MetaTrader5 native library integration
         # SAFETY: a native ``mt5.order_send`` is a REAL broker order. It must

@@ -33,6 +33,8 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -52,6 +54,13 @@ _ALLOWED_ROLES = ("market", "risk", "research")
 # project's key. Most other `*free` endpoints are restricted to the OpenCode
 # client, so these are preferred (and used as the fallback chain).
 _PREFERRED_FREE_MODELS = ("codebuddy-deepseekv4.1flashfree", "codebuddy-free")
+
+
+def _shared_telemetry_store() -> Any:
+    """Return the process-wide store used by the v2 telemetry endpoint."""
+    from ..system.v2_endpoints import get_llm_store
+
+    return get_llm_store()
 
 
 @dataclass
@@ -251,47 +260,46 @@ class LLMAdvisor:
             "timeout_s": REQUEST_TIMEOUT_S,
         }
 
-        if role not in _ALLOWED_ROLES:
+        def _refuse(reason: str, *, fallback: bool = False, error: str = "") -> AdvisorResult:
             self._refusals += 1
-            return AdvisorResult(
-                ok=False,
-                reason=f"Peran tidak diizinkan: {role!r} (hanya {', '.join(_ALLOWED_ROLES)}).",
-                guardrails=guardrails,
+            self._record_telemetry(
+                role=role,
+                model="",
+                prompt_tokens=0,
+                completion_tokens=0,
+                latency_s=0.0,
+                fallback=fallback,
+                error=error,
+                valid=False,
             )
+            return AdvisorResult(ok=False, reason=reason, guardrails=guardrails)
+
+        if role not in _ALLOWED_ROLES:
+            return _refuse(f"Peran tidak diizinkan: {role!r} (hanya {', '.join(_ALLOWED_ROLES)}).")
 
         # G1 — opt-in (cheapest gate first: no client construction, no tokens)
         if not self._enabled():
-            self._refusals += 1
-            return AdvisorResult(
-                ok=False,
-                reason=(
-                    "Penasihat LLM nonaktif. Aktifkan 'llm_advisor_enabled' di "
-                    "Pengaturan sebelum memakai token."
-                ),
-                guardrails=guardrails,
+            return _refuse(
+                "Penasihat LLM nonaktif. Aktifkan 'llm_advisor_enabled' di "
+                "Pengaturan sebelum memakai token."
             )
         guardrails["enabled"] = True
 
         # G3 — data availability (before spending a budget commit)
         if not market:
-            self._refusals += 1
-            return AdvisorResult(
-                ok=False,
-                reason="Tidak ada data pasar nyata untuk dianalisis.",
-                guardrails=guardrails,
-            )
+            return _refuse("Tidak ada data pasar nyata untuk dianalisis.")
         guardrails["data_ok"] = True
 
         # G2 — token budget through the real supervisor
         allowed, reason = self._commit_budget(DEFAULT_ESTIMATE_TOKENS)
         if not allowed:
-            self._refusals += 1
-            return AdvisorResult(ok=False, reason=reason, guardrails=guardrails)
+            return _refuse(reason)
         guardrails["budget_ok"] = True
         guardrails["estimate_tokens"] = DEFAULT_ESTIMATE_TOKENS
 
         # G4 — the call itself, with hard caps
         prompt = self._build_prompt(role, market)
+        started = time.monotonic()
         try:
             client = self._ensure_client()
             response = client.generate(
@@ -304,12 +312,11 @@ class LLMAdvisor:
             )
         except Exception as exc:
             logger.warning("advisor: panggilan LLM gagal: %s", exc)
-            self._refusals += 1
-            return AdvisorResult(
-                ok=False,
-                reason=f"Panggilan LLM gagal: {exc}",
-                guardrails=guardrails,
+            return _refuse(
+                f"Panggilan LLM gagal: {exc}",
+                error=str(exc),
             )
+        elapsed = time.monotonic() - started
 
         usage = getattr(response, "usage", None)
         prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
@@ -337,18 +344,70 @@ class LLMAdvisor:
             bucket["total_tokens"] += total_tokens
             bucket["cost_usd"] += cost_usd
 
+        is_fallback = bool(getattr(response, "is_fallback", False))
+        latency_s = float(getattr(response, "latency_s", 0.0) or 0.0) or elapsed
+        self._record_telemetry(
+            role=role,
+            model=model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            latency_s=latency_s,
+            fallback=is_fallback,
+            error="",
+            valid=True,
+        )
+
         return AdvisorResult(
             ok=True,
             content=str(getattr(response, "content", "")),
             model=model_name,
-            is_fallback=bool(getattr(response, "is_fallback", False)),
+            is_fallback=is_fallback,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             cost_usd=cost_usd,
-            latency_s=float(getattr(response, "latency_s", 0.0) or 0.0),
+            latency_s=latency_s,
             guardrails=guardrails,
         )
+
+    def _record_telemetry(
+        self,
+        *,
+        role: str,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        latency_s: float,
+        fallback: bool,
+        error: str,
+        valid: bool,
+    ) -> None:
+        """Best-effort: record one LLM telemetry row (success/refusal/failure).
+
+        Uses the SHARED store behind ``/v2/llm/telemetry`` so the Models page
+        shows real advisor activity. Telemetry must never break the advisor.
+        """
+        try:
+            from ..observability.llm_telemetry import LLMRequestTelemetry
+
+            store = _shared_telemetry_store()
+            store.record(
+                LLMRequestTelemetry(
+                    request_id=uuid.uuid4().hex,
+                    agent=f"llm_advisor:{role}",
+                    provider="9router",
+                    model=model or "none",
+                    prompt_version="advisor-v1",
+                    input_tokens=int(prompt_tokens),
+                    output_tokens=int(completion_tokens),
+                    latency=float(latency_s),
+                    fallback=bool(fallback),
+                    error=error or "",
+                    structured_output_valid=bool(valid),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - observability never breaks advise()
+            logger.debug("advisor: telemetry gagal: %s", exc)
 
     def status(self) -> dict[str, Any]:
         """Report advisor state + real usage aggregates for the UI."""

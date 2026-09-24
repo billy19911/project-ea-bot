@@ -347,6 +347,29 @@ app.get('/reconciliation/status', async (req, res) => {
   await sendProxy(res, '/reconciliation/status', undefined, req);
 });
 
+function buildActivityRows(
+  tasks: any[],
+): Array<{ id: string; timestamp: string; agent: string; action: string; status: 'success' | 'warning' | 'error'; duration?: number }> {
+  return tasks
+    .map((task: any, index: number) => {
+      const status: 'success' | 'warning' | 'error' =
+        task.status === 'failed' || task.status === 'error'
+          ? 'error'
+          : task.status === 'running'
+            ? 'warning'
+            : 'success';
+      return {
+        id: `task-${index}-${task.timestamp ?? task.created_at ?? ''}`,
+        timestamp: String(task.timestamp ?? task.created_at ?? task.started_at ?? ''),
+        agent: String(task.agent ?? task.owner ?? 'supervisor'),
+        action: String(task.action ?? task.event_type ?? task.type ?? 'task'),
+        status,
+        ...(typeof task.duration_ms === 'number' ? { duration: task.duration_ms } : {}),
+      };
+    })
+    .filter((row) => row.timestamp);
+}
+
 // AI Control Center — supervisor status, agent hierarchy, model usage
 app.get('/ai-control/status', async (req, res) => {
   const log = (req as any).log;
@@ -360,10 +383,15 @@ app.get('/ai-control/status', async (req, res) => {
     getJson<any>('/ai/advisor/status'),
   ]);
 
-  if (!health.ok && !scheduler.ok && !tasksResult.ok && !modelsResult.ok) {
+  const relevant = { health, scheduler, tasks: tasksResult, models: modelsResult, advisor: advisorResult };
+  const available = Object.entries(relevant).filter(([, result]) => result.ok);
+  if (available.length === 0) {
     res.status(503).json({ error: 'python_service_unavailable', source: 'unavailable' });
     return;
   }
+  const degraded = Object.fromEntries(
+    Object.entries(relevant).filter(([, result]) => !result.ok).map(([name]) => [name, 'unavailable']),
+  );
 
   const healthData = health.ok ? health.data : {};
   const schedulerData = scheduler.ok ? scheduler.data : {};
@@ -384,6 +412,7 @@ app.get('/ai-control/status', async (req, res) => {
         errorRate: typeof a.error_rate === 'number' ? a.error_rate : 0,
         avgConfidence: typeof a.avg_confidence === 'number' ? a.avg_confidence : null,
         lastActive: a.last_active ?? null,
+        last_event_type: a.last_event_type ?? null,
         signalCounts: a.signal_counts ?? {},
       }))
     : [];
@@ -427,8 +456,10 @@ app.get('/ai-control/status', async (req, res) => {
     agents,
     models,
     tasks: Array.isArray(tasksData.tasks) ? tasksData.tasks : [],
+    activity: buildActivityRows(Array.isArray(tasksData.tasks) ? tasksData.tasks : []),
     errors: getRecentErrors(10),
     source: 'live',
+    degraded: Object.keys(degraded).length > 0 ? degraded : undefined,
   });
 });
 
@@ -461,7 +492,8 @@ interface MappedStrategy {
   name: string;
   version: string;
   active: boolean;
-  performance: { win_rate: number; profit_factor: number; sharpe: number; max_dd: number };
+  performance: { win_rate: number | null; profit_factor: number | null; sharpe: number | null; max_dd: number | null };
+  evidence: { has_backtest: boolean; completed_backtests?: number };
   parameters: Record<string, string | number>;
   versions: { version: string; date: string; changes: string }[];
 }
@@ -472,17 +504,30 @@ interface MappedStrategy {
  * overrides it with every sibling version of the same strategy name.
  */
 function mapStrategyRecord(py: any): MappedStrategy {
-  const metrics = py?.metrics_summary ?? {};
+  // Missing metrics stay `null` (never fabricated `0`). The UI renders `—` and
+  // an explicit "belum ada backtest" note when no evidence exists.
+  const metrics = py?.metrics_summary;
+  const hasMetrics = metrics != null && Object.keys(metrics).length > 0;
+  const validation = py?.validation_evidence;
+  const hasBacktest = Boolean(hasMetrics || (validation != null && Object.keys(validation).length > 0));
+  const metric = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) ? value : null;
   return {
     id: py?.strategy_id,
     name: py?.name,
     version: py?.version,
     active: py?.status === 'ACTIVE',
     performance: {
-      win_rate: metrics.win_rate ?? 0,
-      profit_factor: metrics.profit_factor ?? 0,
-      sharpe: metrics.sharpe_ratio ?? 0,
-      max_dd: metrics.max_drawdown ?? 0,
+      win_rate: metric(metrics?.win_rate),
+      profit_factor: metric(metrics?.profit_factor),
+      sharpe: metric(metrics?.sharpe_ratio),
+      max_dd: metric(metrics?.max_drawdown),
+    },
+    evidence: {
+      has_backtest: hasBacktest,
+      ...(typeof validation?.completed_backtests === 'number'
+        ? { completed_backtests: validation.completed_backtests }
+        : {}),
     },
     parameters: py?.parameters ?? {},
     versions: [

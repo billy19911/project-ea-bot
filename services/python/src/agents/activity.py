@@ -42,8 +42,11 @@ class AgentActivity:
     _confidence_sum: float = 0.0
     _confidence_n: int = 0
     recent: deque = field(default_factory=lambda: deque(maxlen=20))
+    last_event_type: Optional[str] = None
 
-    def record(self, signal: str, confidence: float, error: bool = False) -> None:
+    def record(
+        self, signal: str, confidence: float, error: bool = False, event_type: str = ""
+    ) -> None:
         self.invocations += 1
         self.last_active = _now()
         if error:
@@ -56,6 +59,8 @@ class AgentActivity:
             conf = 0.0
         self._confidence_sum += conf
         self._confidence_n += 1
+        if event_type:
+            self.last_event_type = event_type
         self.recent.append({"signal": key, "confidence": round(conf, 3), "at": self.last_active})
 
     @property
@@ -80,6 +85,7 @@ class AgentActivity:
             "signal_counts": dict(self.signal_counts),
             "avg_confidence": self.avg_confidence,
             "recent": list(self.recent),
+            "last_event_type": self.last_event_type,
             # `status` is derived from real activity, not a fixed string.
             "status": "active" if self.invocations > 0 else "idle",
         }
@@ -105,11 +111,14 @@ class AgentActivityTracker:
         signal: str = "NEUTRAL",
         confidence: float = 0.0,
         error: bool = False,
+        event_type: str = "",
     ) -> None:
         """Record one agent run (fail-safe: never raises)."""
         try:
             with self._lock:
-                self._get_or_create(name).record(signal, confidence, error=error)
+                self._get_or_create(name).record(
+                    signal, confidence, error=error, event_type=event_type
+                )
         except Exception:  # noqa: BLE001 - observability must never break analysis
             pass
 
