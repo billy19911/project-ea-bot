@@ -60,13 +60,38 @@ _ARTIFACT_RULES: tuple[_ArtifactRule, ...] = (
     _ArtifactRule("security_scan", ("**/security*.json", "**/bandit*.json"), "laporan security"),
 )
 
+# Directories that never contain real CI evidence: leftover pytest ``tmp_path``
+# fixtures, virtualenvs, build outputs, caches, and hidden dirs (``.git`` etc.).
+_EXCLUDED_DIRS: frozenset[str] = frozenset(
+    {
+        "temp_pytest",
+        ".venv",
+        "venv",
+        "node_modules",
+        ".next",
+        "dist",
+        "build",
+        "__pycache__",
+    }
+)
+
 
 def _find_artifact(root: Path, rule: _ArtifactRule) -> Optional[Path]:
     for pattern in rule.patterns:
         matches = sorted(root.glob(pattern))
         for match in matches:
-            if match.is_file() and match.stat().st_size > 0:
-                return match
+            if not (match.is_file() and match.stat().st_size > 0):
+                continue
+            rel = match.relative_to(root)
+            parts = rel.parts
+            excluded = False
+            for part in parts:
+                if part in _EXCLUDED_DIRS or part.startswith("."):
+                    excluded = True
+                    break
+            if excluded:
+                continue
+            return match
     return None
 
 

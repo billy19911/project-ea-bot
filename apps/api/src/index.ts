@@ -170,10 +170,11 @@ async function sendProxy(
   path: string,
   transform?: ProxyTransform,
   req?: Request,
+  timeoutMs?: number,
 ): Promise<void> {
   const traceId = traceIdFromRequest(req);
   const headers = traceId ? { 'X-Trace-Id': traceId } : undefined;
-  const result = await getJson<any>(path, undefined, headers);
+  const result = await getJson<any>(path, timeoutMs, headers);
   if (!result.ok) {
     res.status(503).json({ error: 'python_service_unavailable', source: 'unavailable' });
     return;
@@ -693,7 +694,7 @@ app.get('/v2/environment', async (req, res) => {
 });
 
 app.get('/v2/accounts', async (req, res) => {
-  await sendProxy(res, '/v2/accounts', undefined, req);
+  await sendProxy(res, '/v2/accounts', undefined, req, 20000);
 });
 
 app.get('/v2/capital', async (req, res) => {
@@ -738,7 +739,7 @@ app.get('/v2/dashboard', async (req, res) => {
 });
 
 app.get('/v2/certification/gate', async (req, res) => {
-  await sendProxy(res, '/v2/certification/gate', undefined, req);
+  await sendProxy(res, '/v2/certification/gate', undefined, req, 20000);
 });
 
 app.get('/v2/research/inbox', async (req, res) => {

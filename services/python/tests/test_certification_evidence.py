@@ -74,6 +74,35 @@ def test_present_artifact_is_true(tmp_path: Path) -> None:
     assert evidence["A"]["python_tests"]["value"] is True
 
 
+def test_temp_fixture_dirs_are_not_evidence(tmp_path: Path) -> None:
+    """Leftover pytest ``tmp_path`` fixture dirs must not count as CI evidence."""
+    # top-level temp_pytest dir
+    (tmp_path / "temp_pytest").mkdir()
+    (tmp_path / "temp_pytest" / "pytest_report.txt").write_text("1 passed", encoding="utf-8")
+    # nested case: deeper inside a temp fixture
+    nested = tmp_path / "temp_pytest" / "test_present_artifact_is_true0"
+    nested.mkdir()
+    (nested / "pytest_report.txt").write_text("1 passed", encoding="utf-8")
+    evidence = collect_gate_evidence(repo_root=tmp_path)
+    assert evidence["A"]["python_tests"]["value"] is None
+
+    # a real report dir outside any temp/hidden/build path is still honored
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "pytest_report.txt").write_text("1 passed", encoding="utf-8")
+    evidence = collect_gate_evidence(repo_root=tmp_path)
+    assert evidence["A"]["python_tests"]["value"] is True
+
+
+def test_hidden_and_build_dirs_are_not_evidence(tmp_path: Path) -> None:
+    """Hidden dirs and build/vendor caches must never be accepted as evidence."""
+    for rel in ("node_modules", "dist", "build", "__pycache__", ".venv", ".cache"):
+        d = tmp_path / rel
+        d.mkdir()
+        (d / "pytest_report.txt").write_text("1 passed", encoding="utf-8")
+    evidence = collect_gate_evidence(repo_root=tmp_path)
+    assert evidence["A"]["python_tests"]["value"] is None
+
+
 def test_gate_b_probe_observed_healthy(tmp_path: Path) -> None:
     probes = {
         "risk_gate": lambda: (True, "validasi terakhir sehat", "risk_gate"),
