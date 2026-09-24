@@ -12,9 +12,67 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 
-__all__ = ["KillSwitchState", "KillSwitch", "KillSwitchEvent"]
+__all__ = [
+    "KillSwitchState",
+    "KillSwitch",
+    "KillSwitchEvent",
+    "set_kill_switch_store",
+    "load_kill_switch",
+]
+
+
+# Optional durable store (B-5). When set the kill switch state is persisted
+# across restarts; when None the module degrades to in-memory only (backward
+# compatible).
+_store: Optional[Any] = None
+
+
+def set_kill_switch_store(store: Optional[Any]) -> None:
+    """Attach a durable :class:`KillSwitchStateStore` (or ``None`` to detach)."""
+    global _store
+    _store = store
+
+
+def _persist(ks: "KillSwitch") -> None:
+    """Persist the kill switch state if a durable store is attached."""
+    if _store is not None:
+        try:
+            _store.save_state(ks)
+        except Exception:  # noqa: BLE001 - persistence must never break kill switch
+            pass
+
+
+def load_kill_switch() -> "KillSwitch":
+    """Reconstruct a :class:`KillSwitch` from the attached durable store.
+
+    Returns a fresh ``KillSwitch()`` when no store is attached, no state is
+    persisted, or the persisted state is incomplete (fail-safe: never crash).
+    """
+    ks = KillSwitch()
+    if _store is None:
+        return ks
+    try:
+        state_dict = _store.load_state()
+    except Exception:  # noqa: BLE001 - load must never crash
+        return ks
+    if not state_dict:
+        return ks
+    try:
+        state_value = state_dict.get("state")
+        if state_value:
+            try:
+                ks.state = KillSwitchState(state_value)
+            except ValueError:
+                pass
+        ks.triggered_at = state_dict.get("triggered_at")
+        ks.reset_at = state_dict.get("reset_at")
+        ks.locked = bool(state_dict.get("locked", False))
+        ks.locked_at = state_dict.get("locked_at")
+    except Exception:  # noqa: BLE001 - reconstruct must never crash
+        pass
+    return ks
 
 
 class KillSwitchState(str, Enum):
@@ -116,6 +174,7 @@ class KillSwitch:
         self.state = KillSwitchState.TRIGGERED
         self.triggered_at = now
         self.history.append(record)
+        _persist(self)
         return record
 
     def lock(self, reason: str = "Automatic lock after trigger") -> KillSwitchRecord:
@@ -148,6 +207,7 @@ class KillSwitch:
         self.locked = True
         self.locked_at = now
         self.history.append(record)
+        _persist(self)
         return record
 
     def request_reset(self, requested_by: str = "operator") -> KillSwitchRecord:
@@ -178,6 +238,7 @@ class KillSwitch:
         )
         self.state = KillSwitchState.RESET_PENDING
         self.history.append(record)
+        _persist(self)
         return record
 
     def confirm_reset(self) -> KillSwitchRecord:
@@ -206,6 +267,7 @@ class KillSwitch:
         self.locked = False
         self.locked_at = None
         self.history.append(record)
+        _persist(self)
         return record
 
     def is_blocked(self) -> bool:

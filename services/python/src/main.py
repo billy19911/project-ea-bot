@@ -5,6 +5,9 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from agents.analysts import (
     FundamentalAnalystAgent,
     MomentumAnalystAgent,
@@ -14,8 +17,6 @@ from agents.analysts import (
 )
 from agents.base import TechnicalAnalystAgent
 from agents.registry import agent_registry
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 from .charting.endpoints import router as charting_router
 from .config import settings
@@ -110,9 +111,7 @@ async def lifespan(app: FastAPI):
                 try:
                     from telegram.signal_lifecycle import get_signal_lifecycle
                 except ImportError:
-                    from .telegram.signal_lifecycle import (
-                        get_signal_lifecycle,  # type: ignore
-                    )
+                    from .telegram.signal_lifecycle import get_signal_lifecycle  # type: ignore
 
                 payload = record.to_dict() if hasattr(record, "to_dict") else record
                 get_signal_lifecycle().on_review(payload)
@@ -124,6 +123,41 @@ async def lifespan(app: FastAPI):
         logger.info("Learning feedback wired: persistent lesson store + review bridge")
     except Exception:  # pragma: no cover - defensive, never block startup
         logger.exception("Learning feedback wiring failed (system continues)")
+
+    # Durable state persistence (B-5) — order ledger, intents, kill switch,
+    # position reconciliation. Wired before everything else so the four ledgers
+    # survive restarts. Fail-safe: a wiring error must never block startup.
+    try:
+        from execution.intents import set_store as set_intent_store
+        from execution.state_machine import set_store as set_order_store
+        from persistence import (
+            IntentStore,
+            KillSwitchStateStore,
+            OrderStateStore,
+            PositionReconciliationStore,
+        )
+        from risk.kill_switch import set_kill_switch_store
+
+        order_store = OrderStateStore()
+        set_order_store(order_store)
+
+        intent_store = IntentStore()
+        set_intent_store(intent_store)
+
+        ks_store = KillSwitchStateStore()
+        set_kill_switch_store(ks_store)
+
+        # PositionReconciliationStore is injected into PositionMonitor instances
+        # at construction time (not global), so it is wired in
+        # orchestration/runtime.py where the monitor is constructed.
+        PositionReconciliationStore()  # noqa: F841 - instantiate to verify import
+
+        logger.info(
+            "Durable state persistence wired: order ledger, intents, kill switch, "
+            "position reconciliation"
+        )
+    except Exception:  # pragma: no cover - defensive, never block startup
+        logger.exception("Durable state persistence wiring failed (system continues)")
 
     # Startup — register every default analyst (idempotent).
     added = register_default_agents()
@@ -176,9 +210,7 @@ async def lifespan(app: FastAPI):
         runtime = get_runtime()
         feed = MarketFeedLoop(
             queue=runtime.queue,
-            symbols=[
-                s.strip() for s in settings.market_feed_symbols.split(",") if s.strip()
-            ],
+            symbols=[s.strip() for s in settings.market_feed_symbols.split(",") if s.strip()],
             timeframe=settings.market_feed_timeframe,
             interval_s=settings.market_feed_interval_s,
             event_cooldown_s=settings.market_feed_event_cooldown_s,
@@ -336,9 +368,7 @@ app = FastAPI(
 # site. We therefore always declare explicit origins from CORS_ALLOWED_ORIGINS
 # (comma-separated) and keep credentials enabled only against those origins.
 _cors_origins = [
-    origin.strip()
-    for origin in settings.cors_allowed_origins.split(",")
-    if origin.strip()
+    origin.strip() for origin in settings.cors_allowed_origins.split(",") if origin.strip()
 ]
 app.add_middleware(
     CORSMiddleware,

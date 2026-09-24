@@ -154,6 +154,7 @@ class PositionMonitor:
         atr_lookback: int = 14,
         close_detector: Any = None,
         default_contract_size: float = 100000.0,
+        reconciliation_store: Any = None,
     ) -> None:
         """Initialize the Position Monitor.
 
@@ -168,11 +169,17 @@ class PositionMonitor:
             default_contract_size: Fallback contract size used only when the
                 broker symbol spec cannot be read (audit P2-7). Overridable so
                 non-FX instruments are not mis-scaled.
+            reconciliation_store: Optional durable
+                :class:`PositionReconciliationStore` (B-5). When supplied the
+                last-seen SL/TP/volume maps are restored on startup and persisted
+                after each change detection, so reconciliation state survives a
+                restart. Optional so existing callers are unaffected.
         """
         self.mt5_connector = mt5_connector
         self.atr_lookback = max(1, atr_lookback)
         self.close_detector = close_detector
         self.default_contract_size = float(default_contract_size)
+        self.reconciliation_store = reconciliation_store
 
         # In-memory state tracking
         self._position_history: dict[int, list[PositionSnapshot]] = {}
@@ -181,6 +188,15 @@ class PositionMonitor:
         self._last_volume: dict[int, float] = {}
         self._entry_prices: dict[int, float] = {}
         self._breakeven_applied: set[int] = set()
+
+        # Restore reconciliation state from the durable store (fail-safe).
+        if self.reconciliation_store is not None:
+            try:
+                restored = self.reconciliation_store.load_snapshot()
+                if restored is not None:
+                    self._last_sl, self._last_tp, self._last_volume = restored
+            except Exception:  # noqa: BLE001 - restore must never break init
+                logger.warning("Could not restore position reconciliation state")
 
     # -------------------------------------------------------------------------
     # Internal Helpers
@@ -506,6 +522,15 @@ class PositionMonitor:
                 self._last_sl.pop(ticket, None)
                 self._last_tp.pop(ticket, None)
                 self._last_volume.pop(ticket, None)
+
+        # Persist reconciliation snapshot (fail-safe).
+        if self.reconciliation_store is not None:
+            try:
+                self.reconciliation_store.save_snapshot(
+                    self._last_sl, self._last_tp, self._last_volume
+                )
+            except Exception:  # noqa: BLE001 - persist must never break detection
+                logger.warning("Could not persist position reconciliation snapshot")
 
         return events
 

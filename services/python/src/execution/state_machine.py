@@ -16,7 +16,7 @@ step.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 
 class OrderState(str, Enum):
@@ -59,22 +59,55 @@ def next_allowed(state: OrderState) -> Tuple[OrderState, ...]:
 # In production this would be persisted; for tests a module‑level dict is enough.
 _order_store: Dict[str, Dict] = {}
 
+# Optional durable store (B-5). When set the ledger is persisted across restarts;
+# when None the module degrades to in-memory only (backward compatible).
+_store: Optional[Any] = None
+
+
+def set_store(store: Optional[Any]) -> None:
+    """Attach a durable :class:`OrderStateStore` (or ``None`` to detach).
+
+    On attach, previously persisted orders are loaded into the in-memory
+    ledger so state survives a restart.
+    """
+    global _store
+    _store = store
+    if store is not None:
+        try:
+            persisted = store.all_orders()
+            for intent_id, record in persisted.items():
+                _order_store[intent_id] = dict(record)
+        except Exception:  # noqa: BLE001 - persistence must never break state machine
+            pass
+
+
+def get_store() -> Optional[Any]:
+    """Return the currently attached durable store (or ``None``)."""
+    return _store
+
 
 def get_order(intent_id: str) -> Dict:
     """Retrieve order record by *intent_id*; raise KeyError if missing."""
     return _order_store[intent_id]
 
 
-def set_order(intent_id: str, state: OrderState, extra: Dict | None = None) -> None:
+def set_order(intent_id: str, state: OrderState | str, extra: Dict | None = None) -> None:
     """Create or update an order record.
 
     ``extra`` can contain arbitrary metadata (e.g., timestamps, broker ticket).
+    ``state`` accepts an :class:`OrderState` or a plain state string.
     """
+    state_value = state.value if isinstance(state, OrderState) else str(state)
     record = _order_store.get(intent_id, {"intent_id": intent_id})
-    record.update({"state": state.value})
+    record.update({"state": state_value})
     if extra:
         record.update(extra)
     _order_store[intent_id] = record
+    if _store is not None:
+        try:
+            _store.set_order(intent_id, state_value, extra=extra)
+        except Exception:  # noqa: BLE001 - persistence must never break state machine
+            pass
 
 
 def reset_store() -> None:

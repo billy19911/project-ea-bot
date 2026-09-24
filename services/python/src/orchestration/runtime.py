@@ -106,7 +106,17 @@ def _build_position_monitor() -> Optional[Any]:
         from review.close_detector import PositionCloseDetector
 
         detector = PositionCloseDetector(on_close=on_position_closed)
-        return PositionMonitor(close_detector=detector)
+
+        # Wire durable position reconciliation store (B-5, fail-safe).
+        reconciliation_store = None
+        try:
+            from persistence import PositionReconciliationStore
+
+            reconciliation_store = PositionReconciliationStore()
+        except Exception:  # noqa: BLE001 - store is optional
+            pass
+
+        return PositionMonitor(close_detector=detector, reconciliation_store=reconciliation_store)
     except Exception as exc:  # noqa: BLE001 - monitoring must never block wiring
         logger.warning("Position monitor not wired: %s", exc)
         return None
@@ -136,9 +146,7 @@ def _notify_cycle_result(result: Any) -> None:
             if get_signal_lifecycle().observe_cycle_result(payload):
                 return
         except Exception as exc:  # noqa: BLE001 - fall back to the digest
-            logger.warning(
-                "Signal lifecycle failed (%s); using digest", type(exc).__name__
-            )
+            logger.warning("Signal lifecycle failed (%s); using digest", type(exc).__name__)
 
         try:
             from telegram.notifier import queue_pipeline_result
@@ -147,9 +155,7 @@ def _notify_cycle_result(result: Any) -> None:
 
         queue_pipeline_result(payload)
     except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
-        logger.warning(
-            "Telegram cycle report failed (%s); cycle unaffected", type(exc).__name__
-        )
+        logger.warning("Telegram cycle report failed (%s); cycle unaffected", type(exc).__name__)
 
 
 class _RecordingPipelineProxy:
@@ -163,9 +169,7 @@ class _RecordingPipelineProxy:
     recording failure never affects the cycle).
     """
 
-    def __init__(
-        self, pipeline: TradingPipeline, runtime: "OrchestrationRuntime"
-    ) -> None:
+    def __init__(self, pipeline: TradingPipeline, runtime: "OrchestrationRuntime") -> None:
         self._pipeline = pipeline
         self._runtime = runtime
 
@@ -246,9 +250,7 @@ class OrchestrationRuntime:
         # Audit P1-2: per-dependency circuit breakers (§24) + kill switch, wired
         # into the pipeline as the execution-critical dependency guard. An open
         # EXECUTION breaker or an engaged kill switch blocks new orders.
-        self.execution_guard = (
-            execution_guard if execution_guard is not None else ExecutionGuard()
-        )
+        self.execution_guard = execution_guard if execution_guard is not None else ExecutionGuard()
         self.pipeline = (
             pipeline
             if pipeline is not None
@@ -300,10 +302,7 @@ class OrchestrationRuntime:
         Prefers the scheduler's runner (kept in sync in production) but falls back
         to the runtime-owned runner when a custom scheduler was injected.
         """
-        return (
-            getattr(self.scheduler, "reconciliation_runner", None)
-            or self.reconciliation
-        )
+        return getattr(self.scheduler, "reconciliation_runner", None) or self.reconciliation
 
     @staticmethod
     def _default_reconciliation_providers() -> Any:
@@ -382,9 +381,7 @@ class OrchestrationRuntime:
         # Audit P1-4: normalise volume to the broker's lot step and round prices
         # to the symbol digits when a spec is available. Fail-safe: a spec lookup
         # failure leaves the order unchanged.
-        order_builder = OrderBuilder(
-            symbol_spec_provider=_default_symbol_spec_provider()
-        )
+        order_builder = OrderBuilder(symbol_spec_provider=_default_symbol_spec_provider())
         # One-entry policy (default ON): while one of OUR positions (matched by
         # entry magic) is open, new entries are blocked. The magic id labels our
         # orders so we never count a foreign EA's positions.
@@ -492,9 +489,7 @@ class OrchestrationRuntime:
                     # Refused by the safety layer before any dispatch (e.g.
                     # "EXECUTION NOT ARMED") — expected while unarmed; counting
                     # it would self-lock the loop after three valid signals.
-                    logger.info(
-                        "Execution refused before dispatch — breaker unaffected."
-                    )
+                    logger.info("Execution refused before dispatch — breaker unaffected.")
                     return
                 # An order build/execution error — count toward the breaker.
                 detail = str(record.get("error") or "execution error")
@@ -554,9 +549,7 @@ class OrchestrationRuntime:
         except Exception as exc:  # noqa: BLE001 - never break the loop
             logger.warning("Signal price observation failed (%s)", type(exc).__name__)
 
-    def _record_trace(
-        self, record: dict[str, Any], trace_id: Optional[str] = None
-    ) -> None:
+    def _record_trace(self, record: dict[str, Any], trace_id: Optional[str] = None) -> None:
         """Record the cycle into the bounded trace store (fail-safe)."""
         try:
             self.traces.record_pipeline_result(record, trace_id=trace_id)
@@ -616,9 +609,7 @@ class OrchestrationRuntime:
                 },
             )
             graph.add_node(stage.RESULT, {"status": record.get("status", "")})
-        except (
-            Exception
-        ) as exc:  # noqa: BLE001 - observability must never break a cycle
+        except Exception as exc:  # noqa: BLE001 - observability must never break a cycle
             logger.warning("Failed to record decision graph: %s", exc)
 
     def recent_decisions(self, limit: int = 50) -> list[dict[str, Any]]:
