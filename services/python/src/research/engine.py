@@ -15,6 +15,8 @@ from typing import Any
 
 from trading.indicators import atr_series, ema
 
+from .store import ResearchStore
+
 logger = logging.getLogger(__name__)
 
 # Default train/test split ratio for walk-forward validation (§18 / P2-24).
@@ -100,12 +102,108 @@ class BacktestResult:
 class ResearchEngine:
     """Engine for hypothesis creation, experimentation, backtesting, comparison."""
 
-    def __init__(self) -> None:
-        """Initialise the research engine."""
+    def __init__(self, store: ResearchStore | None = None) -> None:
+        """Initialise the research engine.
+
+        Args:
+            store: Append-only JSONL store. ``None`` builds the default store
+                (``research_state.jsonl`` next to the Python service dir).
+                A store that cannot read/write degrades to memory-only — the
+                engine never raises because of persistence failures.
+        """
+        self._store = store if store is not None else ResearchStore()
         self._hypotheses: dict[str, Hypothesis] = {}
         self._strategy_versions: dict[str, StrategyVersion] = {}
         self._experiments: dict[str, Experiment] = {}
         self._backtest_results: dict[str, BacktestResult] = {}
+        self._run_provenance: dict[str, dict[str, Any]] = {}
+        self._hydrate()
+
+    # -- Persistence ----------------------------------------------------------
+
+    @property
+    def persisted(self) -> bool:
+        """True while the backing store accepts writes (False = memory-only)."""
+        return self._store.persisted
+
+    @property
+    def store_path(self) -> str:
+        """Path of the backing JSONL store (informational)."""
+        return str(self._store.path)
+
+    def _hydrate(self) -> None:
+        """Rebuild engine state from previously persisted store records.
+
+        Unknown record types and individually malformed payloads are skipped
+        (logged) so one bad line never blocks the rest of the state.
+        """
+        for record in self._store.replay():
+            record_type = record.get("type")
+            data = record.get("data")
+            if not isinstance(data, dict):
+                continue
+            try:
+                if record_type == "hypothesis":
+                    hypothesis = Hypothesis(
+                        id=str(data["id"]),
+                        name=str(data["name"]),
+                        description=str(data.get("description", "")),
+                        entry_rules=list(data.get("entry_rules") or []),
+                        exit_rules=list(data.get("exit_rules") or []),
+                        parameters=dict(data.get("parameters") or {}),
+                        created_at=datetime.fromisoformat(str(data["created_at"])),
+                    )
+                    self._hypotheses[hypothesis.id] = hypothesis
+                elif record_type == "strategy_version":
+                    version = StrategyVersion(
+                        version=str(data["version"]),
+                        parameters=dict(data.get("parameters") or {}),
+                        created_at=datetime.fromisoformat(str(data["created_at"])),
+                        description=str(data.get("description", "")),
+                    )
+                    self._strategy_versions[version.version] = version
+                elif record_type == "experiment":
+                    experiment = Experiment(
+                        id=str(data["id"]),
+                        name=str(data["name"]),
+                        strategy_version=str(data["strategy_version"]),
+                        parameters=dict(data.get("parameters") or {}),
+                        hypothesis_id=str(data["hypothesis_id"]),
+                        status=str(data.get("status", "pending")),
+                    )
+                    self._experiments[experiment.id] = experiment
+                elif record_type == "backtest_result":
+                    experiment_id = str(data["experiment_id"])
+                    self._backtest_results[experiment_id] = BacktestResult(
+                        total_trades=int(data.get("total_trades", 0)),
+                        win_rate=float(data.get("win_rate", 0.0)),
+                        profit_factor=float(data.get("profit_factor", 0.0)),
+                        sharpe_ratio=float(data.get("sharpe_ratio", 0.0)),
+                        max_drawdown=float(data.get("max_drawdown", 0.0)),
+                        expectation=float(data.get("expectation", 0.0)),
+                        net_pnl=float(data.get("net_pnl", 0.0)),
+                        trades=list(data.get("trades") or []),
+                        walk_forward=dict(data.get("walk_forward") or {}),
+                    )
+                elif record_type == "run_provenance":
+                    experiment_id = str(data["experiment_id"])
+                    provenance = dict(data.get("provenance") or {})
+                    if provenance:
+                        self._run_provenance[experiment_id] = provenance
+            except (KeyError, TypeError, ValueError) as exc:
+                logger.warning(f"Skipping malformed research record ({record_type}): {exc}")
+
+    def record_run_provenance(self, experiment_id: str, provenance: dict[str, Any]) -> None:
+        """Persist provenance (symbol/timeframe/bars/account) for a run."""
+        self._run_provenance[experiment_id] = provenance
+        self._store.append(
+            "run_provenance",
+            {"experiment_id": experiment_id, "provenance": provenance},
+        )
+
+    def get_run_provenance(self, experiment_id: str) -> dict[str, Any] | None:
+        """Return the stored provenance for an experiment, or None."""
+        return self._run_provenance.get(experiment_id)
 
     # -- Hypothesis management ------------------------------------------------
 
@@ -140,6 +238,9 @@ class ResearchEngine:
             created_at=datetime.now(timezone.utc),
         )
         self._hypotheses[hypothesis_id] = hypothesis
+        self._store.append(
+            "hypothesis", {**hypothesis.__dict__, "created_at": hypothesis.created_at.isoformat()}
+        )
         logger.info(f"Created hypothesis '{name}' ({hypothesis_id})")
         return hypothesis
 
@@ -174,6 +275,9 @@ class ResearchEngine:
             description=description,
         )
         self._strategy_versions[version] = strategy
+        self._store.append(
+            "strategy_version", {**strategy.__dict__, "created_at": strategy.created_at.isoformat()}
+        )
         logger.info(f"Created strategy version '{version}'")
         return strategy
 
@@ -227,6 +331,7 @@ class ResearchEngine:
             status="pending",
         )
         self._experiments[experiment_id] = experiment
+        self._store.append("experiment", experiment.__dict__.copy())
         logger.info(f"Created experiment '{experiment.name}' ({experiment_id})")
         return experiment
 
@@ -362,6 +467,7 @@ class ResearchEngine:
             )
             self._backtest_results[experiment.id] = result
             experiment.status = "completed"
+            self._persist_result(experiment.id, result)
             return result
 
         # Merge parameters: strategy version + experiment overrides
@@ -391,10 +497,34 @@ class ResearchEngine:
         )
         self._backtest_results[experiment.id] = result
         experiment.status = "completed"
+        self._persist_result(experiment.id, result)
         logger.info(
             f"Backtest completed: {result.total_trades} trades, " f"PnL={result.net_pnl:.2f}"
         )
         return result
+
+    def _persist_result(self, experiment_id: str, result: BacktestResult) -> None:
+        """Append a completed backtest result (metrics + trades + walk-forward)."""
+        self._store.append(
+            "backtest_result",
+            {
+                "experiment_id": experiment_id,
+                "total_trades": result.total_trades,
+                "win_rate": result.win_rate,
+                "profit_factor": result.profit_factor,
+                "sharpe_ratio": result.sharpe_ratio,
+                "max_drawdown": result.max_drawdown,
+                "expectation": result.expectation,
+                "net_pnl": result.net_pnl,
+                "trades": result.trades,
+                "walk_forward": result.walk_forward,
+            },
+        )
+        # The experiment's status flipped to "completed" — persist that too so a
+        # restarted engine sees the same status without re-running anything.
+        experiment = self._experiments.get(experiment_id)
+        if experiment is not None:
+            self._store.append("experiment", experiment.__dict__.copy())
 
     # -- Simulation internals -------------------------------------------------
 

@@ -19,7 +19,8 @@
  */
 
 import Head from 'next/head';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import Pagination, { usePagination } from '../../components/ui/pagination';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
@@ -32,7 +33,10 @@ type Overview = {
   completed: number;
   engine_note?: string;
   data_note?: string;
+  persisted?: boolean;
 };
+
+type Ranking = { ranked: Array<{ rank: number; name: string; metrics: Metrics; provenance: Provenance | null }>; insufficient_sample: Array<{ name: string; reason: string; metrics: Metrics }> };
 
 type Metrics = {
   total_trades: number;
@@ -58,8 +62,12 @@ type WalkForwardWindow = { name: string; range: number[]; metrics: Metrics };
 
 type Provenance = {
   symbol: string;
+  symbol_resolved?: string | null;
   timeframe: string;
   bars: number;
+  requested_bars?: number;
+  first_bar_time?: string | null;
+  last_bar_time?: string | null;
   ran_at: string;
   source: string;
   account: { login: number | null; server: string | null; currency: string | null } | null;
@@ -125,6 +133,9 @@ export default function Home() {
   const [cmpA, setCmpA] = useState('');
   const [cmpB, setCmpB] = useState('');
   const [cmpResult, setCmpResult] = useState<Record<string, unknown> | null>(null);
+  const [ranking, setRanking] = useState<Ranking | null>(null);
+  const [rankingError, setRankingError] = useState('');
+  const pagination = usePagination(experiments.length, 25);
 
   const refresh = useCallback(async () => {
     try {
@@ -145,14 +156,40 @@ export default function Home() {
       setOverview(ov);
       setExperiments(ex.experiments ?? []);
       setError('');
-      const withResults = (ex.experiments ?? []).filter((e) => e.has_result);
-      setSelectedId((current) => current || withResults[0]?.id || ex.experiments?.[0]?.id || '');
+      const rows = ex.experiments ?? [];
+      const ids = new Set(rows.map((r) => r.id));
+      const withResults = rows.filter((e) => e.has_result);
+      // Keep the current selection when it still exists; only reset to a valid
+      // id when the underlying list changed underneath us.
+      setSelectedId((current) => (ids.has(current) ? current : withResults[0]?.id || rows[0]?.id || ''));
+      const resultIds = new Set(withResults.map((r) => r.id));
+      setCmpA((current) => (resultIds.has(current) ? current : ''));
+      setCmpB((current) => (resultIds.has(current) ? current : ''));
     } catch {
       setError('Layanan riset tidak menjawab — periksa Python API (:8000).');
     }
   }, []);
 
+  const refreshRanking = useCallback(async () => {
+    try {
+      const res = await apiFetch('/research/ranking');
+      if (!res.ok) {
+        setRanking(null);
+        setRankingError('Peringkat tidak tersedia — layanan riset tidak menjawab.');
+        return;
+      }
+      setRanking((await res.json()) as Ranking);
+      setRankingError('');
+    } catch {
+      setRanking(null);
+      setRankingError('Peringkat tidak tersedia — layanan riset tidak menjawab.');
+    }
+  }, []);
+
   useAutoRefresh(refresh);
+  useEffect(() => {
+    if (tab === 'Perbandingan') void refreshRanking();
+  }, [tab, refreshRanking]);
 
   const flash = (message: string) => {
     setNotice(message);
@@ -277,6 +314,17 @@ export default function Home() {
         <div className={styles.pageBody}>
           {error && <div className={styles.noticeError}>{error}</div>}
           {notice && <div className={styles.notice}>{notice}</div>}
+          {overview &&
+            (overview.persisted ? (
+              <div className={styles.notice}>
+                State riset persisten — eksperimen &amp; hasil backtest bertahan setelah
+                restart layanan Python.
+              </div>
+            ) : (
+              <div className={styles.noticeError}>
+                State riset hanya di memori — hilang saat layanan Python restart.
+              </div>
+            ))}
 
           <nav className={styles.tabs}>
             {TABS.map((item) => (
@@ -360,11 +408,21 @@ export default function Home() {
                 <span className={styles.resultCount}>{experiments.length} eksperimen</span>
               </div>
               <ExperimentTable
-                items={experiments}
+                items={pagination.slice(experiments)}
                 onSelect={(id) => {
                   void loadDetail(id);
                 }}
               />
+              {experiments.length > 25 && (
+                <Pagination
+                  page={pagination.page}
+                  pageSize={pagination.pageSize}
+                  total={experiments.length}
+                  onPageChange={pagination.setPage}
+                  onPageSizeChange={pagination.setPageSize}
+                  unitLabel="eksperimen"
+                />
+              )}
               {detail && <DetailCard detail={detail} />}
             </>
           )}
@@ -468,6 +526,74 @@ export default function Home() {
                 </div>
               )}
               {cmpResult && <CompareCard result={cmpResult} />}
+
+              <div className={styles.sectionHead}>
+                <div>
+                  <h2>Peringkat (advisory)</h2>
+                  <p>
+                    Urut profit factor (tie-break PnL/unit), syarat minimal 10 trade.
+                    Hanya saran berbasis hasil backtest nyata — tidak pernah
+                    mengaktifkan atau mengubah strategi otomatis.
+                  </p>
+                </div>
+                <button className={styles.primary} onClick={() => void refreshRanking()}>
+                  Muat ulang peringkat
+                </button>
+              </div>
+              {rankingError && <div className={styles.noticeError}>{rankingError}</div>}
+              {ranking && ranking.ranked.length === 0 && !ranking.insufficient_sample.length && (
+                <div className={styles.empty}>
+                  Belum ada eksperimen dengan hasil backtest untuk diperingkat.
+                </div>
+              )}
+              {ranking && ranking.ranked.length > 0 && (
+                <div className={styles.tableCard}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Eksperimen</th>
+                        <th>Trades</th>
+                        <th>Win rate</th>
+                        <th>PF</th>
+                        <th>Sharpe</th>
+                        <th>PnL / unit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ranking.ranked.map((entry) => (
+                        <tr key={entry.rank}>
+                          <td>
+                            <strong>{entry.rank}</strong>
+                          </td>
+                          <td>{entry.name}</td>
+                          <td>{entry.metrics?.total_trades ?? '—'}</td>
+                          <td>{fmtPct(entry.metrics?.win_rate)}</td>
+                          <td>{fmt(entry.metrics?.profit_factor)}</td>
+                          <td>{fmt(entry.metrics?.sharpe_ratio)}</td>
+                          <td
+                            className={
+                              (entry.metrics?.net_pnl ?? 0) > 0 ? styles.positive : ''
+                            }
+                          >
+                            {fmt(entry.metrics?.net_pnl)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {ranking && ranking.insufficient_sample.length > 0 && (
+                <div className={styles.card}>
+                  <h3>Di luar peringkat (contoh tidak cukup)</h3>
+                  {ranking.insufficient_sample.map((entry) => (
+                    <p key={entry.name} className={styles.mutedText}>
+                      {entry.name} — {fmt(entry.metrics?.total_trades)} trade: {entry.reason}
+                    </p>
+                  ))}
+                </div>
+              )}
             </>
           )}
 
@@ -501,6 +627,8 @@ function ExperimentTable({ items, onSelect }: { items: ExperimentRow[]; onSelect
             <th>Status</th>
             <th>Trades</th>
             <th>Win rate</th>
+            <th>PF</th>
+            <th>Sharpe</th>
             <th>PnL / unit</th>
             <th>Max DD</th>
             <th></th>
@@ -529,6 +657,8 @@ function ExperimentTable({ items, onSelect }: { items: ExperimentRow[]; onSelect
               </td>
               <td>{item.metrics ? item.metrics.total_trades : '—'}</td>
               <td>{item.metrics ? fmtPct(item.metrics.win_rate) : '—'}</td>
+              <td>{item.metrics ? fmt(item.metrics.profit_factor) : '—'}</td>
+              <td>{item.metrics ? fmt(item.metrics.sharpe_ratio) : '—'}</td>
               <td
                 className={
                   item.metrics && (item.metrics.net_pnl ?? 0) > 0 ? styles.positive : ''

@@ -13,6 +13,7 @@ here:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -35,13 +36,24 @@ class _Bar:
 
 
 @pytest.fixture(autouse=True)
-def _reset_engine_state():
-    """Give every test a fresh engine + run registry (module-level singletons)."""
+def _reset_engine_state(tmp_path: Path):
+    """Give every test a fresh engine + run registry (module-level singletons).
+
+    Also points the persistence store at a throwaway path so tests never read
+    or write the operator's real research_state.jsonl.
+    """
     from src.research import endpoints as research_endpoints
 
+    state_path = tmp_path / "research_state.jsonl"
+    previous_state = os.environ.get("RESEARCH_STATE_PATH")
+    os.environ["RESEARCH_STATE_PATH"] = str(state_path)
     research_endpoints._engine = None
     research_endpoints._RUNS.clear()
     yield
+    if previous_state is None:
+        os.environ.pop("RESEARCH_STATE_PATH", None)
+    else:
+        os.environ["RESEARCH_STATE_PATH"] = previous_state
     research_endpoints._engine = None
     research_endpoints._RUNS.clear()
 
@@ -66,6 +78,42 @@ def test_overview_reports_real_counts_and_notes():
     # Honest notes must be present for the UI.
     assert "memori" in data["engine_note"]
     assert "read-only" in data["data_note"]
+
+
+def test_overview_reports_persistence_state(monkeypatch):
+    """Overview must honestly report whether state is persisted (JSONL) or not."""
+    from src.research import endpoints as research_endpoints
+
+    monkeypatch.setattr(research_endpoints, "_engine", None)
+    data = client.get("/research/overview").json()
+    assert data["persisted"] is True
+
+
+def test_backtest_provenance_records_requested_vs_actual_bars(monkeypatch):
+    """Provenance must carry requested vs actual bars plus first/last bar time."""
+    from datetime import datetime, timezone
+
+    class _TimedBar:
+        def __init__(self, close: float, idx: int) -> None:
+            self.close = close
+            self.time = datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp() + idx * 3600
+
+    closes = [100.0 + (i % 10) for i in range(120)]
+    bars = [_TimedBar(c, i) for i, c in enumerate(closes)]
+    monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+    monkeypatch.setattr(connector, "get_ohlc", lambda *a, **k: bars)
+    exp_id = _create_experiment()
+    res = client.post(
+        f"/research/experiments/{exp_id}/backtest",
+        json={"symbol": "XAUUSD", "timeframe": "H1", "bars": 300},
+    )
+    assert res.status_code == 200, res.text
+    provenance = res.json()["provenance"]
+    assert provenance["requested_bars"] == 300
+    assert provenance["bars"] == 120
+    assert provenance["source"] == "live"
+    assert provenance["first_bar_time"] == bars[0].time
+    assert provenance["last_bar_time"] == bars[-1].time
 
 
 def test_create_experiment_rejects_inverted_emas():
@@ -193,3 +241,59 @@ def test_compare_requires_results_and_is_json_safe(monkeypatch):
 
     same = client.post("/research/compare", json={"id_a": exp_a, "id_b": exp_a})
     assert same.status_code == 400
+
+
+def test_ranking_orders_and_splits_insufficient_sample():
+    """Two synthetic results: a strong 12-trade run ranks; a 5-trade run is split out."""
+    from datetime import datetime, timezone
+
+    from src.research.endpoints import _ensure_baseline, get_research_engine
+    from src.research.engine import BacktestResult
+
+    engine = get_research_engine()
+    hypothesis_id = _ensure_baseline(engine)
+    engine.create_strategy_version("strong", {"fast_ema_period": 2, "slow_ema_period": 4})
+    engine.create_strategy_version("weak", {"fast_ema_period": 2, "slow_ema_period": 4})
+    strong = engine.create_experiment(hypothesis_id, "strong")
+    weak = engine.create_experiment(hypothesis_id, "weak")
+
+    engine._backtest_results[strong.id] = BacktestResult(
+        total_trades=12,
+        win_rate=60.0,
+        profit_factor=2.5,
+        sharpe_ratio=1.0,
+        max_drawdown=5.0,
+        expectation=1.0,
+        net_pnl=120.0,
+        trades=[],
+        walk_forward={},
+    )
+    engine._backtest_results[weak.id] = BacktestResult(
+        total_trades=5,
+        win_rate=80.0,
+        profit_factor=4.0,
+        sharpe_ratio=1.0,
+        max_drawdown=1.0,
+        expectation=1.0,
+        net_pnl=50.0,
+        trades=[],
+        walk_forward={},
+    )
+    engine.record_run_provenance(
+        strong.id,
+        {
+            "symbol": "XAUUSD",
+            "source": "live",
+            "ran_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        },
+    )
+
+    data = client.get("/research/ranking").json()
+    assert data["advisory"] is True
+    assert len(data["ranked"]) == 1
+    assert data["ranked"][0]["id"] == strong.id
+    assert data["ranked"][0]["rank"] == 1
+    assert data["ranked"][0]["provenance"]["source"] == "live"
+    assert len(data["insufficient_sample"]) == 1
+    assert data["insufficient_sample"][0]["id"] == weak.id
+    assert "minimum 10" in data["insufficient_sample"][0]["reason"]

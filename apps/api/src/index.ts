@@ -929,6 +929,10 @@ app.get('/research/experiments', async (req, res) => {
   await sendProxy(res, '/research/experiments', undefined, req);
 });
 
+app.get('/research/ranking', async (req, res) => {
+  await sendProxy(res, '/research/ranking', undefined, req);
+});
+
 app.post('/research/experiments', authenticate, async (req, res) => {
   await sendPostProxy(res, '/research/experiments', req, req.body ?? {});
 });

@@ -20,6 +20,7 @@ real ``trading.indicators.ema``, default 3/8) — it fabricates no results.
 from __future__ import annotations
 
 import math
+import os
 import re
 import threading
 from datetime import datetime, timezone
@@ -29,6 +30,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .engine import BacktestResult, Experiment, ResearchEngine
+from .store import ResearchStore
 
 router = APIRouter(prefix="/research", tags=["research"])
 
@@ -120,7 +122,7 @@ def get_research_engine() -> ResearchEngine:
     global _engine
     with _engine_lock:
         if _engine is None:
-            engine = ResearchEngine()
+            engine = ResearchEngine(store=ResearchStore(os.environ.get("RESEARCH_STATE_PATH")))
             _ensure_baseline(engine)
             _engine = engine
         return _engine
@@ -234,8 +236,12 @@ def get_overview() -> dict[str, Any]:
             if baseline
             else None
         ),
+        "persisted": engine.persisted,
         "engine_note": (
-            "Hasil backtest disimpan di memori layanan Python — hilang saat " "layanan restart."
+            "Hasil backtest tersimpan di JSONL dan dipulihkan saat layanan restart; "
+            "memori tetap cache aktif."
+            if engine.persisted
+            else "Persistensi gagal; hasil hanya tersimpan di memori layanan Python."
         ),
         "data_note": (
             "Backtest memakai bar harga nyata dari terminal MT5 yang terpasang "
@@ -303,7 +309,7 @@ def get_experiment_detail(experiment_id: str) -> dict[str, Any]:
         "walk_forward": _sanitize(result.walk_forward) if result else None,
         "trades_total": len(result.trades) if result else 0,
         "trades_preview": _sanitize(result.trades[-TRADES_PREVIEW:]) if result else [],
-        "provenance": _RUNS.get(experiment_id),
+        "provenance": _RUNS.get(experiment_id) or engine.get_run_provenance(experiment_id),
     }
 
 
@@ -361,14 +367,19 @@ def run_experiment_backtest(experiment_id: str, payload: BacktestRequest) -> dic
 
     provenance = {
         "symbol": symbol,
+        "symbol_resolved": getattr(connector, "resolve_symbol", lambda value: None)(symbol),
         "timeframe": timeframe,
         "bars": len(closes),
         "requested_bars": payload.bars,
         "ran_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "source": "live",
         "account": _account_snapshot(),
+        "first_bar_time": getattr(bars[0], "time", None) if bars else None,
+        "last_bar_time": getattr(bars[-1], "time", None) if bars else None,
     }
+    provenance = _sanitize(provenance)
     _RUNS[experiment_id] = provenance
+    engine.record_run_provenance(experiment_id, provenance)
 
     return {
         "ok": True,
@@ -378,6 +389,45 @@ def run_experiment_backtest(experiment_id: str, payload: BacktestRequest) -> dic
         "walk_forward": _sanitize(result.walk_forward),
         "trades_total": len(result.trades),
         "trades_preview": _sanitize(result.trades[-TRADES_PREVIEW:]),
+    }
+
+
+@router.get("/ranking")
+def rank_experiments() -> dict[str, Any]:
+    """Rank completed experiments by profit factor, then net PnL."""
+    engine = get_research_engine()
+    ranked: list[dict[str, Any]] = []
+    insufficient: list[dict[str, Any]] = []
+    for experiment in engine.list_experiments():
+        result = engine.get_backtest_result(experiment.id)
+        if result is None:
+            continue
+        entry = {
+            "id": experiment.id,
+            "name": experiment.name,
+            "metrics": _metrics_dict(result),
+            "provenance": engine.get_run_provenance(experiment.id),
+        }
+        if result.total_trades < 10:
+            entry["reason"] = "total_trades kurang dari minimum 10"
+            insufficient.append(entry)
+        else:
+            ranked.append(entry)
+    ranked.sort(
+        key=lambda item: (
+            -(item["metrics"]["profit_factor"] or 0),
+            -(item["metrics"]["net_pnl"] or 0),
+        )
+    )
+    for rank, entry in enumerate(ranked, 1):
+        entry["rank"] = rank
+    return {
+        "ok": True,
+        "advisory": True,
+        "note": "Peringkat informasional; tidak pernah mengaktifkan strategi otomatis.",
+        "rule": "profit_factor desc, tie-break net_pnl desc, minimum 10 trades",
+        "ranked": ranked,
+        "insufficient_sample": insufficient,
     }
 
 
