@@ -6,21 +6,27 @@
 
 ---
 
-## B-1 — Python API is unauthenticated in the shipped runtime (arm switch exposed)
+## B-1 — Python API is unauthenticated in the shipped runtime (arm switch exposed) ✅ FIXED
 
 - **ID:** B-1
 - **Severity:** P0
 - **Component:** `services/python/src/main.py`, `services/python/src/security/api_key.py`, `.env.runtime`
-- **Evidence:**
+- **Status:** ✅ **FIXED** (operational: `.env.runtime` patched 2026-09-24)
+- **Evidence (before fix):**
   - `main.py:288-308` installs `ApiKeyMiddleware` **only if `settings.python_api_key`** is truthy.
-  - `.env.runtime` does **not** define `PYTHON_API_KEY` (verified via key-name enumeration).
+  - `.env.runtime` did **not** define `PYTHON_API_KEY` (verified via key-name enumeration).
   - No endpoint uses FastAPI `Depends`/`Security` for auth (grep-verified).
   - `mt5/endpoints.py:85` `POST /mt5/terminals/arm` — the switch that arms live execution — is subject only to that conditional middleware.
-- **Impact:** Anyone able to reach the Python port can arm live execution, run pipeline cycles, toggle circuit breakers, and change settings without a token.
-- **Reproduction:**
+- **Impact (before fix):** Anyone able to reach the Python port can arm live execution, run pipeline cycles, toggle circuit breakers, and change settings without a token.
+- **Reproduction (before fix):**
   1. Start the Python service with the shipped `.env.runtime` (no `PYTHON_API_KEY`).
   2. `POST http://<host>:8787/mt5/terminals/arm` with `{"armed": true}` → accepted without credentials (subject to config `execution:true`).
-- **Recommended Fix:** Set `PYTHON_API_KEY` in the production environment and forward it from the Node client (see B-2); or bind to a private Unix socket / loopback and make the Node API the only reachable caller. Add per-endpoint auth as defense in depth.
+- **Fix applied:** `.env.runtime` now defines `PYTHON_API_KEY` (32-byte urlsafe token, generated `python -c "import secrets; print(secrets.token_urlsafe(32))"`). File is gitignored; key never committed. `scripts/start-all.ps1` line 118 exports `$env:PYTHON_API_KEY` → `Export-CommonEnv` forwards to both Python and Node child processes. Node client (`apps/api/src/pythonClient.ts`) injects `x-api-key` header (B-2 fix, commit `021565e`).
+- **Verification (2026-09-24):**
+  - Python `/decisions` unauth → `401`, with `x-api-key` → `200` ✅
+  - Python `/mt5/terminals/arm` unauth → `401` (fail-closed) ✅
+  - Node `/decisions` with Bearer token → `200` (Node injects `x-api-key` to Python automatically) ✅
+  - Warning `"PYTHON_API_KEY is not set"` count = `0` ✅
 
 ---
 
@@ -129,7 +135,7 @@
 
 | ID | Severity | Status |
 |---|---|---|
-| B-1 | P0 | Open (operational: set `PYTHON_API_KEY`) |
+| B-1 | P0 | ✅ Fixed (operational: `.env.runtime` 2026-09-24) |
 | B-2 | P0 | ✅ Fixed (`021565e`) |
 | B-3 | P0 (structural) | ✅ Fixed (`02a577c`) |
 | B-4 | P0 | Open (operational: live broker validation) |
@@ -138,4 +144,4 @@
 | B-7 | P0 (safety, latent) | ✅ Fixed (`a2a9258`) |
 | B-8 | P1 (entry functionality) | ✅ Fixed (`a2a9258`) |
 
-**Remaining open blockers (B-1, B-4)** are operational/deployment actions (authentication enforcement, live validation) that require production configuration or a real broker — they are not code defects that can be safely fixed in an isolated change. **B-2 (Node→Python key forwarding) fixed in commit `021565e`; B-5 (durable state persistence) fixed in commit `58d99be`.**
+**Remaining open blocker (B-4)** is an operational/deployment action (live broker validation) that requires a real broker — it is not a code defect that can be safely fixed in an isolated change. **B-1 (auth enforcement) closed operationally 2026-09-24; B-2 (Node→Python key forwarding) fixed in commit `021565e`; B-5 (durable state persistence) fixed in commit `58d99be`.**
