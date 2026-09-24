@@ -249,3 +249,42 @@ test('putJson preserves upstream 4xx body (validation errors reach the UI)', asy
     delete process.env.PYTHON_SERVICE_URL;
   }
 });
+
+test('sends X-API-Key header when PYTHON_API_KEY is set', async () => {
+  let seenApiKey;
+  const server = await withServer((req, res) => {
+    seenApiKey = req.headers['x-api-key'];
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+  });
+  setBaseUrl(server.baseUrl);
+  process.env.PYTHON_API_KEY = 'test-secret-123';
+  try {
+    const result = await getJson('/secure');
+    assert.equal(result.ok, true);
+    assert.equal(seenApiKey, 'test-secret-123');
+  } finally {
+    await server.close();
+    delete process.env.PYTHON_SERVICE_URL;
+    delete process.env.PYTHON_API_KEY;
+  }
+});
+
+test('does not send X-API-Key when PYTHON_API_KEY is unset', async () => {
+  let seenApiKey;
+  const server = await withServer((req, res) => {
+    seenApiKey = req.headers['x-api-key'];
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+  });
+  setBaseUrl(server.baseUrl);
+  delete process.env.PYTHON_API_KEY;
+  try {
+    const result = await getJson('/public');
+    assert.equal(result.ok, true);
+    assert.equal(seenApiKey, undefined);
+  } finally {
+    await server.close();
+    delete process.env.PYTHON_SERVICE_URL;
+  }
+});

@@ -69,6 +69,16 @@ function resolveTimeoutMs(): number {
 }
 
 /**
+ * Pre-shared key used to authenticate Node → Python requests when the Python
+ * service is configured with `PYTHON_API_KEY`. Read per request (like the
+ * base URL) so env changes take effect without a restart; empty string when
+ * unset or blank → no header sent (dev mode, Python middleware allows through).
+ */
+function resolveApiKey(): string {
+  return (process.env.PYTHON_API_KEY ?? '').trim();
+}
+
+/**
  * Perform a GET request against the Python service and parse the JSON body.
  *
  * Never throws: transport failures, timeouts, non-2xx responses and malformed
@@ -167,7 +177,13 @@ function request<T>(
       resolve(result);
     };
 
-    const requestHeaders: RequestHeaders = { accept: 'application/json', ...headers };
+    const requestHeaders: RequestHeaders = { accept: 'application/json' };
+    const apiKey = resolveApiKey();
+    if (apiKey) {
+      requestHeaders['x-api-key'] = apiKey;
+    }
+    Object.assign(requestHeaders, headers);
+    
     let payload: string | undefined;
     if (method === 'POST' || method === 'PUT') {
       payload = JSON.stringify(body ?? {});
