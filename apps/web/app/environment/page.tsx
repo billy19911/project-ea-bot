@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
 import styles from '@/components/ops.module.css';
@@ -39,9 +40,7 @@ export default function EnvironmentPage() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useAutoRefresh(load);
 
   return (
     <AppShell activeKey="environment" eyebrow="Xynn / Safety" title="Environment">

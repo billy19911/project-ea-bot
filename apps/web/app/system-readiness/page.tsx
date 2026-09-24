@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import AppShell from '../../components/AppShell';
 import { apiFetch } from '../../lib/api';
+import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import Pagination from '../../components/ui/pagination';
 import styles from './page.module.css';
 
@@ -30,14 +31,15 @@ export default function SystemReadinessPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
-  useEffect(() => {
-    apiFetch('/certify').then(async res => {
-      if (res.ok) {
-        const data = await res.json();
-        setComponents(data.components || []);
-      }
-    });
+  const load = useCallback(async () => {
+    const res = await apiFetch('/certify');
+    if (res.ok) {
+      const data = await res.json();
+      setComponents(data.components || []);
+    }
   }, []);
+
+  useAutoRefresh(load);
 
   const pageCount = Math.max(1, Math.ceil(components.length / pageSize));
   const safePage = Math.min(page, pageCount);

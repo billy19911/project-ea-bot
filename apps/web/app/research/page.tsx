@@ -19,9 +19,10 @@
  */
 
 import Head from 'next/head';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
+import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 
 type Overview = {
@@ -151,9 +152,7 @@ export default function Home() {
     }
   }, []);
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  useAutoRefresh(refresh);
 
   const flash = (message: string) => {
     setNotice(message);

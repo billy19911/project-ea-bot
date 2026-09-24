@@ -1,6 +1,7 @@
 ﻿'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
 import Pagination from '@/components/ui/pagination';
@@ -43,9 +44,7 @@ export default function ModelsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useAutoRefresh(load);
 
   const failures = records.filter(r => r.error).length;
   const avgLatency =

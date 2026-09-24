@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
+import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 import Pagination from '../../components/ui/pagination';
 
@@ -115,8 +116,7 @@ export default function AIControlPage() {
   const [advisorBusy, setAdvisorBusy] = useState(false);
   const [advisorResult, setAdvisorResult] = useState<AdvisorResult | null>(null);
 
-  useEffect(() => {
-    const load = async () => {
+  const load = useCallback(async () => {
       try {
         const res = await apiFetch(`/ai-control/status`);
         if (!res.ok) {
@@ -161,12 +161,9 @@ export default function AIControlPage() {
       } finally {
         setLoading(false);
       }
-    };
-    load();
-
-    // Polling is not yet scheduled here; the page fetches on mount. WebSocket
-    // streaming from the Python service is a future enhancement.
   }, []);
+
+  useAutoRefresh(load);
 
   const totalTokens = models.reduce((sum, m) => sum + m.promptTokens + m.completionTokens, 0);
   const totalCost = models.reduce((sum, m) => sum + m.cost, 0);

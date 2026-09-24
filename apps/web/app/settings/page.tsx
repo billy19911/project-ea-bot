@@ -23,6 +23,7 @@ import Head from 'next/head';
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import styles from '../page.module.css';
 import { apiFetch } from '../../lib/api';
+import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 
 type SourceState = 'live' | 'unavailable';
@@ -96,9 +97,7 @@ export default function SettingsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useAutoRefresh(load);
 
   useEffect(() => {
     let cancelled = false;

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
 import styles from '@/components/ops.module.css';
@@ -48,9 +49,7 @@ export default function CertificationPage() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useAutoRefresh(load);
 
   return (
     <AppShell activeKey="certification" eyebrow="Xynn / System" title="Production Certification">

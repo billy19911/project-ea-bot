@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
 import { useLiveQuotes } from '@/lib/useLiveQuotes';
 import Pagination from '@/components/ui/pagination';
 import styles from '../overview.module.css';
@@ -92,9 +93,7 @@ export default function OverviewPage() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useAutoRefresh(load);
 
   const acct = data?.account ?? null;
 

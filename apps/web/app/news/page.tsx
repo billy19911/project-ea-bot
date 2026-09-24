@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import AppShell from '../../components/AppShell';
 import { apiFetch } from '../../lib/api';
+import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import Pagination from '../../components/ui/pagination';
 import styles from './page.module.css';
 
@@ -95,9 +96,7 @@ export default function NewsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useAutoRefresh(load);
 
   // Group by day → tabs.
   const tabs: Tab[] = useMemo(() => {

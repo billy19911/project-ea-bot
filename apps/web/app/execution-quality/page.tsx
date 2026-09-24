@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
 import styles from '@/components/ops.module.css';
@@ -29,9 +30,7 @@ export default function ExecutionQualityPage() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useAutoRefresh(load);
 
   const metrics = data?.metrics ?? {};
   const num = (k: string) => (typeof metrics[k] === 'number' ? Number(metrics[k]) : null);

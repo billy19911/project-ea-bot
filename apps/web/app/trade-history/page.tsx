@@ -1,6 +1,7 @@
 ﻿'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
 import AppShell from '@/components/AppShell';
 import { DataTable } from '@/components/ui/data-table';
 import { apiFetch } from '@/lib/api';
@@ -73,9 +74,7 @@ export default function TradeHistoryPage() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useAutoRefresh(load);
 
   return (
     <AppShell activeKey="trade-history" eyebrow="Xynn / Trade History" title="Positions & Trades">

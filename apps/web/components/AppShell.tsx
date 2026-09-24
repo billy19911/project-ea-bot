@@ -60,6 +60,7 @@ const NAV_GROUPS = [
     label: 'Intelligence',
     items: [
       { key: 'ai-control', label: 'AI Control', href: '/ai-control', icon: 'cpu' },
+      { key: 'agents', label: 'Agents', href: '/agents', icon: 'users' },
       { key: 'models', label: 'Models', href: '/models', icon: 'layers' },
       { key: 'strategy', label: 'Strategy', href: '/strategy', icon: 'trend' },
     ],
@@ -178,6 +179,14 @@ function Icon({ name }: IconProps) {
         <>
           <path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
           <path d="M8 7h8M8 11h8M8 15h5" />
+        </>
+      )}
+      {name === 'users' && (
+        <>
+          <path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" />
+          <path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
         </>
       )}
     </svg>

@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
+import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 import Pagination from '../../components/ui/pagination';
 
@@ -63,7 +64,6 @@ export default function StrategyCenterPage() {
   const selected = selectedId ? strategies.find((s) => s.id === selectedId) : null;
 
   const loadStrategies = useCallback(async () => {
-    setLoading(true);
     setError('');
     try {
       const res = await apiFetch('/strategies');
@@ -80,9 +80,7 @@ export default function StrategyCenterPage() {
     }
   }, []);
 
-  useEffect(() => {
-    loadStrategies();
-  }, [loadStrategies]);
+  useAutoRefresh(loadStrategies);
 
   const toggleActive = async (id: string) => {
     const strat = strategies.find((s) => s.id === id);

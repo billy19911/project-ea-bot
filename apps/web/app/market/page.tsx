@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
+import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import { useLiveQuotes, type LivePosition } from '../../lib/useLiveQuotes';
 import AppShell from '../../components/AppShell';
 import Pagination from '../../components/ui/pagination';
@@ -116,7 +117,6 @@ export default function MarketPage() {
 
   const load = useCallback(async () => {
     const seq = ++reqSeq.current;
-    setLoading(true);
     setError(null);
     try {
       const qs = new URLSearchParams({ symbol, timeframe, bars: String(bars) });
@@ -154,7 +154,7 @@ export default function MarketPage() {
     }
   }, [symbol, timeframe, bars]);
 
-  useEffect(() => { load(); }, [load]);
+  useAutoRefresh(load);
 
   // Lazy-load older history when the chart is panned to its left edge. Fetches
   // the previous window (`before` = oldest loaded bar) and PREPENDS it to every

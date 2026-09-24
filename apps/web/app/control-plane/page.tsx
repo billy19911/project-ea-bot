@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch, generateTraceId, getAuthToken } from '../../lib/api';
+import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 import DailyReport from '../../components/DailyReport';
 import Pagination from '../../components/ui/pagination';
@@ -256,7 +257,6 @@ export default function ControlPlanePage() {
   }, []);
 
   const fetchAll = useCallback(async () => {
-    setLoading(true);
     const [overview, trading, positions, market, aiControl, tasks, decisions, execution, audit, health, committee, telegram, providers, models, learning, reconciliation, mt5Mode, mt5Terminals] = await Promise.all([
       fetchJson('/system/overview'),
       fetchJson('/trading/overview'),
@@ -281,9 +281,7 @@ export default function ControlPlanePage() {
     setLoading(false);
   }, [fetchJson]);
 
-  useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
+  useAutoRefresh(fetchAll);
 
   const showNotice = (msg: string) => {
     setNotice(msg);

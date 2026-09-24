@@ -1,6 +1,7 @@
 ﻿'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
 import Pagination from '@/components/ui/pagination';
@@ -61,9 +62,7 @@ export default function CircuitBreakerPage() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useAutoRefresh(load);
 
   const transitions = state?.recent ?? [];
   const pageCount = Math.max(1, Math.ceil(transitions.length / pageSize));

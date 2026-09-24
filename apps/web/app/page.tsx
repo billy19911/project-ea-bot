@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useAutoRefresh } from '@/lib/useAutoRefresh';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
 import Pagination from '@/components/ui/pagination';
@@ -55,7 +56,6 @@ export default function OverviewPage() {
   const [pageSize, setPageSize] = useState(10);
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       const [ovRes, decRes] = await Promise.all([
         apiFetch('/trading/overview'),
@@ -75,9 +75,7 @@ export default function OverviewPage() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useAutoRefresh(load);
 
   const acct = data?.account ?? null;
   const totalPnl = (data?.recent_trades ?? []).reduce((s, t) => s + (t.pnl || 0), 0);
