@@ -70,14 +70,16 @@
 
 ---
 
-## B-5 — Order/risk state is not durable across restart
+## B-5 — Order/risk state is not durable across restart ✅ FIXED
 
 - **ID:** B-5
 - **Severity:** P1
 - **Component:** `services/python/src/execution/state_machine.py`, `services/python/src/execution/intents.py`, `services/python/src/risk/kill_switch.py`, `services/python/src/monitoring/position_monitor.py`
-- **Evidence:** All four stores are module-level in-memory dicts; comments explicitly note "In production this would be persisted." Restart resets a TRIGGERED/LOCKED kill switch to ACTIVE and clears the order ledger.
+- **Status:** ✅ **FIXED** (commit `58d99be`)
+- **Evidence (before fix):** All four stores are module-level in-memory dicts; comments explicitly note "In production this would be persisted." Restart resets a TRIGGERED/LOCKED kill switch to ACTIVE and clears the order ledger.
 - **Impact:** Restart can lose execution/risk state, mis-drive reconciliation (empty internal ledger), and reset an engaged kill switch — contradicting the restart-recovery safety claim.
-- **Recommended Fix:** Persist the order state machine, kill-switch state, and last reconciliation snapshot to the existing store (JSONL/DB). This is the previously **deferred P2-15**.
+- **Fix applied:** Four new append-only JSONL stores (`persistence/order_state_store.py`, `intent_store.py`, `kill_switch_store.py`, `position_reconciliation_store.py`) mirror the existing `JsonlLessonStore` pattern (stdlib only, cache+disk, fail-safe). `main.py` lifespan wires the three global stores after `JsonlLessonStore`; `orchestration/runtime.py` injects the `PositionReconciliationStore` into `PositionMonitor`. On restart, each store reloads its cache from disk, restoring the order ledger, intent registry, kill-switch state, and last reconciliation snapshot. Corrupt JSONL lines are skipped (warning logged); unwritable paths degrade to cache-only; every persistence call is wrapped in `try/except` so a disk error can never break the execution/risk path. `store=None` preserves backward compat (in-memory only).
+- **Tests:** `tests/persistence/` (20 tests: restart survival × 4, fail-safe corrupt-skip × 4, unwritable degrade × 1, backward compat × 4, integration × 7); full suite 2102 passed, no regressions. `black --line-length 100` ✅, `isort` ✅, `flake8 --max-line-length=100 --extend-ignore=E203,W503` ✅.
 
 ---
 
@@ -131,9 +133,9 @@
 | B-2 | P0 | ✅ Fixed (`021565e`) |
 | B-3 | P0 (structural) | ✅ Fixed (`02a577c`) |
 | B-4 | P0 | Open (operational: live broker validation) |
-| B-5 | P1 | Open (durable state) |
+| B-5 | P1 | ✅ Fixed (`58d99be`) |
 | B-6 | P1 | ✅ Fixed (`02a577c`) |
 | B-7 | P0 (safety, latent) | ✅ Fixed (`a2a9258`) |
 | B-8 | P1 (entry functionality) | ✅ Fixed (`a2a9258`) |
 
-**Remaining open blockers (B-1, B-4, B-5)** are operational/deployment actions (authentication enforcement, live validation, durable persistence) that require production configuration or a real broker — they are not code defects that can be safely fixed in an isolated change. **B-2 (Node→Python key forwarding) fixed in commit `021565e`.**
+**Remaining open blockers (B-1, B-4)** are operational/deployment actions (authentication enforcement, live validation) that require production configuration or a real broker — they are not code defects that can be safely fixed in an isolated change. **B-2 (Node→Python key forwarding) fixed in commit `021565e`; B-5 (durable state persistence) fixed in commit `58d99be`.**
