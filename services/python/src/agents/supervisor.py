@@ -70,6 +70,32 @@ def normalize_agent_output(result: Any, agent_name: str = "") -> dict[str, Any]:
     return out
 
 
+def build_display_agent_results(results: dict[str, Any]) -> dict[str, Any]:
+    """Flatten department-lead ``specialist_results`` into a display dict.
+
+    Committee UI needs one bubble per contributing agent: the lead first
+    (dispatch order preserved), then each of its specialists in the lead's
+    own ``specialist_results`` order. Specialists are defensive-normalized
+    (signal/confidence/reasons/agent) on a copy — the nested lead results
+    passed to synthesis/risk-gate are never mutated. Leads without
+    ``specialist_results`` and records from older cycles degrade gracefully.
+    """
+    display = dict(results)
+    for lead_result in results.values():
+        if not isinstance(lead_result, dict):
+            continue
+        specs = lead_result.get("specialist_results")
+        if not isinstance(specs, dict) or not specs:
+            continue
+        for name, spec in specs.items():
+            if not isinstance(spec, dict):
+                continue
+            if name in display:
+                continue  # never overwrite a lead/top-level entry
+            display[name] = normalize_agent_output(spec, name)
+    return display
+
+
 def _record_activity(name: str, signal: str, confidence: float, error: bool = False) -> None:
     """Best-effort record of one agent run for realtime metrics (fail-safe)."""
     try:
@@ -537,12 +563,18 @@ class SupervisorAgent(BaseAgent):
         # (never an unvalidated order).
         synthesis, proposal = self._synthesise(event_type, context, results)
 
+        # Display view: expand each department lead into its contributing
+        # specialists so the committee UI shows the whole rapat. This is the
+        # ONLY change to the record — synthesis above (and the risk gate,
+        # routing, EPIC 01) still consume the lead-level ``results`` unchanged.
+        display_results = build_display_agent_results(results)
+
         return {
             "agent": self.name,
             "event_type": event_type,
             "overall_signal": overall_signal,
             "overall_confidence": overall_confidence,
-            "agent_results": results,
+            "agent_results": display_results,
             "summary": "; ".join(summary_reasons),
             "skipped_agents": skipped,
             "token_used": self.token_used,

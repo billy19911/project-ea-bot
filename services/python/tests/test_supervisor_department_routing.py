@@ -53,11 +53,15 @@ def test_supervisor_routes_to_department_lead():
     )
     # Supervisor should have called the lead, not the specialist directly
     assert "market_lead" in result["agent_results"]
-    assert "technical" not in result["agent_results"]
+    # Specialists are flattened into agent_results for committee DISPLAY
+    # (one bubble per contributor) — still sourced from the lead's nested run.
+    assert "technical" in result["agent_results"]
+    assert list(result["agent_results"])[0] == "market_lead"
 
     # Lead should have delegated to the specialist internally
     lead_result = result["agent_results"]["market_lead"]
     assert lead_result["specialist_results"]["technical"]["signal"] == "BULLISH"
+    assert result["agent_results"]["technical"]["signal"] == "BULLISH"
 
 
 def test_supervisor_all_match_includes_multiple_department_leads():
