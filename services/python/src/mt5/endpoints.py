@@ -52,7 +52,13 @@ class SelectTerminalRequest(BaseModel):
 
 
 class ArmRequest(BaseModel):
-    """Body for POST /mt5/terminals/arm."""
+    """Body for POST /mt5/terminals/arm (legacy, no id in path)."""
+
+    armed: bool
+
+
+class ArmTerminalRequest(BaseModel):
+    """Body for POST /mt5/terminals/{terminal_id}/arm (B-9)."""
 
     armed: bool
 
@@ -84,15 +90,38 @@ async def select_terminal(request: SelectTerminalRequest):
 
 @router.post("/terminals/arm")
 async def arm_terminal(request: ArmRequest):
-    """Arm or disarm real order execution for the selected terminal.
+    """Arm or disarm real order execution for the selected terminal (legacy).
 
     Arming requires: a running selected terminal, ``"execution": true`` in
     mt5_terminals.json, and an active attachment. Returns 400 otherwise.
+    Kept for backward compat — the per-terminal endpoint below is preferred.
     """
     result = terminal_manager.arm_execution(request.armed)
     if not result.get("ok"):
         return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=result)
     result["execution_armed"] = terminal_manager.is_execution_armed()
+    return result
+
+
+@router.post("/terminals/{terminal_id}/arm")
+async def arm_terminal_by_id(terminal_id: str, request: ArmTerminalRequest):
+    """Arm or disarm ONE specific terminal (multi-terminal B-9).
+
+    Arming requires: the terminal is in the registry, currently running, and
+    marked ``"execution": true`` in mt5_terminals.json (LIVE accounts such as
+    ``vito2`` ship with ``execution: false`` and can never be armed). Returns
+    400 otherwise. Disarm is always allowed (fail-safe).
+
+    Multiple terminals can be armed simultaneously; the execution engine loops
+    ``get_armed_terminals()``. The process-wide MT5 binding still only
+    delivers an order to the attached terminal, so ``execution_permitted()``
+    additionally requires the attached terminal to be armed.
+    """
+    result = terminal_manager.arm_terminal(terminal_id, request.armed)
+    if not result.get("ok"):
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=result)
+    result["execution_armed"] = terminal_manager.is_execution_armed()
+    result["armed_terminals"] = terminal_manager.get_armed_terminals()
     return result
 
 

@@ -936,6 +936,25 @@ app.post('/mt5/terminals/arm', authenticate, async (req, res) => {
   await sendPostProxy(res, '/mt5/terminals/arm', req, req.body ?? {});
 });
 
+// B-9: per-terminal arm/disarm (multi-terminal execution). One row in the
+// dashboard = one call; multiple terminals can be armed simultaneously.
+// Terminal ids come from mt5_terminals.json (or auto-detected `auto-<pid>`).
+app.post('/mt5/terminals/:terminalId/arm', authenticate, async (req, res) => {
+  const log = (req as any).log;
+  const terminalId = String(req.params.terminalId || '').trim();
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(terminalId)) {
+    res.status(400).json({ error: 'invalid_terminal_id' });
+    return;
+  }
+  log.info({ terminalId }, 'mt5.terminals.arm.by_id');
+  await sendPostProxy(
+    res,
+    `/mt5/terminals/${encodeURIComponent(terminalId)}/arm`,
+    req,
+    req.body ?? {},
+  );
+});
+
 // Probe akun (F3): read-only, memindahkan binding sementara lalu memulihkannya
 // di Python. Timeout lebih longgar karena menyentuh beberapa terminal sekaligus.
 app.post('/mt5/terminals/probe', authenticate, async (req, res) => {

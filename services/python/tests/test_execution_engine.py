@@ -586,3 +586,118 @@ def test_require_approval_defaults_off_for_backwards_compatibility(monkeypatch):
 
     # No approval required by default → simulated success unchanged.
     assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# B-9 — multi-terminal execution routing
+# ---------------------------------------------------------------------------
+
+
+def test_get_armed_terminal_ids_returns_list(monkeypatch):
+    """The engine queries mt5.terminals.get_armed_terminals() (B-9)."""
+
+    def mock_get_armed():
+        return ["bil2", "demo2"]
+
+    def mock_execution_permitted():
+        return True
+
+    import sys
+    import types
+
+    fake_terms = types.ModuleType("mt5.terminals")
+    fake_terms.get_armed_terminals = mock_get_armed
+    fake_terms.execution_permitted = mock_execution_permitted
+    monkeypatch.setitem(sys.modules, "mt5.terminals", fake_terms)
+
+    engine = ExecutionEngine(mt5_connector=None)
+    armed = engine._get_armed_terminal_ids()
+    assert armed == ["bil2", "demo2"]
+
+
+def test_get_armed_terminal_ids_is_pure_routing_info(monkeypatch):
+    """The armed list is NOT filtered by the attachment gate.
+
+    ``_get_armed_terminal_ids`` reports which terminals the operator armed;
+    whether the process-wide binding may actually send is a separate fail-closed
+    check (``_native_execution_armed`` / ``execution_permitted``).
+    """
+
+    def mock_get_armed():
+        return ["bil2"]
+
+    def mock_execution_permitted():
+        return False
+
+    import sys
+    import types
+
+    fake_terms = types.ModuleType("mt5.terminals")
+    fake_terms.get_armed_terminals = mock_get_armed
+    fake_terms.execution_permitted = mock_execution_permitted
+    monkeypatch.setitem(sys.modules, "mt5.terminals", fake_terms)
+
+    engine = ExecutionEngine(mt5_connector=None)
+    armed = engine._get_armed_terminal_ids()
+    assert armed == ["bil2"]
+    # The attachment gate independently refuses to send.
+    assert engine._native_execution_armed() is False
+
+
+def test_native_execution_armed_true_when_attached_terminal_armed(monkeypatch):
+    """The process-wide MT5 binding gate (execution_permitted) stays fail-closed."""
+
+    def mock_execution_permitted():
+        return True
+
+    import sys
+    import types
+
+    fake_terms = types.ModuleType("mt5.terminals")
+    fake_terms.execution_permitted = mock_execution_permitted
+    monkeypatch.setitem(sys.modules, "mt5.terminals", fake_terms)
+
+    engine = ExecutionEngine(mt5_connector=None)
+    assert engine._native_execution_armed() is True
+
+
+def test_native_execution_armed_false_by_default(monkeypatch):
+    """With no terminals armed, native execution stays blocked."""
+
+    def mock_execution_permitted():
+        return False
+
+    import sys
+    import types
+
+    fake_terms = types.ModuleType("mt5.terminals")
+    fake_terms.execution_permitted = mock_execution_permitted
+    monkeypatch.setitem(sys.modules, "mt5.terminals", fake_terms)
+
+    engine = ExecutionEngine(mt5_connector=None)
+    assert engine._native_execution_armed() is False
+
+
+def test_execution_blocked_logs_armed_terminal_ids(monkeypatch, caplog):
+    """When execution is blocked, the log includes which terminals are armed."""
+    import sys
+    import types
+
+    fake_terms = types.ModuleType("mt5.terminals")
+    fake_terms.get_armed_terminals = lambda: ["bil2", "demo2"]
+    fake_terms.execution_permitted = lambda: False
+    monkeypatch.setitem(sys.modules, "mt5.terminals", fake_terms)
+
+    fake_mt5 = types.ModuleType("MetaTrader5")
+    monkeypatch.setitem(sys.modules, "MetaTrader5", fake_mt5)
+
+    engine = ExecutionEngine(mt5_connector=None)
+    req = OrderRequest(symbol="EURUSD", order_type="BUY", volume=1.0)
+
+    with caplog.at_level("WARNING"):
+        result = engine.execute_order(req)
+
+    assert result.success is False
+    assert result.error_code == 403
+    assert "EXECUTION NOT ARMED" in result.error_message
+    assert any("Armed terminal ids:" in rec.message for rec in caplog.records)

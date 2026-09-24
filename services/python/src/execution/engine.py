@@ -719,13 +719,41 @@ class ExecutionEngine:
             position_opened=self.sync_position(request.symbol),
         )
 
-    def _native_execution_armed(self) -> bool:
-        """Return True only when an operator-armed execution terminal is present.
+    def _get_armed_terminal_ids(self) -> list[str]:
+        """Return the terminal ids explicitly armed by the operator (B-9).
 
         A native ``mt5.order_send`` is a real broker order, so it must be gated
-        by the operator arm switch (``mt5.terminals.execution_permitted``), which
-        is itself fail-closed. Any doubt → False. Both import paths are checked
-        because the FastAPI app imports ``src.mt5`` while tests import ``mt5``.
+        by the operator arm switch. In the multi-terminal model each terminal
+        carries its own arm flag; ``mt5.terminals.get_armed_terminals()``
+        returns the ids that are armed AND eligible (config ``execution: true``
+        AND running). Fail-closed: any doubt → empty list.
+
+        Both import paths are checked because the FastAPI app imports
+        ``src.mt5`` while tests import ``mt5``.
+        """
+        for mod_name in ("mt5.terminals", "src.mt5.terminals"):
+            try:
+                import importlib
+
+                terms = importlib.import_module(mod_name)
+                return list(terms.get_armed_terminals())
+            except ImportError:
+                continue
+            except Exception as exc:  # noqa: BLE001 - any doubt → stay blocked
+                logger.warning("Armed-terminal check failed (blocked): %s", exc)
+                return []
+        return []
+
+    def _native_execution_armed(self) -> bool:
+        """Return True only when an armed terminal IS the attached binding.
+
+        The MetaTrader5 binding is process-wide: a native ``order_send`` lands
+        on whichever terminal the binding is attached to. An armed terminal
+        that is NOT attached can never receive the order, so the gate stays
+        fail-closed until the attached terminal is itself armed and eligible
+        (``mt5.terminals.execution_permitted``). Any doubt → False. Both import
+        paths are checked because the FastAPI app imports ``src.mt5`` while
+        tests import ``mt5``.
         """
         for mod_name in ("mt5.terminals", "src.mt5.terminals"):
             try:
@@ -834,10 +862,12 @@ class ExecutionEngine:
             # decision below (audit P0-2).
             logger.debug("Native MT5 library not available; no live broker path.")
         else:
+            armed_ids = self._get_armed_terminal_ids()
             if not self._native_execution_armed():
                 logger.warning(
                     "Execution blocked: no armed MT5 execution terminal — native "
-                    "order_send is disabled (fail-closed)."
+                    "order_send is disabled (fail-closed). Armed terminal ids: %s",
+                    armed_ids,
                 )
                 return {
                     "success": False,
@@ -849,6 +879,14 @@ class ExecutionEngine:
                     ),
                     "price": None,
                 }
+            # Log which terminal(s) are armed (Phase 1: order goes to the first
+            # armed terminal, which is also the attached binding; Phase 2 will
+            # loop multiple armed terminals).
+            if armed_ids:
+                logger.info(
+                    "Executing order on armed terminal(s): %s (attached binding receives order)",
+                    armed_ids,
+                )
             try:
                 order_type_mt5 = (
                     mt5.ORDER_TYPE_BUY

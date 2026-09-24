@@ -36,11 +36,17 @@ def _clean_state():
     """Reset module-level manager state around every test."""
     terminals._selected_id = None
     terminals._execution_armed = False
+    terminals._terminal_states = {}
+    terminals._mirror_selected = None
+    terminals._mirror_armed = False
     terminals._account_cache = {}
     terminals._account_cache_ts = None
     yield
     terminals._selected_id = None
     terminals._execution_armed = False
+    terminals._terminal_states = {}
+    terminals._mirror_selected = None
+    terminals._mirror_armed = False
     terminals._account_cache = {}
     terminals._account_cache_ts = None
 
@@ -376,6 +382,215 @@ class TestExecutionPermitted:
         # The terminal process dies.
         monkeypatch.setattr(terminals, "scan_running_terminals", lambda: [])
         assert terminals.execution_permitted() is False
+
+
+# ---------------------------------------------------------------------------
+# F4b — per-terminal arm switch (multi-terminal B-9)
+# ---------------------------------------------------------------------------
+
+# Two terminals, BOTH execution-enabled so multiple can be armed at once.
+CONFIG_MULTI = {
+    "terminals": [
+        {"id": "bil2", "label": "BIL 2", "path": r"C:\mt\BIL2\terminal64.exe", "execution": True},
+        {
+            "id": "demo2",
+            "label": "DEMO 2",
+            "path": r"C:\mt\DEMO2\terminal64.exe",
+            "execution": True,
+        },
+        {
+            "id": "vito2",
+            "label": "VITO 2",
+            "path": r"C:\mt\VITO2\terminal64.exe",
+            "execution": False,
+        },
+    ]
+}
+
+
+def _two_running():
+    """scan_running_terminals replacement with BIL2 + DEMO2 running."""
+    return lambda: [
+        {"pid": 10, "exe": r"C:\mt\BIL2\terminal64.exe", "folder": r"C:\mt\BIL2"},
+        {"pid": 20, "exe": r"C:\mt\DEMO2\terminal64.exe", "folder": r"C:\mt\DEMO2"},
+    ]
+
+
+class TestArmTerminal:
+    def test_arm_single_terminal(self, monkeypatch, tmp_path):
+        _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
+        monkeypatch.setattr(
+            terminals,
+            "scan_running_terminals",
+            lambda: [{"pid": 10, "exe": r"C:\mt\BIL2\terminal64.exe", "folder": r"C:\mt\BIL2"}],
+        )
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+
+        result = terminals.arm_terminal("bil2", True)
+        assert result["ok"] is True
+        assert result["terminal_id"] == "bil2"
+        assert result["armed"] is True
+        assert terminals.get_armed_terminals() == ["bil2"]
+        assert terminals.is_execution_armed() is True
+
+    def test_arm_multiple_terminals(self, monkeypatch, tmp_path):
+        """Arming a second terminal must NOT disarm the first (B-9 core)."""
+        _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
+        monkeypatch.setattr(terminals, "scan_running_terminals", _two_running())
+        # Binding can only be attached to one terminal at a time; both are
+        # "running" so arming each succeeds independently.
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+
+        assert terminals.arm_terminal("bil2", True)["ok"] is True
+
+        # Second terminal: pretend the binding is now attached to DEMO2.
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\DEMO2"))
+        assert terminals.arm_terminal("demo2", True)["ok"] is True
+
+        armed = terminals.get_armed_terminals()
+        assert set(armed) == {"bil2", "demo2"}
+        assert terminals.is_execution_armed() is True
+
+    def test_disarm_one_keeps_other_armed(self, monkeypatch, tmp_path):
+        _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
+        monkeypatch.setattr(terminals, "scan_running_terminals", _two_running())
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+
+        assert terminals.arm_terminal("bil2", True)["ok"] is True
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\DEMO2"))
+        assert terminals.arm_terminal("demo2", True)["ok"] is True
+
+        # Disarm just bil2.
+        result = terminals.arm_terminal("bil2", False)
+        assert result["ok"] is True
+        assert result["armed"] is False
+        assert terminals.get_armed_terminals() == ["demo2"]
+
+    def test_arm_execution_false_terminal_rejected(self, monkeypatch, tmp_path):
+        """vito2 (LIVE) has execution:false → arm must be rejected (SAFETY)."""
+        _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
+        monkeypatch.setattr(
+            terminals,
+            "scan_running_terminals",
+            lambda: [{"pid": 30, "exe": r"C:\mt\VITO2\terminal64.exe", "folder": r"C:\mt\VITO2"}],
+        )
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\VITO2"))
+
+        result = terminals.arm_terminal("vito2", True)
+        assert result["ok"] is False
+        assert result["armed"] is False
+        assert "execution" in result["message"].lower()
+        assert terminals.get_armed_terminals() == []
+
+    def test_arm_unknown_terminal_rejected(self, monkeypatch, tmp_path):
+        _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
+        monkeypatch.setattr(terminals, "scan_running_terminals", lambda: [])
+        monkeypatch.setattr(terminals, "_detect_attached_path", lambda: None)
+
+        result = terminals.arm_terminal("ghost", True)
+        assert result["ok"] is False
+        assert "not found" in result["message"].lower()
+
+    def test_arm_not_running_rejected(self, monkeypatch, tmp_path):
+        _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
+        monkeypatch.setattr(terminals, "scan_running_terminals", lambda: [])
+        monkeypatch.setattr(terminals, "_detect_attached_path", lambda: None)
+
+        result = terminals.arm_terminal("bil2", True)
+        assert result["ok"] is False
+        assert "not running" in result["message"].lower()
+
+    def test_arm_not_attached_rejected(self, monkeypatch, tmp_path):
+        """Running + eligible but the binding is elsewhere → reject."""
+        _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
+        monkeypatch.setattr(terminals, "scan_running_terminals", _two_running())
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+
+        result = terminals.arm_terminal("demo2", True)
+        assert result["ok"] is False
+        assert "attached" in result["message"].lower()
+        assert terminals.get_armed_terminals() == []
+
+    def test_get_armed_terminals_filters_ineligible(self, monkeypatch, tmp_path):
+        """An armed terminal that stops running is dropped from the list."""
+        _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
+        monkeypatch.setattr(
+            terminals,
+            "scan_running_terminals",
+            lambda: [{"pid": 10, "exe": r"C:\mt\BIL2\terminal64.exe", "folder": r"C:\mt\BIL2"}],
+        )
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+        assert terminals.arm_terminal("bil2", True)["ok"] is True
+        assert terminals.get_armed_terminals() == ["bil2"]
+
+        monkeypatch.setattr(terminals, "scan_running_terminals", lambda: [])
+        assert terminals.get_armed_terminals() == []
+
+    def test_armed_flag_surface_in_list_terminals(self, monkeypatch, tmp_path):
+        _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
+        monkeypatch.setattr(
+            terminals,
+            "scan_running_terminals",
+            lambda: [{"pid": 10, "exe": r"C:\mt\BIL2\terminal64.exe", "folder": r"C:\mt\BIL2"}],
+        )
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+        terminals.arm_terminal("bil2", True)
+
+        view = terminals.list_terminals()
+        by_id = {t["id"]: t for t in view["terminals"]}
+        assert by_id["bil2"]["armed"] is True
+        assert by_id["demo2"]["armed"] is False
+        assert view["armed_terminals"] == ["bil2"]
+
+    def test_select_disarms_all_terminals(self, monkeypatch, tmp_path):
+        """Switching the selected terminal disarms EVERY armed terminal."""
+        _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
+        monkeypatch.setattr(terminals, "scan_running_terminals", _two_running())
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+        terminals.arm_terminal("bil2", True)
+
+        real_connector = importlib.import_module("mt5.connector")
+        monkeypatch.setattr(real_connector, "shutdown", lambda: None)
+        monkeypatch.setattr(real_connector, "use_live_data_mode", lambda path=None: True)
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\DEMO2"))
+
+        result = terminals.select_terminal("demo2")
+        assert result["ok"] is True
+        assert terminals.get_armed_terminals() == []
+        assert terminals.is_execution_armed() is False
+
+
+class TestArmTerminalEndpoint:
+    def test_arm_endpoint_arms_specific_terminal(self, monkeypatch, tmp_path):
+        from mt5.endpoints import arm_terminal_by_id as endpoint
+
+        _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
+        monkeypatch.setattr(
+            terminals,
+            "scan_running_terminals",
+            lambda: [{"pid": 10, "exe": r"C:\mt\BIL2\terminal64.exe", "folder": r"C:\mt\BIL2"}],
+        )
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+
+        result = _run(endpoint("bil2", type("R", (), {"armed": True})()))
+        assert result["ok"] is True
+        assert result["armed"] is True
+        assert result["execution_armed"] is True
+        assert result["armed_terminals"] == ["bil2"]
+
+    def test_arm_endpoint_rejects_ineligible(self, monkeypatch, tmp_path):
+        from mt5.endpoints import arm_terminal_by_id as endpoint
+
+        _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
+        monkeypatch.setattr(
+            terminals,
+            "scan_running_terminals",
+            lambda: [{"pid": 30, "exe": r"C:\mt\VITO2\terminal64.exe", "folder": r"C:\mt\VITO2"}],
+        )
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\VITO2"))
+
+        result = _run(endpoint("vito2", type("R", (), {"armed": True})()))
+        assert getattr(result, "status_code", None) == 400
 
 
 # ---------------------------------------------------------------------------

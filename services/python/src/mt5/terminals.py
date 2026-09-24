@@ -35,6 +35,8 @@ __all__ = [
     "list_terminals",
     "select_terminal",
     "arm_execution",
+    "arm_terminal",
+    "get_armed_terminals",
     "is_execution_armed",
     "execution_permitted",
     "scan_running_terminals",
@@ -47,6 +49,9 @@ __all__ = [
 _DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "mt5_terminals.json"
 
 # Manager state (module-level, process-wide).
+# Per-terminal state: {"armed": bool, "selected": bool}
+_terminal_states: dict[str, dict[str, Any]] = {}
+# Backward-compat globals (synced with _terminal_states)
 _selected_id: Optional[str] = None
 _execution_armed: bool = False
 
@@ -59,6 +64,71 @@ _account_cache_ts: Optional[str] = None
 # operation that MOVES it (select, arm, probe) takes this lock — one binding
 # operation at a time, and a probe can never interleave with a switch.
 _binding_lock = threading.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Per-terminal state helpers
+# ---------------------------------------------------------------------------
+
+
+def _state_for(terminal_id: str) -> dict[str, Any]:
+    """Return the mutable state dict for a terminal, creating it on demand."""
+    st = _terminal_states.get(terminal_id)
+    if st is None:
+        st = {"armed": False, "selected": False}
+        _terminal_states[terminal_id] = st
+    return st
+
+
+# Last values written to the legacy globals by THIS module. A difference
+# between the global and its mirror means external code (legacy callers,
+# tests) assigned the global directly — ``_reconcile_globals`` then pulls that
+# write into ``_terminal_states`` before the states are pushed back.
+_mirror_selected: Optional[str] = None
+_mirror_armed: bool = False
+
+
+def _sync_backcompat_globals() -> None:
+    """Push ``_terminal_states`` into the legacy module globals (and mirrors).
+
+    ``_selected_id``/``_execution_armed`` stay readable for older call sites
+    and tests; they are derived, never authoritative.
+    """
+    global _selected_id, _execution_armed, _mirror_selected, _mirror_armed
+
+    _selected_id = next((tid for tid, st in _terminal_states.items() if st.get("selected")), None)
+    _execution_armed = any(st.get("armed") for st in _terminal_states.values())
+    _mirror_selected = _selected_id
+    _mirror_armed = _execution_armed
+
+
+def _reconcile_globals() -> None:
+    """Reconcile direct writes to the legacy globals into ``_terminal_states``.
+
+    - ``_selected_id`` changed externally → that terminal becomes selected.
+    - ``_execution_armed`` changed externally to True → arm the selected
+      terminal (legacy single-switch semantics).
+    - ``_execution_armed`` changed externally to False → the old global switch
+      was turned OFF → disarm everything (fail-safe).
+
+    Always finishes by pushing the canonical state back (mirror stays in sync).
+    """
+    if _selected_id != _mirror_selected:
+        new_sel = _selected_id
+        for tid, st in list(_terminal_states.items()):
+            st["selected"] = tid == new_sel
+        if new_sel is not None:
+            _state_for(new_sel)["selected"] = True
+
+    if _execution_armed != _mirror_armed:
+        if _execution_armed:
+            if _selected_id is not None:
+                _state_for(_selected_id)["armed"] = True
+        else:
+            for st in _terminal_states.values():
+                st["armed"] = False
+
+    _sync_backcompat_globals()
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +249,9 @@ def _detect_attached_path() -> Optional[str]:
 
 def list_terminals() -> dict[str, Any]:
     """Return the terminal registry merged with live process/attach status."""
+    # Pull any direct external writes to the legacy globals into the canonical
+    # state before building the view (legacy single-switch compat).
+    _reconcile_globals()
     config = load_config()
     running = scan_running_terminals()
     running_by_folder = {_norm(r["folder"]): r for r in running}
@@ -193,6 +266,7 @@ def list_terminals() -> dict[str, Any]:
         proc = running_by_folder.get(key)
         if proc:
             matched_running.add(key)
+        st = _terminal_states.get(t["id"]) or {}
         entries.append(
             {
                 "id": t["id"],
@@ -204,7 +278,8 @@ def list_terminals() -> dict[str, Any]:
                 "running": proc is not None,
                 "pid": proc["pid"] if proc else None,
                 "attached": bool(attached_norm and attached_norm == key),
-                "selected": t["id"] == _selected_id,
+                "selected": bool(st.get("selected")),
+                "armed": bool(st.get("armed")),
                 "account": _account_cache.get(key),
             }
         )
@@ -215,6 +290,7 @@ def list_terminals() -> dict[str, Any]:
         if key in matched_running:
             continue
         auto_id = f"auto-{r['pid']}"
+        st = _terminal_states.get(auto_id) or {}
         entries.append(
             {
                 "id": auto_id,
@@ -226,15 +302,25 @@ def list_terminals() -> dict[str, Any]:
                 "running": True,
                 "pid": r["pid"],
                 "attached": bool(attached_norm and attached_norm == key),
-                "selected": auto_id == _selected_id,
+                "selected": bool(st.get("selected")),
+                "armed": bool(st.get("armed")),
                 "account": _account_cache.get(key),
             }
         )
+
+    # Armed terminals are derived from the entries we just built (avoids a
+    # recursive call back into list_terminals from get_armed_terminals).
+    armed_terminals = [
+        e["id"]
+        for e in entries
+        if e.get("armed") and e.get("execution_allowed") and e.get("running")
+    ]
 
     return {
         "terminals": entries,
         "selected_id": _selected_id,
         "execution_armed": _execution_armed,
+        "armed_terminals": armed_terminals,
         "attached_path": attached_folder,
         "accounts_probed_at": _account_cache_ts,
     }
@@ -246,22 +332,26 @@ def sync_selection_from_attached() -> Optional[str]:
     Called once after the startup attach so the dashboard immediately shows
     which terminal the binding is on, without a manual selection step.
     """
-    global _selected_id
-
     attached = _detect_attached_path()
     if not attached:
         return None
     key = _norm(attached)
 
+    def _mark_selected(tid: str) -> str:
+        for other, st in _terminal_states.items():
+            if other != tid:
+                st["selected"] = False
+        _state_for(tid)["selected"] = True
+        _sync_backcompat_globals()
+        return tid
+
     for t in load_config():
         if _norm(ntpath.dirname(t["path"])) == key:
-            _selected_id = t["id"]
-            return _selected_id
+            return _mark_selected(t["id"])
 
     for r in scan_running_terminals():
         if _norm(r["folder"]) == key:
-            _selected_id = f"auto-{r['pid']}"
-            return _selected_id
+            return _mark_selected(f"auto-{r['pid']}")
     return None
 
 
@@ -318,7 +408,9 @@ def restore_saved_selection() -> Optional[str]:
         if entry is None or not entry["running"]:
             return None
         # Already attached to the right terminal — nothing to do.
-        if entry["attached"] and _selected_id == saved:
+        if entry["attached"] and (
+            _selected_id == saved or (_terminal_states.get(saved) or {}).get("selected")
+        ):
             return saved
         result = _select_terminal_locked(saved)
         return result.get("selected_id") if result.get("ok") else None
@@ -380,7 +472,11 @@ def probe_accounts() -> dict[str, Any]:
     """
     global _account_cache, _account_cache_ts
 
-    if _execution_armed:
+    # Fail-closed refusal: ANY armed terminal blocks the probe (it temporarily
+    # moves the process-wide binding). The raw legacy flag is checked first,
+    # BEFORE any reconcile, so a directly-assigned ``_execution_armed = True``
+    # (legacy callers/tests) is honoured even with no per-terminal state.
+    if _execution_armed or is_execution_armed():
         return {
             "ok": False,
             "message": (
@@ -507,8 +603,6 @@ def select_terminal(terminal_id: str) -> dict[str, Any]:
 
 def _select_terminal_locked(terminal_id: str) -> dict[str, Any]:
     """Body of ``select_terminal`` — caller holds ``_binding_lock``."""
-    global _selected_id, _execution_armed
-
     view = list_terminals()
     entry = next((e for e in view["terminals"] if e["id"] == terminal_id), None)
     if entry is None:
@@ -529,7 +623,7 @@ def _select_terminal_locked(terminal_id: str) -> dict[str, Any]:
             "execution_armed": _execution_armed,
         }
 
-    if entry["attached"] and _selected_id == terminal_id:
+    if entry["attached"] and entry.get("selected"):
         return {
             "ok": True,
             "message": f"Terminal '{terminal_id}' is already selected and attached.",
@@ -541,13 +635,15 @@ def _select_terminal_locked(terminal_id: str) -> dict[str, Any]:
     # Re-attach: shutdown + initialize(path=exe). Verified working at runtime.
     from . import connector
 
-    # Safety: disarm BEFORE touching the binding — a switch (even a failed one)
-    # must never leave execution armed while the binding is ambiguous.
-    _execution_armed = False
+    # Safety: disarm ALL terminals BEFORE touching the binding — a switch (even
+    # a failed one) must never leave execution armed while the binding is ambiguous.
+    for st in _terminal_states.values():
+        st["armed"] = False
 
     connector.shutdown()
     ok = connector.use_live_data_mode(path=entry["path"])
     if not ok:
+        _sync_backcompat_globals()
         return {
             "ok": False,
             "message": (
@@ -559,8 +655,12 @@ def _select_terminal_locked(terminal_id: str) -> dict[str, Any]:
             "attached_path": _detect_attached_path(),
         }
 
-    _selected_id = terminal_id
-    _execution_armed = False  # never inherit an arm state across terminals
+    # Mark this terminal as selected, unmark all others
+    for tid, st in _terminal_states.items():
+        st["selected"] = tid == terminal_id
+    _state_for(terminal_id)["selected"] = True
+    _sync_backcompat_globals()
+
     save_selection(terminal_id)
     # Symbols differ per broker (XAUUSD vs XAUUSDc) — drop the resolution cache.
     try:
@@ -588,49 +688,94 @@ def _select_terminal_locked(terminal_id: str) -> dict[str, Any]:
 
 
 def is_execution_armed() -> bool:
-    """Return the raw arm flag (does not validate terminal state)."""
-    return _execution_armed
+    """Return True when ANY terminal is armed (backward-compat global view).
+
+    Per the multi-terminal model, an "armed" terminal is one whose operator
+    toggle is ON, regardless of whether the (process-wide) binding currently
+    points at it. The execution engine consults :func:`get_armed_terminals`
+    for the authoritative list.
+    """
+    return any(st.get("armed") for st in _terminal_states.values())
 
 
-def arm_execution(armed: bool) -> dict[str, Any]:
-    """Arm/disarm real order execution for the SELECTED terminal.
+def get_armed_terminals() -> list[str]:
+    """Return terminal ids armed AND eligible (config ``execution: true`` + running).
+
+    Fail-closed: a terminal whose config flag flipped to ``false`` or whose
+    process stopped is dropped from the list (the operator armed it, but it is
+    no longer eligible). The execution engine loops this list.
+    """
+    view = list_terminals()
+    by_id = {t["id"]: t for t in view["terminals"]}
+    armed: list[str] = []
+    for tid, st in _terminal_states.items():
+        if not st.get("armed"):
+            continue
+        entry = by_id.get(tid)
+        if entry is None:
+            continue
+        if not entry.get("execution_allowed"):
+            continue
+        if not entry.get("running"):
+            continue
+        armed.append(tid)
+    return armed
+
+
+def arm_terminal(terminal_id: str, armed: bool) -> dict[str, Any]:
+    """Arm or disarm a SPECIFIC terminal (multi-terminal B-9).
 
     Arming requires ALL of:
-    - a terminal is selected and currently running,
-    - it is marked ``"execution": true`` in the config file,
-    - the binding is attached to it (live mode).
-    """
-    global _execution_armed
+    - the terminal exists in the registry,
+    - it is currently running,
+    - it is marked ``"execution": true`` in the config file (LIVE accounts
+      must opt in explicitly; ``vito2`` ships with ``execution: false``).
+    - the binding is attached to it (live mode). The MetaTrader5 binding is
+      process-wide (one terminal per process), so an order can only land on
+      the attached terminal; arming a terminal that is not attached would
+      silently route orders elsewhere.
 
+    Disarming is always allowed (fail-safe).
+    """
     if not armed:
-        was = _execution_armed
-        _execution_armed = False
+        st = _state_for(terminal_id)
+        was = bool(st.get("armed"))
+        st["armed"] = False
+        _sync_backcompat_globals()
         return {
             "ok": True,
+            "terminal_id": terminal_id,
             "armed": False,
-            "message": "Execution disarmed." if was else "Execution already disarmed.",
+            "message": (
+                f"Terminal '{terminal_id}' disarmed."
+                if was
+                else f"Terminal '{terminal_id}' was not armed."
+            ),
         }
 
     view = list_terminals()
-    entry = next((e for e in view["terminals"] if e["id"] == _selected_id), None)
+    entry = next((e for e in view["terminals"] if e["id"] == terminal_id), None)
     if entry is None:
         return {
             "ok": False,
-            "armed": _execution_armed,
-            "message": "No terminal selected. Select a running terminal first.",
+            "terminal_id": terminal_id,
+            "armed": False,
+            "message": f"Terminal '{terminal_id}' not found in the registry.",
         }
     if not entry["running"]:
         return {
             "ok": False,
-            "armed": _execution_armed,
-            "message": "The selected terminal is not running.",
+            "terminal_id": terminal_id,
+            "armed": False,
+            "message": f"Terminal '{terminal_id}' is not running.",
         }
     if not entry["execution_allowed"]:
         return {
             "ok": False,
-            "armed": _execution_armed,
+            "terminal_id": terminal_id,
+            "armed": False,
             "message": (
-                f"Terminal '{entry['id']}' is not execution-enabled. Set "
+                f"Terminal '{terminal_id}' is not execution-enabled. Set "
                 '"execution": true for it in mt5_terminals.json, then arm again '
                 "(the config is re-read on every request — no restart needed)."
             ),
@@ -638,31 +783,81 @@ def arm_execution(armed: bool) -> dict[str, Any]:
     if not entry["attached"]:
         return {
             "ok": False,
-            "armed": _execution_armed,
-            "message": "The binding is not attached to the selected terminal. Re-select it.",
+            "terminal_id": terminal_id,
+            "armed": False,
+            "message": (
+                f"The binding is not attached to terminal '{terminal_id}'. "
+                "Select it first (POST /mt5/terminals/select)."
+            ),
         }
 
-    _execution_armed = True
+    _state_for(terminal_id)["armed"] = True
+    _sync_backcompat_globals()
     return {
         "ok": True,
+        "terminal_id": terminal_id,
         "armed": True,
         "message": (
-            f"Execution ARMED for terminal '{entry['id']}'. "
+            f"Execution ARMED for terminal '{terminal_id}'. "
             "Real orders may now be sent. Disarm when done."
         ),
     }
 
 
+def arm_execution(armed: bool) -> dict[str, Any]:
+    """Arm/disarm real order execution for the SELECTED terminal (legacy).
+
+    Backward-compat wrapper: routes to :func:`arm_terminal` using the currently
+    selected terminal id. Kept so existing single-terminal workflows and
+    dashboards (``POST /mt5/terminals/arm`` with no id in the path) keep working.
+    """
+    target = _selected_id
+    if not armed and not target:
+        # Disarm-everything fallback when nothing is selected
+        for st in _terminal_states.values():
+            st["armed"] = False
+        _sync_backcompat_globals()
+        return {
+            "ok": True,
+            "armed": False,
+            "message": "Execution disarmed (no terminal was selected).",
+        }
+    if not target:
+        return {
+            "ok": False,
+            "armed": False,
+            "message": "No terminal selected. Select a running terminal first.",
+        }
+    result = arm_terminal(target, armed)
+    # Preserve the legacy response shape (no "terminal_id" key) for callers that
+    # only check ``ok``/``armed``/``message``.
+    return {
+        "ok": result["ok"],
+        "armed": result["armed"],
+        "message": result["message"],
+    }
+
+
 def execution_permitted() -> bool:
-    """True only when the operator explicitly armed a valid terminal.
+    """True only when at least one armed, eligible terminal is attached.
 
     This is the final gate consulted by the execution engine before any
     native ``mt5.order_send`` call. Fail-closed: any doubt → False.
+
+    Backward-compat: in single-terminal workflows the selected+armed terminal
+    is also the attached one; in the multi-terminal model any armed terminal
+    that is also the attached binding satisfies the gate.
     """
-    if not _execution_armed or not _selected_id:
+    _reconcile_globals()
+    armed_ids = get_armed_terminals()
+    if not armed_ids:
         return False
+    # The MT5 binding is process-wide: only the attached terminal can actually
+    # receive an order. An armed terminal that is not attached cannot receive
+    # one (fail-closed).
     view = list_terminals()
-    entry = next((e for e in view["terminals"] if e["id"] == _selected_id), None)
-    if entry is None:
-        return False
-    return bool(entry["execution_allowed"] and entry["running"] and entry["attached"])
+    for tid in armed_ids:
+        entry = next((e for e in view["terminals"] if e["id"] == tid), None)
+        if entry and entry.get("attached"):
+            return True
+    return False

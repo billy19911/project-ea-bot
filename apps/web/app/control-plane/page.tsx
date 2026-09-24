@@ -1080,6 +1080,7 @@ type TerminalEntry = {
   pid?: number | null;
   attached?: boolean;
   selected?: boolean;
+  armed?: boolean;
   account?: TerminalAccount | null;
 };
 
@@ -1268,7 +1269,34 @@ function TerminalPanel({
                       <span className={`${s.badge} ${s.warning}`}>eligible</span>
                     ) : (
                       <span className={`${s.badge} ${s.muted}`}>data-only</span>
-                    )}
+                    )}{' '}
+                    {t.armed && <span className={`${s.badge} ${s.danger}`}>ARMED</span>}{' '}
+                    {/* B-9: toggle arm per terminal (banyak terminal bisa armed
+                        sekaligus). Nonaktif bila execution:false / tidak jalan. */}
+                    <button
+                      className={s.tab}
+                      disabled={busy || !hasToken || !t.running || !t.execution_allowed}
+                      title={
+                        !hasToken
+                          ? 'Membutuhkan token di localStorage (ea-bot-token)'
+                          : !t.running
+                            ? 'Terminal tidak berjalan'
+                            : !t.execution_allowed
+                              ? 'Terminal tidak diizinkan eksekusi (execution: false di mt5_terminals.json)'
+                              : t.armed
+                                ? `Matikan arm untuk terminal ${t.id}`
+                                : `Izinkan eksekusi order nyata untuk terminal ${t.id}`
+                      }
+                      onClick={() =>
+                        post(
+                          `/mt5/terminals/${encodeURIComponent(t.id)}/arm`,
+                          { armed: !t.armed },
+                          t.armed ? `Terminal ${t.id} disarmed.` : `Terminal ${t.id} ARMED.`,
+                        )
+                      }
+                    >
+                      {t.armed ? 'Disarm' : 'Arm'}
+                    </button>
                   </td>
                   <td>
                     <button
@@ -1344,7 +1372,9 @@ function TerminalPanel({
             🔒 Disarm
           </button>
           <span className={s.mono}>
-            Arm hanya mengizinkan eksekusi lewat jalur yang sudah di-guard; order nyata tetap butuh aksi manual. Ganti terminal selalu me-reset arm ke OFF.
+            Arm mengizinkan eksekusi lewat jalur yang sudah di-guard; order nyata tetap butuh aksi
+            manual. Tombol Arm/Disarm per baris di tabel mengontrol arm per terminal (B-9); ganti
+            terminal selalu me-reset semua arm ke OFF.
           </span>
         </div>
       )}

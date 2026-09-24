@@ -287,3 +287,39 @@ export async function proxyJson<T = Record<string, unknown>>(
   if (!result.ok) return null;
   return { ...(result.data as T), source: 'live' };
 }
+
+/**
+ * Arm or disarm ONE specific MT5 terminal (multi-terminal B-9).
+ *
+ * The Python service rejects with 400 when the terminal is unknown, not
+ * running, or marked `"execution": false` in `mt5_terminals.json` (LIVE
+ * accounts ship ineligible). Multiple terminals may be armed simultaneously;
+ * the execution engine loops `get_armed_terminals()`.
+ *
+ * @param terminalId Registry id (e.g. `bil2`).
+ * @param armed `true` to arm, `false` to disarm (disarm always succeeds).
+ * @param timeoutMs Optional override request timeout.
+ */
+export function armTerminal(
+  terminalId: string,
+  armed: boolean,
+  timeoutMs?: number,
+): Promise<PythonProxyResult<unknown>> {
+  return postJson(`/mt5/terminals/${encodeURIComponent(terminalId)}/arm`, { armed }, timeoutMs);
+}
+
+/**
+ * Legacy single-switch arm/disarm for the SELECTED terminal (no id in path).
+ *
+ * Kept for backward compatibility with existing single-terminal workflows;
+ * prefer {@link armTerminal} for per-account control.
+ *
+ * @param armed `true` to arm, `false` to disarm.
+ * @param timeoutMs Optional override request timeout.
+ */
+export function armExecution(
+  armed: boolean,
+  timeoutMs?: number,
+): Promise<PythonProxyResult<unknown>> {
+  return postJson('/mt5/terminals/arm', { armed }, timeoutMs);
+}
