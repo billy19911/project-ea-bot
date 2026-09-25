@@ -168,7 +168,13 @@ if (Test-Port $webPort) {
   Ok "      sudah berjalan - dilewati"
 } else {
   $webDir = Join-Path $root 'apps\web'
-  if (-not (Test-Path (Join-Path $webDir '.next\BUILD_ID'))) {
+  # next.config.mjs derives distDir from the port (.next-<port>), and the CLI
+  # -p flag wins over process.env.PORT. Pin PORT to $webPort here so the build
+  # and the following `next start` resolve to the SAME dir; otherwise the PORT
+  # leaked by the Node API step above (3789) would build into .next-3789 while
+  # `next start -p $webPort` looks in .next-$webPort and fails.
+  $env:PORT = "$webPort"
+  if (-not (Test-Path (Join-Path $webDir ".next-$webPort\BUILD_ID"))) {
     Warn "      build web belum ada - build (1-2 menit)..."
     Push-Location $webDir; npm run build; Pop-Location
   }
