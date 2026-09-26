@@ -40,7 +40,7 @@ const envSchema = z.object({
     .refine((v) => !isNaN(Number(v)) && Number(v) > 0 && Number(v) < 65536, {
       message: "PORT harus angka 1-65535",
     })
-    .default("3000"),
+    .default("3789"),
 
   // Logging
   LOG_LEVEL: z
@@ -99,7 +99,7 @@ const envSchema = z.object({
     .refine((v) => !isNaN(Number(v)) && Number(v) > 0, {
       message: "PYTHON_SERVICE_PORT harus angka positif",
     })
-    .default("8000"),
+    .default("8787"),
 });
 
 // ---- Validation ---------------------------------------------------------

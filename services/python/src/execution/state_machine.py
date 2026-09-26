@@ -38,9 +38,19 @@ _NEXT_ALLOWED: Dict[OrderState, Tuple[OrderState, ...]] = {
     OrderState.RISK_APPROVED: (OrderState.SUBMITTING,),
     OrderState.SUBMITTING: (OrderState.SUBMITTED, OrderState.UNKNOWN),
     OrderState.SUBMITTED: (OrderState.ACKNOWLEDGED, OrderState.UNKNOWN),
-    OrderState.ACKNOWLEDGED: (OrderState.PARTIALLY_FILLED, OrderState.FILLED, OrderState.UNKNOWN),
+    OrderState.ACKNOWLEDGED: (
+        OrderState.PARTIALLY_FILLED,
+        OrderState.FILLED,
+        OrderState.UNKNOWN,
+    ),
     OrderState.PARTIALLY_FILLED: (OrderState.FILLED, OrderState.UNKNOWN),
-    OrderState.FILLED: (OrderState.POSITION_CONFIRMED, OrderState.UNKNOWN),
+    # LEDGER-SLTP T1: a filled order whose position is (subsequently) gone may
+    # be closed directly — the POSITION_CONFIRMED step is not always persisted.
+    OrderState.FILLED: (
+        OrderState.POSITION_CONFIRMED,
+        OrderState.CLOSED,
+        OrderState.UNKNOWN,
+    ),
     OrderState.POSITION_CONFIRMED: (OrderState.CLOSED, OrderState.UNKNOWN),
     OrderState.CLOSED: (),
     OrderState.UNKNOWN: (),
@@ -91,7 +101,9 @@ def get_order(intent_id: str) -> Dict:
     return _order_store[intent_id]
 
 
-def set_order(intent_id: str, state: OrderState | str, extra: Dict | None = None) -> None:
+def set_order(
+    intent_id: str, state: OrderState | str, extra: Dict | None = None
+) -> None:
     """Create or update an order record.
 
     ``extra`` can contain arbitrary metadata (e.g., timestamps, broker ticket).

@@ -2,7 +2,8 @@
 """Structure Analyst Agent.
 
 Analyzes market structure: support/resistance, swing highs/lows, trendlines,
-order blocks/liquidity levels.
+order blocks/liquidity levels, Fair Value Gaps (FVG), Break of Structure (BOS),
+Change of Character (CHoCH), and integrates self-improvement lessons.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
-from trading.indicators import bollinger_bands, ema
+from trading.indicators import adx, bollinger_bands, ema
 
 from ..base import AgentCapability, AgentPriority, BaseAgent
 
@@ -82,17 +83,24 @@ class StructureInput:
 
 
 class StructureAnalystAgent(BaseAgent):
-    """Deterministic market-structure analysis agent.
+    """Deterministic market-structure analysis agent with self-improvement.
 
-    Detects support/resistance, swing highs/lows, trend alignment, and
-    order-block/liquidity zones from supplied OHLC data.
+    Detects:
+    - Support / Resistance clusters with multi-touch strength
+    - Fractal Swing Highs & Lows (Higher Highs, Lower Lows)
+    - Break of Structure (BOS) & Change of Character (CHoCH)
+    - Liquidity Sweeps / Stop Hunts
+    - Fair Value Gaps (FVG) / Imbalance Zones
+    - ADX Trend Strength confirmation
+    - Historical Lessons & Confidence Calibration (Self-Improvement)
     """
 
     SYSTEM_PROMPT = (
         "Analyze market structure deterministically. Identify confirmed swing highs and lows, "
-        "support/resistance, liquidity zones, and moving-average trend alignment. Return only "
-        "evidence supported by supplied OHLC data; use a neutral, low-confidence result for "
-        "insufficient or invalid input."
+        "support/resistance, liquidity zones, Break of Structure (BOS), "
+        "Change of Character (CHoCH), "
+        "Fair Value Gaps (FVG), and moving-average trend alignment. Calibrate confidence with past "
+        "trading lessons."
     )
 
     def __init__(self) -> None:
@@ -101,18 +109,30 @@ class StructureAnalystAgent(BaseAgent):
             agent_type="structural",
             description=(
                 "Analyzes market structure: support/resistance, swing "
-                "highs/lows, trendlines, order blocks"
+                "highs/lows, BOS, CHoCH, FVG, order blocks, and applies past lessons"
             ),
             priority=AgentPriority.HIGH,
         )
         self.capabilities = [
-            AgentCapability("support_resistance", "Identifies key support/resistance levels"),
+            AgentCapability(
+                "support_resistance", "Identifies key support/resistance levels"
+            ),
             AgentCapability("swing_detection", "Detects swing highs and lows"),
             AgentCapability(
                 "trend_identification",
                 "Identifies trend direction from price-MA relationship",
             ),
-            AgentCapability("order_block_analysis", "Finds order blocks and liquidity zones"),
+            AgentCapability(
+                "order_block_analysis", "Finds order blocks and liquidity zones"
+            ),
+            AgentCapability(
+                "market_structure_patterns",
+                "Detects BOS, CHoCH, FVG, and liquidity sweeps",
+            ),
+            AgentCapability(
+                "self_improvement",
+                "Calibrates signal and confidence using past trade lessons",
+            ),
         ]
 
     def can_handle(self, event_type: str, context: dict[str, Any]) -> bool:
@@ -122,29 +142,122 @@ class StructureAnalystAgent(BaseAgent):
             "PRICE_ACTION",
             "TREND_DETECT",
             "LEVEL_SCAN",
+            "MARKET_STRUCTURE",
         ) or event_type.startswith("MARKET_")
 
     def _detect_swing_points(
         self, highs: list[float], lows: list[float], lookback: int = 5
     ) -> tuple[Optional[float], Optional[float]]:
-        """Detect most recent swing high and swing low.
-
-        A swing high is the highest price in a window with lower highs on both
-        sides. A swing low is the lowest price in a window with higher lows on
-        both sides.
-        """
+        """Detect most recent swing high and swing low."""
         if len(highs) < lookback * 2 + 1 or len(lows) < lookback * 2 + 1:
             return None, None
 
-        # Last valid swing high: highest high in middle of window
         start_idx = len(highs) - lookback - 1
         end_idx = len(highs) - lookback
         swing_high = max(highs[start_idx:end_idx]) if start_idx >= 0 else None
-
-        # Last valid swing low
         swing_low = min(lows[start_idx:end_idx]) if start_idx >= 0 else None
 
         return swing_high, swing_low
+
+    def _detect_market_structure_pattern(
+        self, highs: list[float], lows: list[float], prices: list[float]
+    ) -> dict[str, Any]:
+        """Detect advanced SMC patterns: BOS, CHoCH, HH/HL/LH/LL sequence."""
+        if len(prices) < 15:
+            return {
+                "structure_type": "INSUFFICIENT_DATA",
+                "bos": None,
+                "choch": None,
+                "hh_hl": False,
+                "lh_ll": False,
+                "sweep": None,
+            }
+
+        # 3-fractal swing sequence for structural trend
+        recent_highs = [highs[-i] for i in range(1, min(16, len(highs)), 5)]
+        recent_lows = [lows[-i] for i in range(1, min(16, len(lows)), 5)]
+
+        hh_hl = False
+        lh_ll = False
+        if len(recent_highs) >= 2 and len(recent_lows) >= 2:
+            hh_hl = (
+                recent_highs[0] > recent_highs[1] and recent_lows[0] > recent_lows[1]
+            )
+            lh_ll = (
+                recent_highs[0] < recent_highs[1] and recent_lows[0] < recent_lows[1]
+            )
+
+        # Break of Structure (BOS) / Change of Character (CHoCH)
+        prior_swing_high = max(highs[-15:-5]) if len(highs) >= 15 else highs[0]
+        prior_swing_low = min(lows[-15:-5]) if len(lows) >= 15 else lows[0]
+        current_price = prices[-1]
+
+        bos = None
+        choch = None
+        if current_price > prior_swing_high:
+            bos = "BULLISH_BOS"
+            if lh_ll:  # Was making lower lows, now broke prior swing high -> Reversal!
+                choch = "BULLISH_CHOCH"
+        elif current_price < prior_swing_low:
+            bos = "BEARISH_BOS"
+            if hh_hl:  # Was making higher highs, now broke prior swing low -> Reversal!
+                choch = "BEARISH_CHOCH"
+
+        # Liquidity sweep (Stop hunt): spike above prior high but close below it, or vice versa
+        sweep = None
+        if highs[-1] > prior_swing_high and current_price < prior_swing_high:
+            sweep = "BEARISH_SWEEP"
+        elif lows[-1] < prior_swing_low and current_price > prior_swing_low:
+            sweep = "BULLISH_SWEEP"
+
+        structure_type = (
+            "TRENDING_UP" if hh_hl else ("TRENDING_DOWN" if lh_ll else "RANGING")
+        )
+
+        return {
+            "structure_type": structure_type,
+            "bos": bos,
+            "choch": choch,
+            "hh_hl": hh_hl,
+            "lh_ll": lh_ll,
+            "sweep": sweep,
+            "prior_swing_high": prior_swing_high,
+            "prior_swing_low": prior_swing_low,
+        }
+
+    def _detect_fvg(
+        self, highs: list[float], lows: list[float], prices: list[float]
+    ) -> list[dict[str, Any]]:
+        """Detect Fair Value Gaps (FVG) / Imbalances in recent candles."""
+        fvgs: list[dict[str, Any]] = []
+        if len(prices) < 4:
+            return fvgs
+
+        lookback = min(10, len(prices) - 2)
+        for i in range(len(prices) - lookback, len(prices) - 1):
+            if i > 0 and i < len(highs) - 1:
+                # Bullish FVG: Bar i-1 high < Bar i+1 low
+                if lows[i + 1] > highs[i - 1]:
+                    fvgs.append(
+                        {
+                            "type": "BULLISH_FVG",
+                            "top": lows[i + 1],
+                            "bottom": highs[i - 1],
+                            "mid": (lows[i + 1] + highs[i - 1]) / 2.0,
+                        }
+                    )
+                # Bearish FVG: Bar i-1 low > Bar i+1 high
+                elif highs[i + 1] < lows[i - 1]:
+                    fvgs.append(
+                        {
+                            "type": "BEARISH_FVG",
+                            "top": lows[i - 1],
+                            "bottom": highs[i + 1],
+                            "mid": (lows[i - 1] + highs[i + 1]) / 2.0,
+                        }
+                    )
+
+        return fvgs[-3:]
 
     def _calculate_support_resistance(
         self, lows: list[float], highs: list[float], prices: list[float]
@@ -156,14 +269,11 @@ class StructureAnalystAgent(BaseAgent):
         if len(prices) < 10:
             return supports, resistances
 
-        # Pivot-based levels (last 20% of data)
         pivot_count = max(3, len(prices) // 10)
         recent_prices = prices[-pivot_count * 2 :]
 
-        # Price clusters as potential levels
         price_counts: dict[float, int] = {}
         for p in recent_prices:
-            # Round to nearest 0.01 for clustering
             cluster = round(p / 0.005) * 0.005
             price_counts[cluster] = price_counts.get(cluster, 0) + 1
 
@@ -201,7 +311,6 @@ class StructureAnalystAgent(BaseAgent):
                     )
                 )
 
-        # Sort by strength
         supports.sort(key=lambda x: x.strength, reverse=True)
         resistances.sort(key=lambda x: x.strength, reverse=True)
 
@@ -232,8 +341,6 @@ class StructureAnalystAgent(BaseAgent):
             return []
 
         order_blocks: list[dict[str, Any]] = []
-
-        # Look for price extremes in recent bars
         recent_high = max(highs[-10:]) if len(highs) >= 10 else None
         recent_low = min(lows[-10:]) if len(lows) >= 10 else None
 
@@ -257,15 +364,64 @@ class StructureAnalystAgent(BaseAgent):
 
         return order_blocks
 
+    def _apply_self_improvement(
+        self, signal: str, confidence: float, context: dict[str, Any]
+    ) -> tuple[float, str]:
+        """Calibrate signal and confidence using historical lessons and memory."""
+        adjustment_note = ""
+        calibrated_conf = confidence
+
+        # 1. Check lesson store if available
+        lesson_store = context.get("lesson_store")
+        if not lesson_store:
+            try:
+                from .review_agent import get_lesson_store
+
+                lesson_store = get_lesson_store()
+            except ImportError:
+                lesson_store = None
+
+        if lesson_store and hasattr(lesson_store, "all_lessons"):
+            lessons = lesson_store.all_lessons()
+            false_breakouts = [
+                lesson
+                for lesson in lessons
+                if "breakout" in str(lesson).lower()
+                or "structure" in str(lesson).lower()
+            ]
+            if len(false_breakouts) >= 2:
+                calibrated_conf = max(0.1, calibrated_conf - 0.1)
+                adjustment_note = (
+                    f" [Self-Improvement: {len(false_breakouts)} past structure/breakout "
+                    f"failures noted - confidence adjusted -0.10]"
+                )
+
+        # 2. Check agent memory accuracy if provided
+        agent_memory = context.get("agent_memory")
+        if agent_memory and hasattr(agent_memory, "adjust_confidence"):
+            regime = context.get(
+                "regime",
+                (
+                    "TRENDING"
+                    if ("BULLISH" in signal or "BEARISH" in signal)
+                    else "RANGING"
+                ),
+            )
+            calibrated_conf, mem_note = agent_memory.adjust_confidence(
+                self.name, regime, calibrated_conf
+            )
+            if "confidence" in mem_note:
+                adjustment_note += f" [Memory: {mem_note}]"
+
+        return round(calibrated_conf, 3), adjustment_note
+
     def analyze(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Run structure analysis and return results."""
+        """Run structure analysis with advanced patterns & self-improvement."""
         try:
-            # Extract input data
             prices = context.get("prices", context.get("close_prices", []))
             highs = context.get("highs", [])
             lows = context.get("lows", [])
 
-            # Validate input
             if not prices or len(prices) < 10:
                 return self._create_fallback_result(
                     prices, "Insufficient price data for structure analysis"
@@ -276,34 +432,41 @@ class StructureAnalystAgent(BaseAgent):
             if not lows:
                 lows = prices
 
-            # Ensure same length
             min_len = min(len(prices), len(highs), len(lows))
             prices = prices[:min_len]
             highs = highs[:min_len]
             lows = lows[:min_len]
 
-            # Calculate indicators
+            # 1. Moving Averages
             ema_fast = ema(prices, 20)
             ema_slow = ema(prices, 50)
             ema_100 = ema(prices, 100)
 
-            # Detect swing points
+            # 2. ADX Trend Strength Confirmation
+            adx_val = None
+            if len(prices) >= 15:
+                try:
+                    adx_val = adx(highs, lows, prices, period=14)
+                except Exception:
+                    adx_val = None
+
+            # 3. Detect Swing Points & SMC Patterns
             swing_high, swing_low = self._detect_swing_points(highs, lows)
+            pattern_info = self._detect_market_structure_pattern(highs, lows, prices)
+            fvgs = self._detect_fvg(highs, lows, prices)
 
-            # Calculate levels
-            supports, resistances = self._calculate_support_resistance(lows, highs, prices)
-
-            # Determine trend
+            # 4. S/R Levels
+            supports, resistances = self._calculate_support_resistance(
+                lows, highs, prices
+            )
             trend = (
                 self._determine_trend(prices, ema_fast, ema_slow)
                 if ema_fast and ema_slow
                 else "NEUTRAL"
             )
-
-            # Detect order blocks
             order_blocks = self._detect_order_blocks(prices, highs, lows)
 
-            # Build key_levels output
+            # 5. Build Key Levels Output
             key_levels: list[dict[str, Any]] = []
             for s in supports[:3]:
                 key_levels.append(
@@ -323,32 +486,104 @@ class StructureAnalystAgent(BaseAgent):
                         "touch_count": r.touch_count,
                     }
                 )
-
-            # Build order blocks
             for ob in order_blocks:
                 key_levels.append(ob)
 
-            # Calculate confidence
+            # 6. Confluence Scoring & Direction Decision
             price = prices[-1]
             confidence = 0.5
-            if ema_fast and ema_slow:
-                if (price > ema_fast > ema_slow) or (price < ema_fast < ema_slow):
-                    confidence = 0.8
-                elif price > ema_fast or price < ema_fast:
-                    confidence = 0.6
+            bullish_factors: list[str] = []
+            bearish_factors: list[str] = []
 
-            # Determine signal
+            # MA trend
             if trend == "BULLISH":
-                signal = "BULLISH"
-                sh_str = f"{swing_low:.4f}" if swing_low else "N/A"
-                reasoning = f"Price above EMA20/50, trend bullish. Swing low: {sh_str}"
+                bullish_factors.append("EMA20>50")
             elif trend == "BEARISH":
+                bearish_factors.append("EMA20<50")
+
+            # BOS / CHoCH confluence
+            if pattern_info["bos"] == "BULLISH_BOS":
+                bullish_factors.append("BOS-Bullish")
+            elif pattern_info["bos"] == "BEARISH_BOS":
+                bearish_factors.append("BOS-Bearish")
+
+            if pattern_info["choch"] == "BULLISH_CHOCH":
+                bullish_factors.append("CHoCH-Reversal-Bullish")
+            elif pattern_info["choch"] == "BEARISH_CHOCH":
+                bearish_factors.append("CHoCH-Reversal-Bearish")
+
+            # Sweep / Stop Hunt confluence
+            if pattern_info["sweep"] == "BULLISH_SWEEP":
+                bullish_factors.append("LiquiditySweep-Bullish")
+            elif pattern_info["sweep"] == "BEARISH_SWEEP":
+                bearish_factors.append("LiquiditySweep-Bearish")
+
+            # Structure HH/HL or LH/LL
+            if pattern_info["hh_hl"]:
+                bullish_factors.append("HH-HL-Sequence")
+            elif pattern_info["lh_ll"]:
+                bearish_factors.append("LH-LL-Sequence")
+
+            # ADX trend confirmation
+            is_trending = adx_val is not None and adx_val > 25.0
+            is_ranging = adx_val is not None and adx_val < 20.0
+
+            # Weigh factors
+            if len(bullish_factors) > len(bearish_factors):
+                signal = "BULLISH"
+                base_conf = 0.6 + (0.05 * len(bullish_factors))
+                if is_trending:
+                    base_conf += 0.1
+                elif is_ranging:
+                    base_conf -= 0.15
+                confidence = min(0.95, base_conf)
+                adx_desc = (
+                    "Trending"
+                    if is_trending
+                    else ("Ranging" if is_ranging else "Neutral")
+                )
+                adx_str = f"{adx_val:.1f}" if adx_val is not None else "N/A"
+                sw_str = f"{swing_low:.4f}" if swing_low is not None else "N/A"
+                reasoning = (
+                    f"Bullish structure confirmed ({', '.join(bullish_factors)}). "
+                    f"ADX: {adx_str} ({adx_desc}). "
+                    f"Swing low: {sw_str}"
+                )
+            elif len(bearish_factors) > len(bullish_factors):
                 signal = "BEARISH"
-                sh_str = f"{swing_high:.4f}" if swing_high else "N/A"
-                reasoning = f"Price below EMA20/50, trend bearish. Swing high: {sh_str}"
+                base_conf = 0.6 + (0.05 * len(bearish_factors))
+                if is_trending:
+                    base_conf += 0.1
+                elif is_ranging:
+                    base_conf -= 0.15
+                confidence = min(0.95, base_conf)
+                adx_desc = (
+                    "Trending"
+                    if is_trending
+                    else ("Ranging" if is_ranging else "Neutral")
+                )
+                adx_str = f"{adx_val:.1f}" if adx_val is not None else "N/A"
+                sw_str = f"{swing_high:.4f}" if swing_high is not None else "N/A"
+                reasoning = (
+                    f"Bearish structure confirmed ({', '.join(bearish_factors)}). "
+                    f"ADX: {adx_str} ({adx_desc}). "
+                    f"Swing high: {sw_str}"
+                )
             else:
                 signal = "NEUTRAL"
-                reasoning = f"Trend ambiguous: {trend}. Key levels identified: {len(key_levels)}"
+                confidence = 0.4
+                adx_str = f"{adx_val:.1f}" if adx_val is not None else "N/A"
+                reasoning = (
+                    f"Market structure balanced/ranging. "
+                    f"ADX: {adx_str}. "
+                    f"Key levels tracked: {len(key_levels)}"
+                )
+
+            # 7. Apply Self-Improvement Calibration
+            confidence, self_improve_note = self._apply_self_improvement(
+                signal, confidence, context
+            )
+            reasoning += self_improve_note
 
             return {
                 "agent": self.name,
@@ -363,8 +598,11 @@ class StructureAnalystAgent(BaseAgent):
                     "ema_20": ema_fast,
                     "ema_50": ema_slow,
                     "ema_100": ema_100,
+                    "adx": adx_val,
                     "current_price": price,
                     "bar_count": len(prices),
+                    "structure_pattern": pattern_info,
+                    "fvg_count": len(fvgs),
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 },
             }
@@ -372,7 +610,9 @@ class StructureAnalystAgent(BaseAgent):
         except Exception as e:
             return self._create_fallback_result(context.get("prices", []), str(e))
 
-    def _create_fallback_result(self, prices: list[float], reason: str) -> dict[str, Any]:
+    def _create_fallback_result(
+        self, prices: list[float], reason: str
+    ) -> dict[str, Any]:
         """Create a fallback result on error or insufficient data."""
         return {
             "agent": self.name,

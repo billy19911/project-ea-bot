@@ -13,13 +13,14 @@ determinism and safe handling of empty/short data.
 from __future__ import annotations
 
 import pytest
-
 from research.engine import BacktestResult, ResearchEngine
 
 
 def _make_experiment(engine: ResearchEngine, version: str = "v1"):
     hypothesis = engine.create_hypothesis("Trend", "EMA trend", ["ema"], ["rev"], {})
-    engine.create_strategy_version(version, {"fast_ema_period": 3, "slow_ema_period": 8})
+    engine.create_strategy_version(
+        version, {"fast_ema_period": 3, "slow_ema_period": 8}
+    )
     return engine.create_experiment(hypothesis.id, version, {})
 
 
@@ -124,6 +125,58 @@ class TestSafeDataHandling:
         # Fewer bars than the slow EMA period — must not raise.
         result = engine.run_backtest(exp, [1.0, 2.0, 3.0, 4.0], train_ratio=0.7)
         assert isinstance(result, BacktestResult)
+
+
+# ---------------------------------------------------------------------------
+# O(n) performance: precomputed EMA series must not be O(n²) at 100k bars.
+# ---------------------------------------------------------------------------
+class TestScalability:
+    def test_100k_bars_completes_in_reasonable_time(self) -> None:
+        """100,000 bars should finish in well under the O(n²) worst case.
+
+        The old implementation called ``ema()`` on a growing window per bar,
+        producing ~10^10 operations for 100k bars. With the O(n) precomputed
+        ``ema_series`` fix, this completes in seconds.
+        """
+        import time
+
+        prices = _trending_prices(n=100_000)
+        engine = ResearchEngine()
+        exp = _make_experiment(engine)
+        start = time.monotonic()
+        result = engine.run_backtest(exp, prices)
+        elapsed = time.monotonic() - start
+        # O(n) should finish in ~3s on slow CI; O(n²) would take hours.
+        # Allow generous headroom for CI variance.
+        assert (
+            elapsed < 30.0
+        ), f"Backtest of 100k bars took {elapsed:.1f}s — O(n) fix may be broken"
+        assert isinstance(result, BacktestResult)
+        assert result.total_trades >= 0  # no crash, metrics computed
+
+    def test_10k_bars_scales_linearly(self) -> None:
+        """10k bars should be at least 5x faster per-bar than 1k bars (O(n) vs O(n²))."""
+        import time
+
+        engine = ResearchEngine()
+        exp = _make_experiment(engine)
+        prices_1k = _trending_prices(n=1_000)
+        prices_10k = _trending_prices(n=10_000)
+        start = time.monotonic()
+        engine.run_backtest(exp, prices_1k)
+        t_1k = time.monotonic() - start
+        start = time.monotonic()
+        engine.run_backtest(exp, prices_10k)
+        t_10k = time.monotonic() - start
+        # O(n): t_10k ≈ 10x t_1k (allow 2x–50x for overhead variance).
+        # O(n²): t_10k would be ~100x t_1k, failing the upper bound.
+        # If t_1k is too small to measure reliably, skip the ratio check.
+        if t_1k >= 0.05:
+            ratio = t_10k / t_1k
+            assert ratio < 50.0, (
+                f"Scaling ratio {ratio:.1f}x suggests O(n²): 10k took {t_10k:.2f}s, "
+                f"1k took {t_1k:.2f}s"
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover

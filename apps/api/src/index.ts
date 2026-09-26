@@ -3,6 +3,11 @@
  * Phase 28: Security hardening — auth, authorization, audit logs, rate limiting, API security
  */
 
+// Runtime env self-loader — MUST be the first import: it restores `.env.runtime`
+// (DEV_AUTH_ENABLED, JWT_SECRET, …) after a bare `node dist/index.js` restart by
+// the agent-dashboard supervisor, and middleware/auth captures JWT_SECRET at
+// import time. See loadEnv.ts for details.
+import './loadEnv';
 import { randomUUID } from 'crypto';
 import { createServer } from 'http';
 import express, { type Response, type Request } from 'express';
@@ -42,7 +47,7 @@ import {
 } from './metrics';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3789;
 
 // Phase 28: Validate secrets on startup
 validateSecrets();
@@ -549,6 +554,33 @@ function buildVersionHistory(records: any[]): Map<string, MappedStrategy['versio
   return byName;
 }
 
+app.post('/strategies', authenticate, async (req, res) => {
+  const log = (req as any).log;
+  log.info('strategies.create');
+  const result = await postJson<any>(
+    '/strategies',
+    req.body ?? {},
+    undefined,
+    headersForTrace(req),
+  );
+  if (!result.ok) {
+    const upstreamStatus = result.upstreamStatus;
+    const upstreamBody = result.upstreamBody;
+    if (upstreamStatus === 409) {
+      res.status(409).json(upstreamBody ?? { error: 'strategy_exists' });
+    } else if (upstreamStatus && upstreamStatus >= 400 && upstreamStatus < 500) {
+      res.status(upstreamStatus).json(upstreamBody ?? { error: 'validation_error' });
+    } else {
+      res.status(503).json({ error: 'python_service_unavailable', source: 'unavailable' });
+    }
+    return;
+  }
+  res.status(201).json({
+    strategy: mapStrategyRecord(result.data?.strategy ?? {}),
+    source: 'live',
+  });
+});
+
 app.get('/strategies', async (req, res) => {
   const log = (req as any).log;
   log.info('strategies.list');
@@ -990,12 +1022,29 @@ app.get('/research/overview', async (req, res) => {
   await sendProxy(res, '/research/overview', undefined, req);
 });
 
+app.get('/research/strategies', async (req, res) => {
+  // FIX-503: Backtest page loads supported strategy types from here; the
+  // Python service already serves it (200). Forward any query string verbatim.
+  const qs = new URLSearchParams(req.query as Record<string, string>).toString();
+  const path = qs ? `/research/strategies?${qs}` : '/research/strategies';
+  await sendProxy(res, path, undefined, req);
+});
+
 app.get('/research/experiments', async (req, res) => {
   await sendProxy(res, '/research/experiments', undefined, req);
 });
 
 app.get('/research/ranking', async (req, res) => {
   await sendProxy(res, '/research/ranking', undefined, req);
+});
+
+app.get('/research/data-info', async (req, res) => {
+  const qs = new URLSearchParams();
+  for (const key of ['symbol', 'timeframe']) {
+    const v = (req.query as any)[key];
+    if (v !== undefined) qs.set(key, String(v));
+  }
+  await sendProxy(res, `/research/data-info?${qs.toString()}`, undefined, req);
 });
 
 app.post('/research/experiments', authenticate, async (req, res) => {

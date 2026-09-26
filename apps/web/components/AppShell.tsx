@@ -63,6 +63,8 @@ const NAV_GROUPS = [
       { key: 'agents', label: 'Agents', href: '/agents', icon: 'users' },
       { key: 'models', label: 'Models', href: '/models', icon: 'layers' },
       { key: 'strategy', label: 'Strategy', href: '/strategy', icon: 'trend' },
+      { key: 'strategy-lab', label: 'Strategy Lab', href: '/strategy-lab', icon: 'flask' },
+      { key: 'backtest', label: 'Backtest', href: '/backtest', icon: 'activity' },
     ],
   },
   {
@@ -214,15 +216,13 @@ export default function AppShell({
   const [signedIn, setSignedIn] = useState(false);
   const [realtime, setRealtime] = useState<RealtimeStatus>('OFFLINE');
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    try {
-      const val = localStorage.getItem('sidebar-collapsed');
-      return val === 'true';
-    } catch {
-      return false;
-    }
-  });
+  // Always start expanded so the first client render matches the server HTML.
+  // Reading localStorage in the initializer made the client's first render
+  // differ from the server (hydration mismatch: server renders
+  // `data-collapsed="false"` while the client rendered `true`). The persisted
+  // value is applied after mount, in the effect below.
+  const [collapsed, setCollapsed] = useState(false);
+  const [collapsedReady, setCollapsedReady] = useState(false);
   // Mobile drawer state (independent from desktop collapse).
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -231,12 +231,23 @@ export default function AppShell({
     setDrawerOpen(false);
   }, [pathname]);
 
-  // Persist collapsed state
+  // Apply the persisted collapse state after mount (hydration-safe), then
+  // persist subsequent changes. Guarded by collapsedReady so the initial
+  // `false` default can never overwrite the stored value.
   useEffect(() => {
+    try {
+      const val = localStorage.getItem('sidebar-collapsed');
+      if (val !== null) setCollapsed(val === 'true');
+    } catch {}
+    setCollapsedReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!collapsedReady) return;
     try {
       localStorage.setItem('sidebar-collapsed', collapsed.toString());
     } catch {}
-  }, [collapsed]);
+  }, [collapsed, collapsedReady]);
 
   // Toggle button (placed in topbar actions)
   const toggleSidebar = () => setCollapsed(c => !c);

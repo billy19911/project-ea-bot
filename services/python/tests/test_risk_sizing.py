@@ -51,6 +51,7 @@ class _FullSupervisor:
                 "take_profit": 110.0,
                 "size": self.size,
                 "risk_pct": 0.0,
+                "confidence": 0.9,
             },
         }
 

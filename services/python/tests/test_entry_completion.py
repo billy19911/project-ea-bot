@@ -15,7 +15,6 @@ from __future__ import annotations
 import sys
 
 import pytest
-
 from execution.engine import ExecutionEngine, OrderRequest
 from orchestration.pipeline import TradingPipeline
 
@@ -30,7 +29,11 @@ def _bearish_supervisor():
                 "overall_signal": "SELL",
                 "overall_confidence": 0.7,
                 # Deliberately NO entry/sl/tp/size → must be completed.
-                "proposal": {"symbol": "XAUUSD", "direction": "SELL"},
+                "proposal": {
+                    "symbol": "XAUUSD",
+                    "direction": "SELL",
+                    "confidence": 0.8,
+                },
             }
 
     return StubSupervisor()
@@ -40,14 +43,19 @@ class _ApproveGate:
     def __init__(self):
         self.seen = None
 
-    def validate_proposal(self, proposal, account_state, current_positions, market_info):
+    def validate_proposal(
+        self, proposal, account_state, current_positions, market_info
+    ):
         from risk.gate import GateDecision
 
         self.seen = proposal
         # Approve only if the completed proposal has a positive size + SL.
         ok = bool(proposal.get("size") and proposal.get("stop_loss"))
         return GateDecision(
-            approved=ok, reason="ok" if ok else "incomplete", checks_passed={}, metrics_snapshot={}
+            approved=ok,
+            reason="ok" if ok else "incomplete",
+            checks_passed={},
+            metrics_snapshot={},
         )
 
 
@@ -117,10 +125,13 @@ def test_completion_never_overrides_provided_values():
                     "stop_loss": 1.0950,
                     "take_profit": 1.1100,
                     "size": 0.42,
+                    "confidence": 0.9,
                 },
             }
 
-    pipeline = TradingPipeline(supervisor=FullSupervisor(), risk_gate=gate, execution_engine=None)
+    pipeline = TradingPipeline(
+        supervisor=FullSupervisor(), risk_gate=gate, execution_engine=None
+    )
     pipeline.run({"event_type": "TREND_BULLISH", "symbol": "EURUSD"}, _context())
 
     assert gate.seen["entry_price"] == 1.1000
@@ -132,12 +143,18 @@ def test_completion_never_overrides_provided_values():
 def test_entry_reaches_execution_when_no_terminal(monkeypatch):
     """Full command-entry path reaches a (simulated) execution end to end."""
     monkeypatch.setitem(sys.modules, "MetaTrader5", None)
-    engine = ExecutionEngine(mt5_connector=None, simulation_mode=True, require_approval=True)
+    engine = ExecutionEngine(
+        mt5_connector=None, simulation_mode=True, require_approval=True
+    )
     pipeline = TradingPipeline(
-        supervisor=_bearish_supervisor(), risk_gate=_ApproveGate(), execution_engine=engine
+        supervisor=_bearish_supervisor(),
+        risk_gate=_ApproveGate(),
+        execution_engine=engine,
     )
 
-    result = pipeline.run({"event_type": "TREND_BULLISH", "symbol": "XAUUSD"}, _context())
+    result = pipeline.run(
+        {"event_type": "TREND_BULLISH", "symbol": "XAUUSD"}, _context()
+    )
 
     assert result.status == "EXECUTED", result.error
     assert result.executed is True
@@ -224,7 +241,9 @@ def test_run_validation_uses_merged_snapshot_evidence():
 
     assert gate.seen is not None
     assert gate.seen["entry_price"] > 0
-    assert gate.seen["stop_loss"] > 0, "snapshot ATR must complete SL via the gate inputs"
+    assert (
+        gate.seen["stop_loss"] > 0
+    ), "snapshot ATR must complete SL via the gate inputs"
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +254,9 @@ def test_native_send_requires_armed_terminal():
     # Ensure the real MetaTrader5 is importable (Windows); skip otherwise.
     pytest.importorskip("MetaTrader5")
 
-    engine = ExecutionEngine(mt5_connector=None, simulation_mode=True, require_approval=True)
+    engine = ExecutionEngine(
+        mt5_connector=None, simulation_mode=True, require_approval=True
+    )
     req = OrderRequest(
         symbol="EURUSD",
         order_type="BUY",

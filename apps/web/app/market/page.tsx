@@ -148,7 +148,7 @@ export default function MarketPage() {
         setAnalysis(null);
       }
     } catch {
-      if (seq === reqSeq.current) setError('Tidak bisa menghubungi API. Periksa Node pada :3001.');
+      if (seq === reqSeq.current) setError('Tidak bisa menghubungi API. Periksa Node pada :3789.');
     } finally {
       if (seq === reqSeq.current) setLoading(false);
     }

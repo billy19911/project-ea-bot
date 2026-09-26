@@ -1,0 +1,78 @@
+CERT-A1 web build report
+COMMAND: npm run build --workspace=project-ea-bot-web
+==============================================================================
+SECTION: web build
+COMMAND: npm run build --workspace=project-ea-bot-web
+==============================================================================
+
+> project-ea-bot-web@1.0.0 build
+> next build
+
+   ▲ Next.js 15.5.25
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 3.7s
+   Skipping linting
+   Checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/42) ...
+   Generating static pages (10/42) 
+   Generating static pages (20/42) 
+   Generating static pages (31/42) 
+ ✓ Generating static pages (42/42)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                 Size  First Load JS
+┌ ○ /                                    2.83 kB         125 kB
+├ ○ /_not-found                            986 B         104 kB
+├ ○ /accounts                            1.68 kB         124 kB
+├ ○ /agents                              4.53 kB         127 kB
+├ ○ /ai-control                          5.05 kB         128 kB
+├ ○ /audit                                 340 B         123 kB
+├ ○ /backtest                            3.56 kB         126 kB
+├ ○ /certification                       1.99 kB         125 kB
+├ ○ /circuit-breaker                     3.15 kB         126 kB
+├ ○ /control-plane                       13.3 kB         136 kB
+├ ○ /decision-replay                       354 B         123 kB
+├ ○ /decisions                             342 B         123 kB
+├ ○ /environment                         2.08 kB         125 kB
+├ ○ /execution                             342 B         123 kB
+├ ○ /execution-quality                   1.96 kB         125 kB
+├ ○ /incidents                           2.71 kB         125 kB
+├ ○ /learning                              345 B         123 kB
+├ ○ /login                               2.34 kB         105 kB
+├ ○ /market                              10.2 kB         133 kB
+├ ○ /models                              2.74 kB         125 kB
+├ ○ /monte-carlo                           349 B         123 kB
+├ ○ /news                                3.53 kB         126 kB
+├ ○ /observability                       6.08 kB         129 kB
+├ ○ /orders                               2.5 kB         125 kB
+├ ○ /overview                            4.14 kB         127 kB
+├ ○ /performance                           344 B         123 kB
+├ ○ /positions                           2.56 kB         125 kB
+├ ○ /reconciliation                        349 B         123 kB
+├ ○ /research                            6.21 kB         129 kB
+├ ○ /risk                                2.07 kB         125 kB
+├ ○ /risk-center                           349 B         123 kB
+├ ○ /settings                            4.27 kB         127 kB
+├ ○ /slo                                 2.54 kB         125 kB
+├ ○ /strategy                            3.38 kB         126 kB
+├ ○ /strategy-lab                        2.33 kB         125 kB
+├ ○ /system-health                         353 B         123 kB
+├ ○ /system-readiness                    2.04 kB         125 kB
+├ ○ /trade-history                       2.27 kB         125 kB
+├ ○ /walk-forward                          351 B         123 kB
+└ ○ /why-no-trade                          353 B         123 kB
++ First Load JS shared by all             103 kB
+  ├ chunks/18-2c82660ce7c4918d.js        46.4 kB
+  ├ chunks/87c73c54-24122e7b92478d00.js  54.2 kB
+  └ other shared chunks (total)          2.09 kB
+
+
+○  (Static)  prerendered as static content
+
+
+
+EXIT_CODE: 0
+

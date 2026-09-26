@@ -100,6 +100,13 @@
   gap: 16px;
 }
 
+/* Grid items default to min-width:auto — a wide table would blow the column
+   past the viewport. min-width:0 lets the card shrink and .tableWrapper
+   scroll inside instead. */
+.grid > * {
+  min-width: 0;
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);

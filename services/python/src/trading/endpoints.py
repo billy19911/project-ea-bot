@@ -7,6 +7,7 @@ from datetime import datetime
 
 from fastapi import APIRouter
 
+from ..strategy.endpoints import get_active_strategy_config
 from .engine import TradingEngine
 
 router = APIRouter(prefix="/trading", tags=["deterministic-trading"])
@@ -17,7 +18,7 @@ async def analyze_market(
     ohlc_data: list[dict[str, float]] | list[list[float]],
 ):
     """Get comprehensive market analysis from the trading engine."""
-    engine = TradingEngine()
+    engine = TradingEngine(config=get_active_strategy_config())
     try:
         signal = engine.generate_signal(ohlc_data)
         return {
@@ -58,7 +59,7 @@ async def generate_signal(
     account_equity: float = 10000.0,
 ):
     """Generate a trading signal with position sizing."""
-    engine = TradingEngine()
+    engine = TradingEngine(config=get_active_strategy_config())
     signal = engine.generate_signal(ohlc_data, account_equity)
     return {
         "signal": {

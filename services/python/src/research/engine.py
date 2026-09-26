@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from trading.indicators import atr_series, ema
+from trading.indicators import atr_series, ema_series, macd_series, rsi_series
 
 from .store import ResearchStore
 
@@ -64,6 +64,9 @@ class Experiment:
         parameters: Parameter overrides merged with strategy version params.
         hypothesis_id: Hypothesis ID this experiment tests.
         status: One of "pending", "running", "completed", "failed".
+        strategy_type: Strategy identifier — ``ema_crossover`` (default),
+            ``rsi_reversal``, or ``macd_crossover`` — selecting the signal
+            logic used by :meth:`ResearchEngine._simulate`.
     """
 
     id: str
@@ -72,6 +75,7 @@ class Experiment:
     parameters: dict[str, Any]
     hypothesis_id: str
     status: str
+    strategy_type: str = "ema_crossover"
 
 
 @dataclass
@@ -100,7 +104,18 @@ class BacktestResult:
 
 
 class ResearchEngine:
-    """Engine for hypothesis creation, experimentation, backtesting, comparison."""
+    """Engine for hypothesis creation, experimentation, backtesting, comparison.
+
+    Supported strategy types (used by :meth:`run_backtest` /
+    :meth:`_simulate`):
+
+    * ``ema_crossover`` — fast/slow EMA cross (default; backward compatible).
+    * ``rsi_reversal`` — RSI overbought/oversold mean-reversion entry.
+    * ``macd_crossover`` — MACD line/signal crossover entry.
+    """
+
+    #: All strategy identifiers supported by the engine's ``_simulate``.
+    STRATEGIES: tuple[str, ...] = ("ema_crossover", "rsi_reversal", "macd_crossover")
 
     def __init__(self, store: ResearchStore | None = None) -> None:
         """Initialise the research engine.
@@ -191,9 +206,13 @@ class ResearchEngine:
                     if provenance:
                         self._run_provenance[experiment_id] = provenance
             except (KeyError, TypeError, ValueError) as exc:
-                logger.warning(f"Skipping malformed research record ({record_type}): {exc}")
+                logger.warning(
+                    f"Skipping malformed research record ({record_type}): {exc}"
+                )
 
-    def record_run_provenance(self, experiment_id: str, provenance: dict[str, Any]) -> None:
+    def record_run_provenance(
+        self, experiment_id: str, provenance: dict[str, Any]
+    ) -> None:
         """Persist provenance (symbol/timeframe/bars/account) for a run."""
         self._run_provenance[experiment_id] = provenance
         self._store.append(
@@ -239,7 +258,8 @@ class ResearchEngine:
         )
         self._hypotheses[hypothesis_id] = hypothesis
         self._store.append(
-            "hypothesis", {**hypothesis.__dict__, "created_at": hypothesis.created_at.isoformat()}
+            "hypothesis",
+            {**hypothesis.__dict__, "created_at": hypothesis.created_at.isoformat()},
         )
         logger.info(f"Created hypothesis '{name}' ({hypothesis_id})")
         return hypothesis
@@ -276,7 +296,8 @@ class ResearchEngine:
         )
         self._strategy_versions[version] = strategy
         self._store.append(
-            "strategy_version", {**strategy.__dict__, "created_at": strategy.created_at.isoformat()}
+            "strategy_version",
+            {**strategy.__dict__, "created_at": strategy.created_at.isoformat()},
         )
         logger.info(f"Created strategy version '{version}'")
         return strategy
@@ -299,6 +320,7 @@ class ResearchEngine:
         hypothesis_id: str,
         strategy_version: str,
         parameters: dict[str, Any] | None = None,
+        strategy_type: str = "ema_crossover",
     ) -> Experiment:
         """Create and register an experiment.
 
@@ -309,6 +331,8 @@ class ResearchEngine:
             hypothesis_id: ID of hypothesis being tested.
             strategy_version: Strategy version key.
             parameters: Optional parameter overrides.
+            strategy_type: Strategy identifier (``ema_crossover``, ``rsi_reversal``,
+                or ``macd_crossover``). Defaults to ``ema_crossover``.
 
         Returns:
             Created Experiment instance.
@@ -329,6 +353,7 @@ class ResearchEngine:
             parameters=parameters or {},
             hypothesis_id=hypothesis_id,
             status="pending",
+            strategy_type=strategy_type,
         )
         self._experiments[experiment_id] = experiment
         self._store.append("experiment", experiment.__dict__.copy())
@@ -425,9 +450,14 @@ class ResearchEngine:
     ) -> BacktestResult:
         """Run a realistic, indicator-based backtest over historical closes.
 
-        The simulation reuses the project's real EMA implementation
-        (:func:`trading.indicators.ema`) — there is no hand-rolled indicator maths
+        The simulation reuses the project's real indicator implementations
+        (:func:`trading.indicators.ema`, :func:`trading.indicators.rsi_series`,
+        :func:`trading.indicators.macd_series`) — there is no hand-rolled maths
         here — and is fully deterministic (no randomness, no new deps).
+
+        The strategy type is read from ``experiment.strategy_type`` and selects
+        the signal logic: ``ema_crossover`` (default), ``rsi_reversal``, or
+        ``macd_crossover``.
 
         When ``walk_forward`` is enabled (default), the data is split into a
         train window and a test window (``train_ratio``, default 70/30). A
@@ -463,7 +493,11 @@ class ResearchEngine:
                 expectation=0.0,
                 net_pnl=0.0,
                 trades=[],
-                walk_forward={"enabled": bool(walk_forward), "windows": [], "aggregate": {}},
+                walk_forward={
+                    "enabled": bool(walk_forward),
+                    "windows": [],
+                    "aggregate": {},
+                },
             )
             self._backtest_results[experiment.id] = result
             experiment.status = "completed"
@@ -475,13 +509,24 @@ class ResearchEngine:
         params.update(experiment.parameters)
 
         # Full-series simulation drives the headline metrics/trades.
-        trades = self._simulate(historical_data, params, highs=highs, lows=lows)
+        trades = self._simulate(
+            historical_data,
+            params,
+            highs=highs,
+            lows=lows,
+            strategy_type=experiment.strategy_type,
+        )
         metrics = self.compute_metrics(trades)
 
         walk_forward_meta: dict[str, Any] = {"enabled": bool(walk_forward)}
         if walk_forward:
             walk_forward_meta = self._walk_forward(
-                historical_data, params, train_ratio, highs=highs, lows=lows
+                historical_data,
+                params,
+                train_ratio,
+                highs=highs,
+                lows=lows,
+                strategy_type=experiment.strategy_type,
             )
 
         result = BacktestResult(
@@ -499,7 +544,8 @@ class ResearchEngine:
         experiment.status = "completed"
         self._persist_result(experiment.id, result)
         logger.info(
-            f"Backtest completed: {result.total_trades} trades, " f"PnL={result.net_pnl:.2f}"
+            f"Backtest completed: {result.total_trades} trades, "
+            f"PnL={result.net_pnl:.2f}"
         )
         return result
 
@@ -534,28 +580,52 @@ class ResearchEngine:
         params: dict[str, Any],
         highs: list[float] | None = None,
         lows: list[float] | None = None,
+        strategy_type: str = "ema_crossover",
     ) -> list[dict[str, Any]]:
-        """Simulate EMA-crossover trades over a price series (deterministic).
+        """Simulate trades over a price series using the specified strategy.
 
-        Uses the project's real :func:`trading.indicators.ema` for both the fast
-        and slow lines, enters on a crossover and exits on the opposite
-        crossover (or at end of data). The final open position is always closed
-        so realised PnL reflects the whole series.
+        Supports multiple strategy types:
+        - ``ema_crossover``: Fast/slow EMA crossover (default, backward compat)
+        - ``rsi_reversal``: RSI oversold/overbought reversal
+        - ``macd_crossover``: MACD histogram zero-cross
+
+        Uses the project's real indicator implementations. The final open
+        position is always closed so realised PnL reflects the whole series.
 
         When *highs* and *lows* are supplied (real bars), each trade also gets
-        ATR-based stop-loss / take-profit levels — the same 2×ATR stop and
-        R:R 2:1 target the trading engine proposes. Intrabar the stop is checked
+        ATR-based stop-loss / take-profit levels. Intrabar the stop is checked
         before the target (worst-case convention), and the exit is labelled with
         ``exit_reason``: ``stop_loss`` / ``take_profit`` / ``signal_reversal`` /
         ``end_of_data``. Without real highs/lows no ATR levels are fabricated —
         trades then exit on signal only.
         """
-        fast_period = int(params.get("fast_ema_period", 3))
-        slow_period = int(params.get("slow_ema_period", 8))
-        if fast_period < 1:
-            fast_period = 1
-        if slow_period <= fast_period:
-            slow_period = fast_period + 1
+        # Strategy-specific parameter extraction
+        if strategy_type == "rsi_reversal":
+            rsi_period = int(params.get("rsi_period", 14))
+            rsi_overbought = float(params.get("rsi_overbought", 70.0))
+            rsi_oversold = float(params.get("rsi_oversold", 30.0))
+            if rsi_period < 1:
+                rsi_period = 14
+            min_bars = rsi_period + 1
+        elif strategy_type == "macd_crossover":
+            macd_fast = int(params.get("macd_fast_period", 12))
+            macd_slow = int(params.get("macd_slow_period", 26))
+            macd_signal = int(params.get("macd_signal_period", 9))
+            if macd_fast < 1:
+                macd_fast = 12
+            if macd_slow <= macd_fast:
+                macd_slow = 26
+            if macd_signal < 1:
+                macd_signal = 9
+            min_bars = macd_slow
+        else:  # ema_crossover (default)
+            fast_period = int(params.get("fast_ema_period", 3))
+            slow_period = int(params.get("slow_ema_period", 8))
+            if fast_period < 1:
+                fast_period = 1
+            if slow_period <= fast_period:
+                slow_period = fast_period + 1
+            min_bars = slow_period
 
         trades: list[dict[str, Any]] = []
         in_trade = False
@@ -566,8 +636,7 @@ class ResearchEngine:
         entry_atr: float | None = None
         entry_bar = 0
 
-        # ATR levels need real highs/lows; without them the trades simply carry
-        # no stop/target (no fabricated levels from closes).
+        # ATR levels need real highs/lows; without them trades carry no stop/target.
         use_atr = (
             highs is not None
             and lows is not None
@@ -590,39 +659,117 @@ class ResearchEngine:
         if reward_risk <= 0:
             reward_risk = 2.0
 
+        # Pre-compute indicator series for strategy
+        rsi_vals: list[float | None] = []
+        macd_line: list[float | None] = []
+        macd_hist: list[float | None] = []
+        fast_ema_vals: list[float] = []
+        slow_ema_vals: list[float] = []
+        prev_rsi: float | None = None
+        prev_hist: float | None = None
+
+        if strategy_type == "rsi_reversal":
+            rsi_vals = rsi_series(prices, rsi_period)
+        elif strategy_type == "macd_crossover":
+            macd_line, _signal, macd_hist = macd_series(
+                prices, macd_fast, macd_slow, macd_signal
+            )
+        else:  # ema_crossover
+            # Full-series EMAs in O(n). Running ema() over a growing window per
+            # bar is O(n²) — identical values, but unusable at 100k bars.
+            fast_ema_vals = ema_series(prices, fast_period)
+            slow_ema_vals = ema_series(prices, slow_period)
+
         for bar_idx in range(len(prices)):
-            window = prices[: bar_idx + 1]
-            if len(window) < slow_period:
-                continue
-            fast_ema = ema(window, fast_period)
-            slow_ema = ema(window, slow_period)
-            if fast_ema is None or slow_ema is None:
-                continue
             close = prices[bar_idx]
 
-            if not in_trade:
-                if fast_ema > slow_ema:
-                    entry_price, direction, in_trade = close, 1, True
-                elif fast_ema < slow_ema:
-                    entry_price, direction, in_trade = close, -1, True
-                if in_trade:
-                    entry_bar = bar_idx
-                    entry_atr = atr_values[bar_idx] if use_atr else None
-                    if entry_atr is not None and entry_atr > 0:
-                        stop_loss = entry_price - direction * stop_multiplier * entry_atr
-                        take_profit = (
-                            entry_price + direction * stop_multiplier * reward_risk * entry_atr
-                        )
-                    else:
-                        stop_loss = None
-                        take_profit = None
-            else:
+            # Strategy-specific entry signal
+            entry_signal = 0  # 0=none, 1=long, -1=short
+            exit_signal = False
+
+            if strategy_type == "ema_crossover":
+                if bar_idx < min_bars:
+                    continue
+                fast_ema = fast_ema_vals[bar_idx]
+                slow_ema = slow_ema_vals[bar_idx]
+                # ema_series returns 0.0 placeholders before enough data; skip.
+                if fast_ema == 0.0 or slow_ema == 0.0:
+                    continue
+                if not in_trade:
+                    if fast_ema > slow_ema:
+                        entry_signal = 1
+                    elif fast_ema < slow_ema:
+                        entry_signal = -1
+                else:
+                    reversed_trend = (direction == 1 and fast_ema < slow_ema) or (
+                        direction == -1 and fast_ema > slow_ema
+                    )
+                    exit_signal = reversed_trend
+
+            elif strategy_type == "rsi_reversal":
+                if bar_idx < min_bars:
+                    continue
+                curr_rsi = rsi_vals[bar_idx]
+                if curr_rsi is None:
+                    continue
+                if not in_trade:
+                    # Long: RSI was below oversold, now turning up
+                    if prev_rsi is not None and prev_rsi < rsi_oversold <= curr_rsi:
+                        entry_signal = 1
+                    # Short: RSI was above overbought, now turning down
+                    elif prev_rsi is not None and prev_rsi > rsi_overbought >= curr_rsi:
+                        entry_signal = -1
+                else:
+                    # Exit long if RSI crosses above overbought
+                    if direction == 1 and curr_rsi > rsi_overbought:
+                        exit_signal = True
+                    # Exit short if RSI crosses below oversold
+                    elif direction == -1 and curr_rsi < rsi_oversold:
+                        exit_signal = True
+                prev_rsi = curr_rsi
+
+            elif strategy_type == "macd_crossover":
+                if bar_idx < min_bars:
+                    continue
+                curr_hist = macd_hist[bar_idx]
+                if curr_hist is None:
+                    continue
+                if not in_trade:
+                    # Long: histogram crosses above zero
+                    if prev_hist is not None and prev_hist <= 0 < curr_hist:
+                        entry_signal = 1
+                    # Short: histogram crosses below zero
+                    elif prev_hist is not None and prev_hist >= 0 > curr_hist:
+                        entry_signal = -1
+                else:
+                    # Exit on opposite cross
+                    if direction == 1 and curr_hist < 0:
+                        exit_signal = True
+                    elif direction == -1 and curr_hist > 0:
+                        exit_signal = True
+                prev_hist = curr_hist
+
+            # Process entry
+            if not in_trade and entry_signal != 0:
+                entry_price, direction, in_trade = close, entry_signal, True
+                entry_bar = bar_idx
+                entry_atr = atr_values[bar_idx] if use_atr else None
+                if entry_atr is not None and entry_atr > 0:
+                    stop_loss = entry_price - direction * stop_multiplier * entry_atr
+                    take_profit = (
+                        entry_price
+                        + direction * stop_multiplier * reward_risk * entry_atr
+                    )
+                else:
+                    stop_loss = None
+                    take_profit = None
+
+            # Process exit
+            elif in_trade:
                 exit_price: float | None = None
                 exit_reason = ""
 
-                # Intrabar stop/target using the real high/low of this bar.
-                # Worst-case convention: the stop is assumed hit before the
-                # target when a bar covers both — never an optimistic guess.
+                # Intrabar stop/target (worst-case: stop checked before target)
                 if stop_loss is not None and take_profit is not None:
                     bar_high = float(highs[bar_idx]) if use_atr else close
                     bar_low = float(lows[bar_idx]) if use_atr else close
@@ -637,10 +784,7 @@ class ResearchEngine:
                         elif bar_low <= take_profit:
                             exit_price, exit_reason = take_profit, "take_profit"
 
-                reversed_trend = (direction == 1 and fast_ema < slow_ema) or (
-                    direction == -1 and fast_ema > slow_ema
-                )
-                if exit_price is None and reversed_trend:
+                if exit_price is None and exit_signal:
                     exit_price, exit_reason = close, "signal_reversal"
 
                 if exit_price is not None:
@@ -664,7 +808,7 @@ class ResearchEngine:
                     take_profit = None
                     entry_atr = None
 
-        # Close final position at last price.
+        # Close final position at last price
         if in_trade:
             close = prices[-1]
             pnl = (close - entry_price) * direction
@@ -691,6 +835,7 @@ class ResearchEngine:
         train_ratio: float,
         highs: list[float] | None = None,
         lows: list[float] | None = None,
+        strategy_type: str = "ema_crossover",
     ) -> dict[str, Any]:
         """Split data into train/test windows and aggregate their metrics.
 
@@ -713,7 +858,13 @@ class ResearchEngine:
             window_prices = prices[start:end]
             window_highs = highs[start:end] if highs is not None else None
             window_lows = lows[start:end] if lows is not None else None
-            trades = self._simulate(window_prices, params, highs=window_highs, lows=window_lows)
+            trades = self._simulate(
+                window_prices,
+                params,
+                highs=window_highs,
+                lows=window_lows,
+                strategy_type=strategy_type,
+            )
             metrics = self.compute_metrics(trades)
             windows.append(
                 {
@@ -785,8 +936,13 @@ class ResearchEngine:
         Raises:
             ValueError: If either experiment has no backtest result.
         """
-        if exp1.id not in self._backtest_results or exp2.id not in self._backtest_results:
-            raise ValueError("Cannot compare: requires completed backtests for both experiments")
+        if (
+            exp1.id not in self._backtest_results
+            or exp2.id not in self._backtest_results
+        ):
+            raise ValueError(
+                "Cannot compare: requires completed backtests for both experiments"
+            )
 
         result1 = self._backtest_results[exp1.id]
         result2 = self._backtest_results[exp2.id]

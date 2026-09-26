@@ -87,7 +87,10 @@ def _default_symbol_spec_provider():
     return _provider
 
 
-def _build_position_monitor() -> Optional[Any]:
+def _build_position_monitor(
+    event_queue: Optional[EventQueue] = None,
+    scheduler: Optional[AutonomousScheduler] = None,
+) -> Optional[Any]:
     """Build a read-only position monitor wired to the review/learning loop.
 
     Audit B-6: the production runtime never closed positions and the paper engine
@@ -98,6 +101,11 @@ def _build_position_monitor() -> Optional[Any]:
     broker's open positions each cycle and only detects DISAPPEARED tickets — it
     never places, modifies, or closes anything.
 
+    FIX A (RISK/REVIEW event emission): when a close is detected, ALSO enqueue a
+    ``TRADE_CLOSE`` event to ``event_queue`` (when supplied) and wake the
+    scheduler so the supervisor routes it to ReviewLead. Follows the same
+    pattern as :class:`MarketFeedLoop` ``on_emit``.
+
     Fail-safe: any import/wiring error returns ``None`` (the loop is unaffected).
     """
     try:
@@ -105,7 +113,38 @@ def _build_position_monitor() -> Optional[Any]:
         from review.auto_trigger import on_position_closed
         from review.close_detector import PositionCloseDetector
 
-        detector = PositionCloseDetector(on_close=on_position_closed)
+        def _on_close_emit_trade_event(trade_result: Any) -> None:
+            """Wrap on_position_closed and also enqueue TRADE_CLOSE event.
+
+            Fail-safe: enqueue errors are swallowed (review still runs first).
+            """
+            # Original review/lesson path runs first (fail-safe).
+            try:
+                on_position_closed(trade_result)
+            except Exception as exc:  # noqa: BLE001 - review must not block emit
+                logger.warning("Review on_position_closed failed: %s", exc)
+            # FIX A: also emit TRADE_CLOSE event so supervisor routes to
+            # ReviewLead. Follows MarketFeedLoop on_emit pattern.
+            if event_queue is None:
+                return
+            try:
+                payload = (
+                    dict(trade_result)
+                    if isinstance(trade_result, dict)
+                    else getattr(trade_result, "model_dump", lambda: {})()
+                )
+                event_queue.enqueue(
+                    {
+                        "event_type": "TRADE_CLOSE",
+                        "trade_result": payload,
+                    }
+                )
+                if scheduler is not None:
+                    scheduler.wake()
+            except Exception as exc:  # noqa: BLE001 - never break close path
+                logger.warning("TRADE_CLOSE event emit failed: %s", exc)
+
+        detector = PositionCloseDetector(on_close=_on_close_emit_trade_event)
 
         # Wire durable position reconciliation store (B-5, fail-safe).
         reconciliation_store = None
@@ -116,7 +155,30 @@ def _build_position_monitor() -> Optional[Any]:
         except Exception:  # noqa: BLE001 - store is optional
             pass
 
-        return PositionMonitor(close_detector=detector, reconciliation_store=reconciliation_store)
+        # LEDGER-SLTP T1: wire the order-state ledger so a verified position
+        # disappearance appends a `closed` record (prevents phantom open
+        # positions blocking reconciliation). The store is attached globally by
+        # main.py via execution.state_machine.set_store(); read it back here so
+        # we do not instantiate a second, competing ledger. Fail-safe.
+        order_state_store = None
+        try:
+            for mod_name in ("execution.state_machine", "src.execution.state_machine"):
+                try:
+                    import importlib
+
+                    order_state_store = importlib.import_module(mod_name).get_store()
+                    if order_state_store is not None:
+                        break
+                except (ImportError, AttributeError):
+                    continue
+        except Exception:  # noqa: BLE001 - optional
+            order_state_store = None
+
+        return PositionMonitor(
+            close_detector=detector,
+            reconciliation_store=reconciliation_store,
+            order_state_store=order_state_store,
+        )
     except Exception as exc:  # noqa: BLE001 - monitoring must never block wiring
         logger.warning("Position monitor not wired: %s", exc)
         return None
@@ -146,7 +208,9 @@ def _notify_cycle_result(result: Any) -> None:
             if get_signal_lifecycle().observe_cycle_result(payload):
                 return
         except Exception as exc:  # noqa: BLE001 - fall back to the digest
-            logger.warning("Signal lifecycle failed (%s); using digest", type(exc).__name__)
+            logger.warning(
+                "Signal lifecycle failed (%s); using digest", type(exc).__name__
+            )
 
         try:
             from telegram.notifier import queue_pipeline_result
@@ -155,7 +219,9 @@ def _notify_cycle_result(result: Any) -> None:
 
         queue_pipeline_result(payload)
     except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
-        logger.warning("Telegram cycle report failed (%s); cycle unaffected", type(exc).__name__)
+        logger.warning(
+            "Telegram cycle report failed (%s); cycle unaffected", type(exc).__name__
+        )
 
 
 class _RecordingPipelineProxy:
@@ -169,7 +235,9 @@ class _RecordingPipelineProxy:
     recording failure never affects the cycle).
     """
 
-    def __init__(self, pipeline: TradingPipeline, runtime: "OrchestrationRuntime") -> None:
+    def __init__(
+        self, pipeline: TradingPipeline, runtime: "OrchestrationRuntime"
+    ) -> None:
         self._pipeline = pipeline
         self._runtime = runtime
 
@@ -250,7 +318,9 @@ class OrchestrationRuntime:
         # Audit P1-2: per-dependency circuit breakers (§24) + kill switch, wired
         # into the pipeline as the execution-critical dependency guard. An open
         # EXECUTION breaker or an engaged kill switch blocks new orders.
-        self.execution_guard = execution_guard if execution_guard is not None else ExecutionGuard()
+        self.execution_guard = (
+            execution_guard if execution_guard is not None else ExecutionGuard()
+        )
         self.pipeline = (
             pipeline
             if pipeline is not None
@@ -293,7 +363,12 @@ class OrchestrationRuntime:
         self._graph_stage = GraphStage
         # Audit B-6: read-only position monitoring that feeds the review/learning
         # loop when a ticket disappears (observation only; never orders).
-        self.position_monitor = _build_position_monitor()
+        # FIX A: pass queue + scheduler so TRADE_CLOSE events get enqueued and
+        # routed to ReviewLead, mirroring MarketFeedLoop's on_emit pattern.
+        self.position_monitor = _build_position_monitor(
+            event_queue=self.queue,
+            scheduler=self.scheduler,
+        )
 
     @property
     def _reconciliation_runner(self) -> ReconciliationRunner:
@@ -302,7 +377,10 @@ class OrchestrationRuntime:
         Prefers the scheduler's runner (kept in sync in production) but falls back
         to the runtime-owned runner when a custom scheduler was injected.
         """
-        return getattr(self.scheduler, "reconciliation_runner", None) or self.reconciliation
+        return (
+            getattr(self.scheduler, "reconciliation_runner", None)
+            or self.reconciliation
+        )
 
     @staticmethod
     def _default_reconciliation_providers() -> Any:
@@ -381,7 +459,9 @@ class OrchestrationRuntime:
         # Audit P1-4: normalise volume to the broker's lot step and round prices
         # to the symbol digits when a spec is available. Fail-safe: a spec lookup
         # failure leaves the order unchanged.
-        order_builder = OrderBuilder(symbol_spec_provider=_default_symbol_spec_provider())
+        order_builder = OrderBuilder(
+            symbol_spec_provider=_default_symbol_spec_provider()
+        )
         # One-entry policy (default ON): while one of OUR positions (matched by
         # entry magic) is open, new entries are blocked. The magic id labels our
         # orders so we never count a foreign EA's positions.
@@ -489,7 +569,9 @@ class OrchestrationRuntime:
                     # Refused by the safety layer before any dispatch (e.g.
                     # "EXECUTION NOT ARMED") — expected while unarmed; counting
                     # it would self-lock the loop after three valid signals.
-                    logger.info("Execution refused before dispatch — breaker unaffected.")
+                    logger.info(
+                        "Execution refused before dispatch — breaker unaffected."
+                    )
                     return
                 # An order build/execution error — count toward the breaker.
                 detail = str(record.get("error") or "execution error")
@@ -549,7 +631,9 @@ class OrchestrationRuntime:
         except Exception as exc:  # noqa: BLE001 - never break the loop
             logger.warning("Signal price observation failed (%s)", type(exc).__name__)
 
-    def _record_trace(self, record: dict[str, Any], trace_id: Optional[str] = None) -> None:
+    def _record_trace(
+        self, record: dict[str, Any], trace_id: Optional[str] = None
+    ) -> None:
         """Record the cycle into the bounded trace store (fail-safe)."""
         try:
             self.traces.record_pipeline_result(record, trace_id=trace_id)
@@ -609,7 +693,9 @@ class OrchestrationRuntime:
                 },
             )
             graph.add_node(stage.RESULT, {"status": record.get("status", "")})
-        except Exception as exc:  # noqa: BLE001 - observability must never break a cycle
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - observability must never break a cycle
             logger.warning("Failed to record decision graph: %s", exc)
 
     def recent_decisions(self, limit: int = 50) -> list[dict[str, Any]]:

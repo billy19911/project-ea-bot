@@ -25,6 +25,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
+from config import settings
 from execution.engine import OrderRequest
 from execution.order_builder import OrderBuilder
 from risk.gate import GateDecision
@@ -148,7 +149,9 @@ class PipelineResult:
 
     def add_stage(self, stage: str, status: str, detail: str = "") -> None:
         """Append a stage entry (as a plain dict) to the trace."""
-        self.trace.append(PipelineStage(stage=stage, status=status, detail=detail).to_dict())
+        self.trace.append(
+            PipelineStage(stage=stage, status=status, detail=detail).to_dict()
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise the whole result to a JSON-friendly dict."""
@@ -239,7 +242,9 @@ class TradingPipeline:
         self.supervisor = supervisor
         self.risk_gate = risk_gate
         self.execution_engine = execution_engine
-        self.order_builder = order_builder if order_builder is not None else OrderBuilder()
+        self.order_builder = (
+            order_builder if order_builder is not None else OrderBuilder()
+        )
         self.strategy_version = strategy_version
         # Risk-% sizing knob: fraction of equity risked when the proposal does
         # not carry its own risk_pct. The UI knob (risk_per_trade_pct) pushes a
@@ -260,7 +265,9 @@ class TradingPipeline:
         # left empty (so an entry command can reach execution). Deterministic;
         # never overrides values the proposal already provides. Default instance
         # keeps existing behaviour when a caller does not inject one.
-        self.money_manager = money_manager if money_manager is not None else MoneyManager()
+        self.money_manager = (
+            money_manager if money_manager is not None else MoneyManager()
+        )
         # Optional execution-critical guard (§24). When supplied it must expose
         # ``check_can_execute() -> (bool, reason)``; a False result blocks new
         # orders at the execution check-point. Optional so existing callers and
@@ -350,7 +357,9 @@ class TradingPipeline:
         if proposal is None or not self._is_actionable(proposal):
             # NO-TRADE path: skip risk and execution entirely.
             result.decision = self._no_trade_decision(analysis)
-            result.status = STATUS_WAIT if result.decision == "WAIT" else STATUS_NO_TRADE
+            result.status = (
+                STATUS_WAIT if result.decision == "WAIT" else STATUS_NO_TRADE
+            )
             result.risk_reason = "no actionable proposal"
             # Level reporting: an indicative ladder (ATR model) so the
             # report still carries Entry/SL/TP1/TP2/TPmax for the setup.
@@ -373,9 +382,9 @@ class TradingPipeline:
         # (real entry/SL), consistent with what the gate validates. When the
         # proposal still lacks a usable stop (e.g. no ATR in the context) the
         # report falls back to the indicative ATR ladder instead of nothing.
-        result.levels = self._order_levels(validation, analysis_context) or self._indicative_levels(
-            analysis, analysis_context
-        )
+        result.levels = self._order_levels(
+            validation, analysis_context
+        ) or self._indicative_levels(analysis, analysis_context)
         try:
             decision: GateDecision = self.risk_gate.validate_proposal(
                 validation["proposal"],
@@ -417,7 +426,9 @@ class TradingPipeline:
                 allowed, guard_reason = False, f"dependency guard error: {exc}"
             if not allowed:
                 result.status = STATUS_BLOCKED
-                result.risk_reason = guard_reason or "execution blocked by dependency guard"
+                result.risk_reason = (
+                    guard_reason or "execution blocked by dependency guard"
+                )
                 result.error = guard_reason or "execution blocked by dependency guard"
                 result.add_stage(
                     "dependency_guard",
@@ -427,7 +438,9 @@ class TradingPipeline:
                 result.add_stage("execution", STAGE_SKIPPED, "dependency guard blocked")
                 self._finalise(result)
                 return result
-            result.add_stage("dependency_guard", STAGE_OK, "execution-critical deps healthy")
+            result.add_stage(
+                "dependency_guard", STAGE_OK, "execution-critical deps healthy"
+            )
 
         # ── Step B3: Reconciliation gate (audit P0-3) ───────────────────
         # A critical internal↔MT5 mismatch (missing/orphan position, volume
@@ -452,7 +465,9 @@ class TradingPipeline:
         # While one of OUR positions (matched by magic) is still open, a new
         # entry is blocked — one signal / one position at a time. Fail-safe: a
         # broken position read leaves the guard permissive (never blocks).
-        if self.single_entry_policy and self._has_own_position(validation["current_positions"]):
+        if self.single_entry_policy and self._has_own_position(
+            validation["current_positions"]
+        ):
             ticket = self._own_position_ticket(validation["current_positions"])
             result.status = STATUS_BLOCKED
             result.risk_reason = f"kebijakan satu entry: posisi #{ticket} masih terbuka"
@@ -465,7 +480,9 @@ class TradingPipeline:
         if self.execution_engine is None:
             result.status = STATUS_ERROR
             result.error = "execution engine not configured"
-            result.add_stage("execution", STAGE_ERROR, "execution engine not configured")
+            result.add_stage(
+                "execution", STAGE_ERROR, "execution engine not configured"
+            )
             self._finalise(result)
             return result
 
@@ -503,7 +520,9 @@ class TradingPipeline:
         result.executed = success
         result.status = STATUS_EXECUTED if success else STATUS_ERROR
         if not success:
-            result.error = str(getattr(exec_result, "error_message", "execution failed"))
+            result.error = str(
+                getattr(exec_result, "error_message", "execution failed")
+            )
         result.add_stage(
             "execution",
             STAGE_OK if success else STAGE_ERROR,
@@ -588,6 +607,18 @@ class TradingPipeline:
         analysis_context: dict[str, Any] = dict(context)
         analysis_context["event_type"] = event_type
         analysis_context.setdefault("event", event)
+        # Trade-close payloads arrive under ``trade_result`` (producer
+        # contract — see orchestration/runtime); the review path reads
+        # ``closed_trade``. Alias it so a TRADE_CLOSE event reaches ReviewLead
+        # with its payload. Fail-safe: dict payloads only.
+        if "closed_trade" not in analysis_context:
+            trade_result = (
+                event.get("trade_result")
+                if isinstance(event, dict)
+                else getattr(event, "trade_result", None)
+            )
+            if isinstance(trade_result, dict) and trade_result:
+                analysis_context["closed_trade"] = trade_result
         # Surface symbol from the event when the caller omitted it (needed
         # *before* lesson feedback so the summary is symbol-scoped).
         if "symbol" not in analysis_context:
@@ -606,7 +637,9 @@ class TradingPipeline:
         if self.lesson_provider is not None:
             try:
                 symbol = analysis_context.get("symbol") or "*"
-                analysis_context["lessons"] = self.lesson_provider.summarize_for_symbol(str(symbol))
+                analysis_context["lessons"] = self.lesson_provider.summarize_for_symbol(
+                    str(symbol)
+                )
             except Exception as exc:  # noqa: BLE001 - feedback must never break a cycle
                 logger.warning("Lesson provider failed (cycle continues): %s", exc)
         return analysis_context
@@ -646,15 +679,26 @@ class TradingPipeline:
         # ones the risk gate/order builder expects (stop_loss/take_profit).
         if proposal.get("stop_loss") is None and proposal.get("target_sl") is not None:
             proposal["stop_loss"] = proposal["target_sl"]
-        if proposal.get("take_profit") is None and proposal.get("target_tp") is not None:
+        if (
+            proposal.get("take_profit") is None
+            and proposal.get("target_tp") is not None
+        ):
             proposal["take_profit"] = proposal["target_tp"]
         return proposal
 
     @staticmethod
     def _is_actionable(proposal: dict[str, Any]) -> bool:
-        """Return True only for proposals with an actionable BUY/SELL direction."""
+        """Return True only for proposals with an actionable BUY/SELL direction
+        and confidence above the minimum threshold.
+
+        Fail-closed: missing confidence is treated as 0.0 (not actionable).
+        """
         direction = str(proposal.get("direction", "")).upper()
-        return direction in _ACTIONABLE
+        if direction not in _ACTIONABLE:
+            return False
+
+        confidence = float(proposal.get("confidence") or 0.0)
+        return confidence >= settings.min_signal_confidence
 
     @staticmethod
     def _no_trade_decision(analysis: Any) -> str:
@@ -678,7 +722,9 @@ class TradingPipeline:
         """
         try:
             summary = analysis.get("summary") if isinstance(analysis, dict) else ""
-            signal = analysis.get("overall_signal") if isinstance(analysis, dict) else ""
+            signal = (
+                analysis.get("overall_signal") if isinstance(analysis, dict) else ""
+            )
             direction = direction_from_text(signal, summary)
             if not direction:
                 return None
@@ -750,9 +796,13 @@ class TradingPipeline:
         normalised_proposal = {
             "symbol": proposal.get("symbol") or context.get("symbol", ""),
             "direction": str(proposal.get("direction", "")).upper(),
-            "entry_price": float(proposal.get("entry_price") or proposal.get("price") or 0.0),
+            "entry_price": float(
+                proposal.get("entry_price") or proposal.get("price") or 0.0
+            ),
             "stop_loss": float(proposal.get("stop_loss") or proposal.get("sl") or 0.0),
-            "take_profit": float(proposal.get("take_profit") or proposal.get("tp") or 0.0),
+            "take_profit": float(
+                proposal.get("take_profit") or proposal.get("tp") or 0.0
+            ),
             "size": float(proposal.get("size") or proposal.get("volume") or 0.0),
             "risk_pct": float(proposal.get("risk_pct") or 0.0),
         }
@@ -761,7 +811,9 @@ class TradingPipeline:
         # approved entry can actually reach execution. Fail-safe: any error
         # leaves the values unchanged (the gate then rejects missing fields).
         try:
-            self._complete_proposal(normalised_proposal, context, account_state, market_info)
+            self._complete_proposal(
+                normalised_proposal, context, account_state, market_info
+            )
         except Exception as exc:  # noqa: BLE001 - completion is best-effort
             logger.warning("Proposal completion skipped: %s", exc)
 
@@ -804,7 +856,11 @@ class TradingPipeline:
                 market_state.get("close"),
                 market_state.get("price"),
                 evidence_price,
-                (market_info.get("ask") if direction == "BUY" else market_info.get("bid")),
+                (
+                    market_info.get("ask")
+                    if direction == "BUY"
+                    else market_info.get("bid")
+                ),
                 market_info.get("price"),
                 context.get("close"),
                 context.get("price"),
@@ -869,8 +925,12 @@ class TradingPipeline:
         recompute = self.force_risk_sizing or size <= 0
         if recompute and sl > 0 and entry > 0:
             risk_pct = self._risk_fraction()
-            equity = float(account_state.get("equity") or account_state.get("balance") or 0.0)
-            point_value, contract_size = self._resolve_point_contract(proposal, market_info)
+            equity = float(
+                account_state.get("equity") or account_state.get("balance") or 0.0
+            )
+            point_value, contract_size = self._resolve_point_contract(
+                proposal, market_info
+            )
             sl_distance = abs(entry - sl)
             sl_pips = sl_distance / point_value if point_value > 0 else 0.0
             if sl_pips > 0 and equity > 0:
@@ -1011,7 +1071,9 @@ class TradingPipeline:
             "comment": f"EA-Bot-{direction}",
         }
 
-        client_order_id = proposal.get("client_order_id") or proposal.get("idempotency_key")
+        client_order_id = proposal.get("client_order_id") or proposal.get(
+            "idempotency_key"
+        )
         if client_order_id:
             build_proposal["client_order_id"] = str(client_order_id)
         else:

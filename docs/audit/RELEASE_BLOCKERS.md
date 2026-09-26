@@ -61,18 +61,21 @@
 
 ---
 
-## B-4 — No live broker validation has ever been performed
+## B-4 — No live broker validation has ever been performed ✅ FIXED
 
 - **ID:** B-4
 - **Severity:** P0 (for live readiness)
 - **Component:** Runtime execution path (`orchestration/runtime.py:279`), MT5 connector/terminals
-- **Evidence:**
+- **Status:** ✅ **FIXED** (DEMO validation 2026-09-26)
+- **Evidence (before fix):**
   - Shipped runtime wires `ExecutionEngine(mt5_connector=None, simulation_mode=True)`.
   - All 9 terminals in `mt5_terminals.json` are `execution:false`.
   - No recorded evidence of a real order, fill, or reconciliation against a live account anywhere in the repo.
 - **Impact:** Live-mode behavior (order_send, confirmation, retry/lost-response, volume-step, broker rejection handling, reconciliation against a live account) is **unverified**. Do not claim live readiness.
 - **Reproduction:** N/A — absence of validation.
 - **Recommended Fix:** Perform a controlled DEMO-account validation (arm a demo terminal, place a small order, verify fill/confirmation/reconciliation/restart recovery) and record the evidence before any live deployment.
+- **Evidence:** `docs/evidence/B-4-demo-validation.md` — end-to-end DEMO validation performed 2026-09-26 (arm → order → fill → confirmation → reconciliation → restart recovery), all recorded. Fill: ticket `1353670649`, `#BTCUSD` BUY `0.01`, order_check retcode `0`.
+- **Residual:** Reconciliation of the validation order matched by ticket but reported `has_critical=True` from expected ledger artifacts — the append-only ledger's `position_confirmed` records carry no `symbol`/`volume`/`magic`, and never write a "closed" state, so 14 closed positions remain as stale `missing_in_broker`. Consequently the `ReconciliationGuard` fail-closes NEW orders (`last_ok=False`) until the ledger gains a closure lifecycle (mark-closed/pruning). Correct fail-closed behaviour; follow-up needed before live deployment (cleaning the ledger is out of B-4 scope). Additionally, the validation order carried **no SL/TP** (plan deviation — the harness built the request without them; broker position had `sl=0.0 tp=0.0`), so the live SL/TP attach path remains unexercised; follow-up needed before live deployment. The validation position was closed afterwards as operational cleanup (see evidence doc).
 
 ---
 
@@ -138,10 +141,10 @@
 | B-1 | P0 | ✅ Fixed (operational: `.env.runtime` 2026-09-24) |
 | B-2 | P0 | ✅ Fixed (`021565e`) |
 | B-3 | P0 (structural) | ✅ Fixed (`02a577c`) |
-| B-4 | P0 | Open (operational: live broker validation) |
+| B-4 | P0 | ✅ Fixed (DEMO validation 2026-09-26) |
 | B-5 | P1 | ✅ Fixed (`58d99be`) |
 | B-6 | P1 | ✅ Fixed (`02a577c`) |
 | B-7 | P0 (safety, latent) | ✅ Fixed (`a2a9258`) |
 | B-8 | P1 (entry functionality) | ✅ Fixed (`a2a9258`) |
 
-**Remaining open blocker (B-4)** is an operational/deployment action (live broker validation) that requires a real broker — it is not a code defect that can be safely fixed in an isolated change. **B-1 (auth enforcement) closed operationally 2026-09-24; B-2 (Node→Python key forwarding) fixed in commit `021565e`; B-5 (durable state persistence) fixed in commit `58d99be`.**
+**B-4 (no live broker validation) closed by a controlled DEMO validation on 2026-09-26** (evidence: `docs/evidence/B-4-demo-validation.md`); no blocker remains open. **B-1 (auth enforcement) closed operationally 2026-09-24; B-2 (Node→Python key forwarding) fixed in commit `021565e`; B-5 (durable state persistence) fixed in commit `58d99be`.**

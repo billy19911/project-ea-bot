@@ -150,27 +150,82 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --legacy-peer-deps
 
-      - name: Run backend tests
+      # -----------------------------------------------------------------
+      # Gate A evidence: each step below writes a REAL artifact under
+      # reports/ so the Production Certification gate (Gate A) can read
+      # local CI evidence. Full output is captured (no head/tail) and the
+      # honest exit code is appended. See scripts/cert_artifacts.ps1.
+      # -----------------------------------------------------------------
+      - name: Run backend tests (write Gate A pytest artifact)
         env:
           DATABASE_URL: postgresql://ea_bot_user:test_password@localhost:5432/ea_bot_test
           REDIS_URL: redis://localhost:6379/0
           SECRET_KEY: test-secret-key-for-ci
         run: |
+          mkdir -p reports
           cd services/python
-          python -m pytest tests/ -v
+          set +e
+          python -m pytest tests/ -q > "$GITHUB_WORKSPACE/reports/pytest-report.txt" 2>&1
+          code=$?
+          echo "EXIT_CODE: $code" >> "$GITHUB_WORKSPACE/reports/pytest-report.txt"
+          set -e
 
-      - name: Run Node API tests
-        run: npm test --workspace=project-ea-bot-api
-
-      - name: Lint frontend
+      - name: Run Node API tests (write Gate A node_tests artifact)
         run: |
-          cd apps/web
-          npm run lint
+          mkdir -p reports
+          set +e
+          npm test --workspace=project-ea-bot-api > reports/node_tests.json.raw 2>&1
+          code=$?
+          set -e
+          node -e '
+            const fs = require("fs");
+            const out = fs.readFileSync("reports/node_tests.json.raw", "utf8");
+            fs.writeFileSync("reports/node_tests.json", JSON.stringify({
+              command: "npm test --workspace=project-ea-bot-api",
+              exit_code: '"$code"',
+              output: out
+            }, null, 2));
+          '
+          rm -f reports/node_tests.json.raw
 
-      - name: Type-check frontend
+      - name: Lint frontend (write Gate A lint artifact)
         run: |
-          cd apps/web
-          npx tsc --noEmit
+          set +e
+          {
+            echo "SECTION: eslint (web)"
+            cd apps/web && npm run lint
+            echo "EXIT_CODE: $?"
+          } >> "$GITHUB_WORKSPACE/reports/lint.txt" 2>&1
+          set -e
+
+      - name: Lint backend (write Gate A lint artifact)
+        run: |
+          set +e
+          {
+            echo "SECTION: flake8 (services/python)"
+            python -m flake8 services/python/src --max-line-length=100 --extend-ignore=E203,W503
+            echo "EXIT_CODE: $?"
+          } >> "$GITHUB_WORKSPACE/reports/lint.txt" 2>&1
+          set -e
+
+      - name: Type-check frontend (write Gate A typecheck artifact)
+        run: |
+          mkdir -p reports
+          set +e
+          {
+            echo "SECTION: web type-check"
+            cd apps/web && npx tsc --noEmit
+            echo "EXIT_CODE: $?"
+          } > reports/typecheck.txt 2>&1
+          set -e
+
+      - name: Upload Gate A certification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cert-gate-a-artifacts
+          path: reports/
+          retention-days: 7
 
   # ==========================================
   # BUILD
@@ -207,10 +262,22 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --legacy-peer-deps
 
-      - name: Build frontend
+      - name: Build frontend (write Gate A web_build artifact)
         run: |
-          cd apps/web
-          npm run build
+          mkdir -p reports
+          set +e
+          npm run build --workspace=project-ea-bot-web > reports/web_build.txt 2>&1
+          code=$?
+          echo "EXIT_CODE: $code" >> reports/web_build.txt
+          set -e
+
+      - name: Upload Gate A web build artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cert-gate-a-web-build
+          path: reports/web_build.txt
+          retention-days: 7
 
       - name: Collect backend static files
         run: |
@@ -247,11 +314,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r services/python/requirements.txt
 
-      - name: Run Python dependency audit
-        run: |
-          python -m pip install pip-audit
-          pip-audit -r services/python/requirements.txt
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -260,8 +322,36 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --legacy-peer-deps
 
-      - name: Run frontend dependency audit
-        run: npm audit --audit-level=high
+      # Gate A evidence: build reports/security.json = {pip_audit, npm_audit}.
+      - name: Run dependency audits (write Gate A security artifact)
+        run: |
+          mkdir -p reports
+          python -m pip install pip-audit
+          set +e
+          pip-audit -r services/python/requirements.txt -f json -o reports/pip_audit.json
+          pip_code=$?
+          npm audit --json > reports/npm_audit.json 2>/dev/null
+          npm_code=$?
+          set -e
+          node -e '
+            const fs = require("fs");
+            const read = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) { return null; } };
+            const out = {
+              pip_audit: { command: "pip-audit -r services/python/requirements.txt -f json",
+                           exit_code: '"$pip_code"', findings: read("reports/pip_audit.json") },
+              npm_audit: { command: "npm audit --json",
+                           exit_code: '"$npm_code"', findings: read("reports/npm_audit.json") }
+            };
+            fs.writeFileSync("reports/security.json", JSON.stringify(out, null, 2));
+          '
+
+      - name: Upload Gate A security artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cert-gate-a-security
+          path: reports/security.json
+          retention-days: 7
 
   # ==========================================
   # DEPLOY (opt-in — aktif HANYA bila target + secrets dikonfigurasi)

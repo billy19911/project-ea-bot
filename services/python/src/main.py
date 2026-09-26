@@ -2,11 +2,10 @@
 
 import asyncio
 import logging
+import sys
 import time
 from contextlib import asynccontextmanager
-
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from typing import Any
 
 from agents.analysts import (
     FundamentalAnalystAgent,
@@ -17,6 +16,8 @@ from agents.analysts import (
 )
 from agents.base import TechnicalAnalystAgent
 from agents.registry import agent_registry
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from .charting.endpoints import router as charting_router
 from .config import settings
@@ -39,6 +40,22 @@ from .trading.endpoints import router as trading_router
 from .trading.events import router as events_router
 
 logger = logging.getLogger(__name__)
+
+
+async def _risk_monitor_wrapper(monitor: Any) -> None:
+    """Async wrapper for RiskMonitor thread — waits until monitor stops.
+
+    FIX B: The monitor runs in a background thread (monitor.start()) so it
+    never blocks the event loop. This wrapper creates an asyncio task that
+    the lifespan can await/cancel on shutdown, providing graceful cleanup.
+    """
+    try:
+        while monitor.is_running():
+            await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        monitor.stop()
+        raise
+
 
 # Process start time, captured at import. Used to report a REAL service uptime
 # (seconds since boot) instead of a placeholder string.
@@ -90,6 +107,18 @@ def register_default_agents() -> list[str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan — startup and shutdown hooks."""
+    # FIX-503 T2: self-load .env.runtime (Node loadEnv.ts parity) so a service
+    # started WITHOUT exported env (bare `python main.py`) still gets
+    # NINE_ROUTER_BASE_URL etc. Only blank/missing keys are filled; skipped
+    # under pytest so the suite never inherits real runtime secrets.
+    if "pytest" not in sys.modules:
+        try:
+            from .env_bootstrap import load_runtime_env
+
+            load_runtime_env()
+        except Exception:  # noqa: BLE001 - bootstrap must never block startup
+            logger.exception("Runtime env bootstrap failed (system continues)")
+
     # Learning feedback (Fase 7) — persist lessons across restarts (JSONL) and
     # bridge the paper-close review path into the *same* store the ReviewLead
     # writes to. Wired before agent registration so ReviewLead captures the
@@ -111,7 +140,9 @@ async def lifespan(app: FastAPI):
                 try:
                     from telegram.signal_lifecycle import get_signal_lifecycle
                 except ImportError:
-                    from .telegram.signal_lifecycle import get_signal_lifecycle  # type: ignore
+                    from .telegram.signal_lifecycle import (
+                        get_signal_lifecycle,  # type: ignore
+                    )
 
                 payload = record.to_dict() if hasattr(record, "to_dict") else record
                 get_signal_lifecycle().on_review(payload)
@@ -210,7 +241,9 @@ async def lifespan(app: FastAPI):
         runtime = get_runtime()
         feed = MarketFeedLoop(
             queue=runtime.queue,
-            symbols=[s.strip() for s in settings.market_feed_symbols.split(",") if s.strip()],
+            symbols=[
+                s.strip() for s in settings.market_feed_symbols.split(",") if s.strip()
+            ],
             timeframe=settings.market_feed_timeframe,
             interval_s=settings.market_feed_interval_s,
             event_cooldown_s=settings.market_feed_event_cooldown_s,
@@ -225,6 +258,42 @@ async def lifespan(app: FastAPI):
             settings.market_feed_symbols,
             settings.market_feed_timeframe,
             settings.market_feed_interval_s,
+        )
+
+    # Risk monitor (FIX B) — OFF by default; operator opts in via
+    # RISK_MONITOR_ENABLED=true. Periodically checks account drawdown/exposure/
+    # margin (read-only MT5) and enqueues RISK_* events so the supervisor routes
+    # them to RiskLead. Follows same pattern as MarketFeedLoop.
+    risk_monitor_task = None
+    if settings.risk_monitor_enabled:
+        from .risk.monitor import RiskMonitor
+
+        runtime = get_runtime()
+
+        def _on_risk_emit(event_type: str, event_data: dict) -> None:
+            """Enqueue RISK_* event and wake scheduler (MarketFeedLoop pattern)."""
+            try:
+                runtime.queue.enqueue({"event_type": event_type, **event_data})
+                runtime.scheduler.wake()
+            except Exception as exc:  # noqa: BLE001 - fail-safe, never crash
+                logger.warning("Risk event enqueue failed for %s: %s", event_type, exc)
+
+        monitor = RiskMonitor(
+            check_interval_s=settings.risk_monitor_interval_s,
+            drawdown_threshold=settings.risk_drawdown_threshold,
+            exposure_threshold=settings.risk_exposure_threshold,
+            margin_threshold=settings.risk_margin_threshold,
+            on_emit=_on_risk_emit,
+        )
+        monitor.start()
+        # Wrap in async task for graceful shutdown (FIX B)
+        risk_monitor_task = asyncio.create_task(_risk_monitor_wrapper(monitor))
+        logger.info(
+            "Risk monitor started: interval=%ss, thresholds=(dd=%.1f%%, exp=%.1f%%, margin=%.1f%%)",
+            settings.risk_monitor_interval_s,
+            settings.risk_drawdown_threshold * 100,
+            settings.risk_exposure_threshold * 100,
+            settings.risk_margin_threshold * 100,
         )
 
     # Telegram inbound poller (optional) — OFF unless TELEGRAM_POLLER_ENABLED
@@ -327,6 +396,16 @@ async def lifespan(app: FastAPI):
         except Exception:  # pragma: no cover - defensive
             logger.exception("Error stopping market feed loop")
 
+    # FIX B: stop the risk monitor (thread + wrapper task) on shutdown.
+    if risk_monitor_task is not None:
+        try:
+            risk_monitor_task.cancel()
+            await asyncio.wait_for(risk_monitor_task, timeout=5.0)
+        except asyncio.CancelledError:
+            pass  # expected — cancelled on shutdown
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Error stopping risk monitor")
+
     if poller_task is not None:
         try:
             poller.stop()
@@ -368,7 +447,9 @@ app = FastAPI(
 # site. We therefore always declare explicit origins from CORS_ALLOWED_ORIGINS
 # (comma-separated) and keep credentials enabled only against those origins.
 _cors_origins = [
-    origin.strip() for origin in settings.cors_allowed_origins.split(",") if origin.strip()
+    origin.strip()
+    for origin in settings.cors_allowed_origins.split(",")
+    if origin.strip()
 ]
 app.add_middleware(
     CORSMiddleware,

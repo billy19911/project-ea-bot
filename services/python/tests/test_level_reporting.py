@@ -8,7 +8,7 @@ Covers the seam between the pipeline and the Telegram reports:
   ladder for no-trade cycles (source "analysis"), nothing when evidence is
   missing (never fabricated),
 * ``format_pipeline_report`` / ``format_pipeline_digest`` render the ladder
-  as one compact "📐 Level" line,
+  as a readable multi-line "📐 RENCANA" block (Entry → TP1 → TP2 → TPmax → SL),
 * ``summarize_pipeline_result`` passes the ladder through to the digest.
 
 No network and no MT5 are used.
@@ -44,7 +44,9 @@ class FakeRiskGate:
         self._decision = decision
         self.calls: list[tuple] = []
 
-    def validate_proposal(self, proposal, account_state, current_positions, market_info):
+    def validate_proposal(
+        self, proposal, account_state, current_positions, market_info
+    ):
         self.calls.append((proposal, account_state, current_positions, market_info))
         return self._decision
 
@@ -140,7 +142,8 @@ def test_proposal_cycle_gets_order_ladder() -> None:
         },
     }
     result = _pipeline(FakeSupervisor(analysis), FakeRiskGate(_approved())).run(
-        {"event_id": "e1", "event_type": "BREAKOUT", "symbol": "EURUSD"}, _context(symbol="EURUSD")
+        {"event_id": "e1", "event_type": "BREAKOUT", "symbol": "EURUSD"},
+        _context(symbol="EURUSD"),
     )
 
     levels = result.levels
@@ -173,6 +176,7 @@ def test_proposal_without_stop_is_completed_from_market_evidence() -> None:
             "symbol": "XAUUSD",
             "direction": "BUY",
             "entry_price": 2000.0,
+            "confidence": 0.8,
             # no stop_loss / take_profit → completed from volatility ATR below.
         },
     }
@@ -206,6 +210,7 @@ def test_proposal_stop_is_never_overridden_by_completion() -> None:
             "direction": "BUY",
             "entry_price": 2000.0,
             "stop_loss": 1998.5,  # explicit stop, must never be overridden
+            "confidence": 0.8,
         },
     }
     result = _pipeline(FakeSupervisor(analysis), FakeRiskGate(_approved())).run(
@@ -276,15 +281,22 @@ def _summary(**overrides) -> dict:
     return base
 
 
-def test_report_renders_level_line() -> None:
+def test_report_renders_level_ladder() -> None:
     text = format_pipeline_report(_summary())
-    assert "📐 Level BUY: Entry 2000.0 · SL 1997.0 · TP1 2003.0 · TP2 2006.0 · TPmax 2009.0" in text
-    assert "(indikatif)" in text  # indicative ladder is labelled
+    assert "📐 RENCANA BUY (indikatif)" in text  # indicative ladder is labelled
+    # One level per row, top-to-bottom: Entry → TP1 → TP2 → TPmax → SL.
+    assert (
+        "Entry : 2000.00\n"
+        "TP1   : 2003.00\n"
+        "TP2   : 2006.00\n"
+        "TPmax : 2009.00\n"
+        "SL    : 1997.00"
+    ) in text
 
 
 def test_report_order_ladder_not_labelled_indicative() -> None:
     text = format_pipeline_report(_summary(levels=dict(_LADDER, source="order")))
-    assert "📐 Level BUY" in text
+    assert "📐 RENCANA BUY" in text
     assert "(indikatif)" not in text
 
 
@@ -299,8 +311,8 @@ def test_digest_renders_one_level_line_and_prefers_order_ladder() -> None:
         _summary(levels=dict(_LADDER, source="order", entry=2001.0, sl=1998.0)),
     ]
     text = format_pipeline_digest(items)
-    assert text.count("📐 Level") == 1
-    assert "Entry 2001.0" in text  # the real order ladder wins
+    assert text.count("📐 RENCANA") == 1
+    assert "Entry : 2001.00" in text  # the real order ladder wins
 
 
 def test_digest_without_levels_has_no_level_line() -> None:

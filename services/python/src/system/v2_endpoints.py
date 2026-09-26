@@ -220,7 +220,11 @@ class BreakerRecoverBody(BaseModel):
 @router.get("/circuit-breaker", summary="Multi-level circuit breaker state (Phase 36)")
 async def circuit_breaker_state() -> dict[str, Any]:
     try:
-        return {"value": get_circuit_breaker().to_dict(), "source": "live", "status": "OK"}
+        return {
+            "value": get_circuit_breaker().to_dict(),
+            "source": "live",
+            "status": "OK",
+        }
     except Exception as exc:  # noqa: BLE001
         logger.warning("circuit-breaker state failed: %s", exc)
         return {"value": None, "source": "unavailable", "status": "UNAVAILABLE"}
@@ -234,14 +238,21 @@ async def circuit_breaker_trigger(body: BreakerTriggerBody) -> dict[str, Any]:
         try:
             trigger = TriggerType(body.trigger)
         except ValueError:
-            return {"error": f"unknown trigger: {body.trigger}", "source": "unavailable"}
-        record = get_circuit_breaker().trigger(trigger, reason=body.reason, source=body.source)
+            return {
+                "error": f"unknown trigger: {body.trigger}",
+                "source": "unavailable",
+            }
+        record = get_circuit_breaker().trigger(
+            trigger, reason=body.reason, source=body.source
+        )
         return {"value": record.to_dict(), "source": "live", "status": "OK"}
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc), "source": "unavailable"}
 
 
-@router.post("/circuit-breaker/recover", summary="Clear a latched breaker state (Phase 36)")
+@router.post(
+    "/circuit-breaker/recover", summary="Clear a latched breaker state (Phase 36)"
+)
 async def circuit_breaker_recover(body: BreakerRecoverBody) -> dict[str, Any]:
     from ..risk.multi_level_breaker import BreakerLevel
 
@@ -325,7 +336,12 @@ async def environment_state() -> dict[str, Any]:
             "status": "OK",
         }
     except Exception as exc:  # noqa: BLE001
-        return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -357,10 +373,17 @@ async def accounts_state() -> dict[str, Any]:
             value["source"] = "mt5"
         else:
             value["attached_account"] = None
-            value["unavailable"] = (info or {}).get("unavailable_reason", "akun MT5 tidak tersedia")
+            value["unavailable"] = (info or {}).get(
+                "unavailable_reason", "akun MT5 tidak tersedia"
+            )
         return {"value": value, "source": "live", "status": "OK"}
     except Exception as exc:  # noqa: BLE001
-        return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
 
 
 def _read_attached_account(connector: Any = None) -> dict[str, Any]:
@@ -417,9 +440,18 @@ def _read_attached_account(connector: Any = None) -> dict[str, Any]:
 @router.get("/capital", summary="Capital allocation snapshot (Phase 52)")
 async def capital_state() -> dict[str, Any]:
     try:
-        return {"value": get_capital_allocator().snapshot(), "source": "live", "status": "OK"}
+        return {
+            "value": get_capital_allocator().snapshot(),
+            "source": "live",
+            "status": "OK",
+        }
     except Exception as exc:  # noqa: BLE001
-        return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -446,7 +478,12 @@ async def incidents_list() -> dict[str, Any]:
             "status": "OK",
         }
     except Exception as exc:  # noqa: BLE001
-        return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
 
 
 @router.post("/incidents", summary="Open an incident (Phase 55)")
@@ -464,12 +501,19 @@ async def incidents_open(body: IncidentBody) -> dict[str, Any]:
         return {"error": str(exc), "source": "unavailable"}
 
 
-@router.post("/incidents/{incident_id}/resolve", summary="Resolve an incident (Phase 55)")
-async def incidents_resolve(incident_id: str, recovery_state: str = "RESOLVED") -> dict[str, Any]:
+@router.post(
+    "/incidents/{incident_id}/resolve", summary="Resolve an incident (Phase 55)"
+)
+async def incidents_resolve(
+    incident_id: str, recovery_state: str = "RESOLVED"
+) -> dict[str, Any]:
     try:
         inc = get_incident_manager().get(incident_id)
         if inc is None:
-            return {"error": f"Incident {incident_id} not found", "source": "unavailable"}
+            return {
+                "error": f"Incident {incident_id} not found",
+                "source": "unavailable",
+            }
         inc.resolve(recovery_state=recovery_state)
         return {"value": inc.to_dict(), "source": "live", "status": "OK"}
     except Exception as exc:  # noqa: BLE001
@@ -491,7 +535,12 @@ async def slo_state() -> dict[str, Any]:
     try:
         return {"value": get_slo_tracker().report(), "source": "live", "status": "OK"}
     except Exception as exc:  # noqa: BLE001
-        return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
 
 
 @router.post("/slo/sample", summary="Record an SLI sample (Phase 56)")
@@ -526,7 +575,12 @@ async def execution_quality_state() -> dict[str, Any]:
             "status": "OK",
         }
     except Exception as exc:  # noqa: BLE001
-        return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -545,7 +599,12 @@ async def llm_telemetry() -> dict[str, Any]:
             "status": "OK",
         }
     except Exception as exc:  # noqa: BLE001
-        return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
 
 
 @router.get("/llm/governance", summary="Model governance state (Phase 46)")
@@ -558,7 +617,12 @@ async def llm_governance_state() -> dict[str, Any]:
             "status": "OK",
         }
     except Exception as exc:  # noqa: BLE001
-        return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -583,7 +647,12 @@ async def dashboard_state() -> dict[str, Any]:
         return {"value": aggregator.build(), "source": "live", "status": "OK"}
     except Exception as exc:  # noqa: BLE001
         logger.warning("dashboard build failed: %s", exc)
-        return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
 
 
 def circuit_breaker_state_sync() -> dict[str, Any]:
@@ -605,7 +674,9 @@ def _system_health_sync() -> Optional[dict]:
 
 def _reconciliation_sync() -> Optional[dict]:
     try:
-        runtime = __import__("src.orchestration.runtime", fromlist=["get_runtime"]).get_runtime()
+        runtime = __import__(
+            "src.orchestration.runtime", fromlist=["get_runtime"]
+        ).get_runtime()
         report = runtime.last_reconciliation()
         return report.to_dict() if report else None
     except Exception:  # noqa: BLE001
@@ -622,9 +693,11 @@ async def certification_gate() -> dict[str, Any]:
     try:
         from ..live_readiness.certification_evidence import collect_gate_evidence
         from ..live_readiness.certification_gate import ProductionCertificationGate
+        from .gate_b_probes import build_gate_b_probes
 
         gate = ProductionCertificationGate(
             gate_results=collect_gate_evidence(
+                gate_b_probes=build_gate_b_probes(),
                 execution_quality=get_execution_quality(),
                 incident_manager=get_incident_manager(),
             ),
@@ -632,7 +705,12 @@ async def certification_gate() -> dict[str, Any]:
         )
         return {"value": gate.evaluate().to_dict(), "source": "live", "status": "OK"}
     except Exception as exc:  # noqa: BLE001
-        return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -651,7 +729,12 @@ async def research_inbox_state() -> dict[str, Any]:
             "status": "OK",
         }
     except Exception as exc:  # noqa: BLE001
-        return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -659,7 +742,9 @@ async def research_inbox_state() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/lifecycle/{strategy_id}/{version}", summary="Strategy lifecycle state (Phase 44)")
+@router.get(
+    "/lifecycle/{strategy_id}/{version}", summary="Strategy lifecycle state (Phase 44)"
+)
 async def lifecycle_state(strategy_id: str, version: int) -> dict[str, Any]:
     try:
         sv = get_lifecycle_governor().get(strategy_id, version)
@@ -667,7 +752,12 @@ async def lifecycle_state(strategy_id: str, version: int) -> dict[str, Any]:
             return {"value": None, "source": "unavailable", "status": "NO_DATA"}
         return {"value": sv.to_dict(), "source": "live", "status": "OK"}
     except Exception as exc:  # noqa: BLE001
-        return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -675,7 +765,10 @@ async def lifecycle_state(strategy_id: str, version: int) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/decision/{decision_id}/replay", summary="Decision replay from snapshots (Phase 45)")
+@router.get(
+    "/decision/{decision_id}/replay",
+    summary="Decision replay from snapshots (Phase 45)",
+)
 async def decision_replay(decision_id: str) -> dict[str, Any]:
     try:
         replay = get_decision_store().replay(decision_id)
@@ -683,7 +776,12 @@ async def decision_replay(decision_id: str) -> dict[str, Any]:
             return {"value": None, "source": "unavailable", "status": "NO_DATA"}
         return {"value": replay, "source": "live", "status": "OK"}
     except Exception as exc:  # noqa: BLE001
-        return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -691,7 +789,10 @@ async def decision_replay(decision_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/performance-intelligence", summary="Performance intelligence by dimension (Phase 42)")
+@router.get(
+    "/performance-intelligence",
+    summary="Performance intelligence by dimension (Phase 42)",
+)
 async def performance_intelligence(dimension: str = "hour") -> dict[str, Any]:
     """Analyse REAL closed-trade outcomes by dimension (audit P2-8).
 
@@ -713,7 +814,12 @@ async def performance_intelligence(dimension: str = "hour") -> dict[str, Any]:
             "status": "OK" if buckets else "NO_DATA",
         }
     except Exception as exc:  # noqa: BLE001
-        return {"value": None, "source": "unavailable", "status": "UNAVAILABLE", "error": str(exc)}
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
 
 
 def _closed_trade_rows() -> list[Any]:

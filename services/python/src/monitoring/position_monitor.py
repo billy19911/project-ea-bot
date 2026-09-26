@@ -155,6 +155,7 @@ class PositionMonitor:
         close_detector: Any = None,
         default_contract_size: float = 100000.0,
         reconciliation_store: Any = None,
+        order_state_store: Any = None,
     ) -> None:
         """Initialize the Position Monitor.
 
@@ -174,12 +175,18 @@ class PositionMonitor:
                 last-seen SL/TP/volume maps are restored on startup and persisted
                 after each change detection, so reconciliation state survives a
                 restart. Optional so existing callers are unaffected.
+            order_state_store: Optional order-state ledger store (LEDGER-SLTP T1)
+                exposing ``mark_closed(ticket, reason=...)``. When supplied, a
+                *verified* ``POSITION_DISAPPEARED`` transition appends a
+                ``closed`` record so the internal ledger no longer counts the
+                ticket as open. Optional so existing callers are unaffected.
         """
         self.mt5_connector = mt5_connector
         self.atr_lookback = max(1, atr_lookback)
         self.close_detector = close_detector
         self.default_contract_size = float(default_contract_size)
         self.reconciliation_store = reconciliation_store
+        self.order_state_store = order_state_store
 
         # In-memory state tracking
         self._position_history: dict[int, list[PositionSnapshot]] = {}
@@ -214,6 +221,29 @@ class PositionMonitor:
                     pass
         return get_positions()
 
+    def _get_positions_ex(self) -> tuple[bool, list[Any]]:
+        """Fetch positions with a read-verified flag (LEDGER-SLTP T1).
+
+        Prefers a connector ``get_positions_ex()`` that distinguishes "broker
+        holds no positions" from "the broker read failed". Connectors without
+        that method are treated as verified (their ``get_positions()`` contract
+        is the existing one), so behaviour is unchanged for legacy callers.
+        """
+        if self.mt5_connector is not None and hasattr(
+            self.mt5_connector, "get_positions_ex"
+        ):
+            try:
+                result = self.mt5_connector.get_positions_ex()
+                if isinstance(result, tuple) and len(result) == 2:
+                    ok, positions = result
+                    return bool(ok), list(positions or [])
+            except Exception:  # noqa: BLE001 - unverified read → skip closure
+                logger.warning(
+                    "Verified position read failed; skipping diff this cycle"
+                )
+                return False, []
+        return True, self._get_positions()
+
     def _get_tick(self, symbol: str) -> Any:
         """Fetch current tick for symbol."""
         if self.mt5_connector is not None:
@@ -223,7 +253,9 @@ class PositionMonitor:
                 return self.mt5_connector.symbol_info_tick(symbol)
         return get_tick(symbol)
 
-    def _get_ohlc(self, symbol: str, timeframe: str = "H1", count: int = 100) -> list[Any]:
+    def _get_ohlc(
+        self, symbol: str, timeframe: str = "H1", count: int = 100
+    ) -> list[Any]:
         """Fetch OHLC bars for ATR calculation."""
         if self.mt5_connector is not None:
             if hasattr(self.mt5_connector, "get_ohlc"):
@@ -264,7 +296,9 @@ class PositionMonitor:
         if not true_ranges:
             return 0.0
 
-        return sum(true_ranges[-self.atr_lookback :]) / min(len(true_ranges), self.atr_lookback)
+        return sum(true_ranges[-self.atr_lookback :]) / min(
+            len(true_ranges), self.atr_lookback
+        )
 
     def _to_side(self, side_str: str) -> Side:
         """Normalize side string to Side enum."""
@@ -275,8 +309,16 @@ class PositionMonitor:
 
     def _normalize_position(self, pos: Any) -> PositionSnapshot:
         """Convert raw position to PositionSnapshot."""
-        ticket = getattr(pos, "ticket", 0) if not isinstance(pos, dict) else pos.get("ticket", 0)
-        symbol = getattr(pos, "symbol", "") if not isinstance(pos, dict) else pos.get("symbol", "")
+        ticket = (
+            getattr(pos, "ticket", 0)
+            if not isinstance(pos, dict)
+            else pos.get("ticket", 0)
+        )
+        symbol = (
+            getattr(pos, "symbol", "")
+            if not isinstance(pos, dict)
+            else pos.get("symbol", "")
+        )
         side_raw = (
             getattr(pos, "side", "BUY")
             if not isinstance(pos, dict)
@@ -285,7 +327,9 @@ class PositionMonitor:
         side = self._to_side(str(side_raw))
 
         vol_val = (
-            getattr(pos, "volume", 0.0) if not isinstance(pos, dict) else pos.get("volume", 0.0)
+            getattr(pos, "volume", 0.0)
+            if not isinstance(pos, dict)
+            else pos.get("volume", 0.0)
         )
         volume = float(vol_val)
 
@@ -304,7 +348,9 @@ class PositionMonitor:
         current_price = float(p_curr)
 
         profit = (
-            getattr(pos, "profit", 0.0) if not isinstance(pos, dict) else pos.get("profit", 0.0)
+            getattr(pos, "profit", 0.0)
+            if not isinstance(pos, dict)
+            else pos.get("profit", 0.0)
         )
         unrealized = (
             getattr(pos, "unrealized_pnl", 0.0)
@@ -314,18 +360,32 @@ class PositionMonitor:
         pnl = float(profit or unrealized)
 
         margin = float(
-            getattr(pos, "margin", 0.0) if not isinstance(pos, dict) else pos.get("margin", 0.0)
+            getattr(pos, "margin", 0.0)
+            if not isinstance(pos, dict)
+            else pos.get("margin", 0.0)
         )
         swap = float(
-            getattr(pos, "swap", 0.0) if not isinstance(pos, dict) else pos.get("swap", 0.0)
+            getattr(pos, "swap", 0.0)
+            if not isinstance(pos, dict)
+            else pos.get("swap", 0.0)
         )
         # Schema reports None when no level is placed; PositionSnapshot keeps
         # its documented 0.0-if-unset convention for its stop/target logic.
         sl = float(
-            (getattr(pos, "sl", 0.0) if not isinstance(pos, dict) else pos.get("sl", 0.0)) or 0.0
+            (
+                getattr(pos, "sl", 0.0)
+                if not isinstance(pos, dict)
+                else pos.get("sl", 0.0)
+            )
+            or 0.0
         )
         tp = float(
-            (getattr(pos, "tp", 0.0) if not isinstance(pos, dict) else pos.get("tp", 0.0)) or 0.0
+            (
+                getattr(pos, "tp", 0.0)
+                if not isinstance(pos, dict)
+                else pos.get("tp", 0.0)
+            )
+            or 0.0
         )
 
         # Calculate PnL percentage
@@ -377,7 +437,9 @@ class PositionMonitor:
                 return self._normalize_position(pos)
         return None
 
-    def monitor_all_positions(self, account_id: Optional[int] = None) -> list[PositionSnapshot]:
+    def monitor_all_positions(
+        self, account_id: Optional[int] = None
+    ) -> list[PositionSnapshot]:
         """Get snapshots of all open positions.
 
         Args:
@@ -414,15 +476,22 @@ class PositionMonitor:
 
         return snapshots
 
-    def _snapshot_positions(self) -> list[PositionSnapshot]:
+    def _snapshot_positions(
+        self, positions: Optional[list[Any]] = None
+    ) -> list[PositionSnapshot]:
         """Build snapshots + history WITHOUT feeding the close detector.
 
         Internal helper for callers that already handled position-close
         observation (e.g. :meth:`detect_position_changes`), so a single cycle
         never double-fires the close detector.
+
+        Args:
+            positions: Pre-fetched raw positions; when ``None`` they are read
+                from the connector (legacy behaviour).
         """
         snapshots: list[PositionSnapshot] = []
-        for pos in self._get_positions():
+        raw_positions = self._get_positions() if positions is None else positions
+        for pos in raw_positions:
             snapshot = self._normalize_position(pos)
             snapshots.append(snapshot)
             ticket = snapshot.ticket
@@ -433,7 +502,32 @@ class PositionMonitor:
                 self._position_history[ticket] = self._position_history[ticket][-100:]
         return snapshots
 
-    def detect_position_changes(self, account_id: Optional[int] = None) -> list[AbnormalEvent]:
+    def _mark_ticket_closed(self, ticket: int) -> None:
+        """Append a ``closed`` record for *ticket* to the order-state ledger.
+
+        LEDGER-SLTP T1: fail-safe. A ticket with no open ledger record is
+        skipped (debug log); a store without ``mark_closed`` or a raising store
+        never breaks the monitoring loop.
+        """
+        store = self.order_state_store
+        if store is None:
+            return
+        mark_closed = getattr(store, "mark_closed", None)
+        if not callable(mark_closed):
+            return
+        try:
+            written = mark_closed(ticket, reason="broker_position_disappeared")
+        except Exception as exc:  # noqa: BLE001 - closure must never break loop
+            logger.warning("mark_closed failed for ticket %s: %s", ticket, exc)
+            return
+        if not written:
+            logger.debug(
+                "No ledger open record to close for ticket %s (skipped)", ticket
+            )
+
+    def detect_position_changes(
+        self, account_id: Optional[int] = None
+    ) -> list[AbnormalEvent]:
         """Diff the current positions against the last-seen state (audit P2-2).
 
         Detects changes the system did not make itself:
@@ -444,9 +538,26 @@ class PositionMonitor:
 
         The state maps are updated to the current snapshot so each change is
         reported once. Read-only: it never modifies SL/TP or closes anything.
+
+        LEDGER-SLTP T1: the broker read is *verified* (``get_positions_ex``)
+        before any disappearance is acted on. When the read fails (``ok ==
+        False``) the whole cycle's diff is skipped — no events, no closures — so
+        a terminal hiccup can never false-close the internal ledger. A verified
+        disappearance additionally appends a ``closed`` record via
+        ``order_state_store.mark_closed`` (when a store is wired).
         """
         events: list[AbnormalEvent] = []
-        snapshots = self._snapshot_positions()
+        ok, positions = self._get_positions_ex()
+        if not ok:
+            # Unverified read: an empty list may mean "broker down", not "no
+            # positions". Skip the diff entirely to avoid false closures.
+            logger.warning(
+                "Position read unverified (ok=False); skipping change detection "
+                "this cycle (no closures, no events)"
+            )
+            return events
+
+        snapshots = self._snapshot_positions(positions)
         seen: set[int] = set()
 
         for snap in snapshots:
@@ -468,7 +579,11 @@ class PositionMonitor:
                             f"{prev_sl} → {snap.sl}"
                         ),
                         symbol=snap.symbol,
-                        metadata={"ticket": ticket, "old_sl": prev_sl, "new_sl": snap.sl},
+                        metadata={
+                            "ticket": ticket,
+                            "old_sl": prev_sl,
+                            "new_sl": snap.sl,
+                        },
                     )
                 )
             if prev_tp is not None and snap.tp != prev_tp:
@@ -481,7 +596,11 @@ class PositionMonitor:
                             f"{prev_tp} → {snap.tp}"
                         ),
                         symbol=snap.symbol,
-                        metadata={"ticket": ticket, "old_tp": prev_tp, "new_tp": snap.tp},
+                        metadata={
+                            "ticket": ticket,
+                            "old_tp": prev_tp,
+                            "new_tp": snap.tp,
+                        },
                     )
                 )
             if prev_vol is not None and snap.volume < prev_vol:
@@ -508,6 +627,8 @@ class PositionMonitor:
             self._last_volume[ticket] = snap.volume
 
         # Unexpected disappearance: a tracked ticket that is no longer present.
+        # The read was verified above (ok), so a missing ticket is a genuine
+        # close — record it in the internal ledger (LEDGER-SLTP T1).
         for ticket in list(self._last_sl.keys()):
             if ticket not in seen:
                 events.append(
@@ -519,6 +640,7 @@ class PositionMonitor:
                         metadata={"ticket": ticket},
                     )
                 )
+                self._mark_ticket_closed(ticket)
                 self._last_sl.pop(ticket, None)
                 self._last_tp.pop(ticket, None)
                 self._last_volume.pop(ticket, None)
@@ -568,7 +690,9 @@ class PositionMonitor:
             return None
 
         is_buy = snapshot.side == Side.BUY
-        current_price = getattr(tick, "bid", 0.0) if is_buy else getattr(tick, "ask", 0.0)
+        current_price = (
+            getattr(tick, "bid", 0.0) if is_buy else getattr(tick, "ask", 0.0)
+        )
         if current_price <= 0:
             current_price = snapshot.current_price
 
@@ -617,7 +741,9 @@ class PositionMonitor:
             return None
 
         is_buy = snapshot.side == Side.BUY
-        current_price = getattr(tick, "bid", 0.0) if is_buy else getattr(tick, "ask", 0.0)
+        current_price = (
+            getattr(tick, "bid", 0.0) if is_buy else getattr(tick, "ask", 0.0)
+        )
         if current_price <= 0:
             current_price = snapshot.current_price
 
@@ -805,7 +931,9 @@ class PositionMonitor:
     def _account_equity(self) -> Optional[float]:
         """Return the real account equity, or ``None`` when unavailable (P2-7)."""
         try:
-            if self.mt5_connector is not None and hasattr(self.mt5_connector, "get_account_info"):
+            if self.mt5_connector is not None and hasattr(
+                self.mt5_connector, "get_account_info"
+            ):
                 account = self.mt5_connector.get_account_info()
             else:
                 from mt5.connector import get_account_info

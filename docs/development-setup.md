@@ -279,7 +279,7 @@ API menerapkan autentikasi pada semua route kecuali allowlist publik: `/health`,
 
 2. Mint sebuah token (development-only):
    ```bash
-   curl -s -X POST http://localhost:3001/auth/token \
+   curl -s -X POST http://localhost:3789/auth/token \
      -H 'Content-Type: application/json' \
      -d '{"userId":"admin","role":"admin"}'
    ```

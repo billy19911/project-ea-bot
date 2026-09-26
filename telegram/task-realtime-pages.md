@@ -1,7 +1,7 @@
 # Task: 3 halaman web realtime (positions, orders, risk)
 
-Repo: C:/xampp/htdocs/project-ea-bot (monorepo: apps/web Next.js :3000, apps/api Node :3789,
-services/python FastAPI :8000). Semua service sudah berjalan — edit file saja, JANGAN restart service.
+Repo: C:/xampp/htdocs/project-ea-bot (monorepo: apps/web Next.js :4321, apps/api Node :3789,
+services/python FastAPI :8787). Semua service sudah berjalan — edit file saja, JANGAN restart service.
 
 ## Goal
 

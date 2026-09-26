@@ -227,8 +227,8 @@ npm run dev
 start.bat
 ```
 
-Satu perintah itu menyalakan **ketiga** service (Python API :8000, Node API :3001,
-Web :3200), menunggu sampai sehat, lalu membuka dashboard di browser. Skrip juga
+Satu perintah itu menyalakan **ketiga** service (Python API :8787, Node API :3789,
+Web :4321), menunggu sampai sehat, lalu membuka dashboard di browser. Skrip juga
 otomatis:
 
 - memuat konfigurasi lokal dari `.env.runtime` (dibuat otomatis bila belum ada),
@@ -240,32 +240,32 @@ otomatis:
 |---|---|
 | `start.bat` / `npm run up` | nyalakan semua service + buka dashboard |
 | `start.bat -NoBrowser` | sama, tanpa membuka browser |
-| `stop.bat` / `npm run down` | hentikan semua service (hanya port 8000/3001/3200) |
+| `stop.bat` / `npm run down` | hentikan semua service (hanya port dari `.env.runtime`) |
 | `status.bat` / `npm run status` | cek kesehatan ketiga service |
 | `token.bat` / `npm run token` | buat dev token & copy ke clipboard (isi `localStorage`) |
 
-> Script hanya menyentuh port 8000/3001/3200 — **tidak pernah** menyentuh
-> terminal MT5 yang sedang berjalan.
+> Script hanya menyentuh port dari `.env.runtime` (default 8787/3789/4321) — **tidak
+> pernah** menyentuh terminal MT5 yang sedang berjalan.
 
 ### Cara manual (3 terminal)
 
 ```bash
-# Terminal 1 — Python service (FastAPI) :8000
+# Terminal 1 — Python service (FastAPI) :8787
 cd services/python
 .venv/Scripts/activate            # Windows
 # source .venv/bin/activate       # Linux/macOS
-NINE_ROUTER_BASE_URL=http://127.0.0.1:20128/v1 uvicorn src.main:app --host 127.0.0.1 --port 8000
+NINE_ROUTER_BASE_URL=http://127.0.0.1:20128/v1 uvicorn src.main:app --host 127.0.0.1 --port 8787
 
-# Terminal 2 — Node API :3001
+# Terminal 2 — Node API :3789
 cd apps/api
 npm run build                     # sekali saja / setelah ubah kode
-DEV_AUTH_ENABLED=true PORT=3001 PYTHON_SERVICE_URL=http://127.0.0.1:8000 node dist/index.js
+DEV_AUTH_ENABLED=true PORT=3789 PYTHON_SERVICE_URL=http://127.0.0.1:8787 node dist/index.js
 
-# Terminal 3 — Web dashboard :3200
+# Terminal 3 — Web dashboard :4321
 cd apps/web
 npm run build                     # sekali saja
-npx next start -p 3200
-# buka http://127.0.0.1:3200
+npx next start -p 4321
+# buka http://127.0.0.1:4321
 ```
 
 ### Dev auth token
@@ -278,9 +278,9 @@ localStorage.setItem('ea-bot-token', '<token>')
 
 | Service | Port | Health check |
 |---|---:|---|
-| Python FastAPI | 8000 | `GET /health` |
-| Node API | 3001 | `GET /health` |
-| Web (Next.js) | 3200 | buka `/` |
+| Python FastAPI | 8787 | `GET /health` |
+| Node API | 3789 | `GET /health` |
+| Web (Next.js) | 4321 | buka `/` |
 
 ### Mode data live MT5 (read-only)
 
@@ -292,7 +292,7 @@ data pasar & posisi **nyata** dari terminal MT5 yang sedang berjalan:
 cd services/python && .venv/Scripts/pip install MetaTrader5
 
 # 2. Jalankan Python service dengan mode live read-only
-MT5_LIVE_DATA=true uvicorn src.main:app --host 127.0.0.1 --port 8000
+MT5_LIVE_DATA=true uvicorn src.main:app --host 127.0.0.1 --port 8787
 ```
 
 Yang terjadi saat `MT5_LIVE_DATA=true`:

@@ -1,16 +1,14 @@
 'use client';
 
-// Halaman Masuk (UI/UX ide #3).
+// Halaman Masuk — satu klik.
 //
-// Menggantikan alur lama: jalankan token.bat → buka DevTools → tempel
-// localStorage.setItem(...). Di sini token diverifikasi dulu ke endpoint
-// terproteksi (/mt5/terminals) sebelum disimpan — token yang salah tidak
-// pernah masuk localStorage. Backend auth tidak diubah sama sekali.
+// Jalur utama: tombol "Masuk" memanggil POST /auth/token (endpoint dev, sama
+// yang dipakai token.bat) lalu memverifikasi token ke /mt5/terminals sebelum
+// disimpan — token yang salah tidak pernah masuk localStorage.
 //
-// Dua jalur masuk:
-//   1. Tempel token yang sudah ada (mis. dari token.bat).
-//   2. Mint token dev sekali klik lewat POST /auth/token (endpoint publik
-//      khusus development, sama yang dipakai token.bat).
+// Jalur cadangan: tempel token yang sudah ada, disembunyikan di dalam
+// "Punya token sendiri?" agar halaman tetap sederhana. Terbuka otomatis bila
+// mint token dev gagal (mis. DEV_AUTH_ENABLED off).
 
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useState } from 'react';
@@ -23,6 +21,7 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [alreadyIn, setAlreadyIn] = useState(false);
+  const [showManual, setShowManual] = useState(false);
 
   useEffect(() => {
     setAlreadyIn(Boolean(getAuthToken()));
@@ -43,23 +42,7 @@ export default function LoginPage() {
     localStorage.setItem('ea-bot-token', candidate);
   };
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    const trimmed = token.trim();
-    if (!trimmed || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await verifyAndStore(trimmed);
-      router.replace('/');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Terjadi kesalahan.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const mint = async () => {
+  const signIn = async () => {
     if (busy) return;
     setBusy(true);
     setError(null);
@@ -76,11 +59,29 @@ export default function LoginPage() {
       }
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.token) {
+        setShowManual(true);
         throw new Error(
-          data?.message || `Gagal membuat token (HTTP ${res.status}). Coba lagi beberapa saat.`,
+          data?.message ||
+            `Gagal membuat token dev (HTTP ${res.status}). Tempel token manual di bawah.`,
         );
       }
       await verifyAndStore(data.token);
+      router.replace('/');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Terjadi kesalahan.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitManual = async (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = token.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await verifyAndStore(trimmed);
       router.replace('/');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Terjadi kesalahan.');
@@ -126,42 +127,41 @@ export default function LoginPage() {
         ) : (
           <>
             <h1 className={styles.title}>Masuk</h1>
-            <p className={styles.sub}>
-              Dashboard memakai Bearer token. Tempel token yang sudah ada, atau buat token dev
-              sekali klik.
-            </p>
+            <p className={styles.sub}>Satu klik untuk masuk ke dashboard.</p>
 
-            <form onSubmit={submit} className={styles.form}>
-              <label className={styles.label} htmlFor="token">
-                Token
-              </label>
-              <input
-                id="token"
-                className={styles.input}
-                type="password"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="Tempel token di sini"
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <button className={styles.primary} type="submit" disabled={busy || !token.trim()}>
-                {busy ? 'Memeriksa…' : 'Masuk'}
-              </button>
-            </form>
-
-            <div className={styles.divider}>
-              <span>atau</span>
-            </div>
-
-            <button className={styles.secondary} onClick={mint} disabled={busy}>
-              {busy ? 'Memproses…' : 'Buat token dev (sekali klik)'}
+            <button className={styles.primary} onClick={signIn} disabled={busy}>
+              {busy ? 'Memproses…' : 'Masuk'}
             </button>
 
+            <details
+              className={styles.details}
+              open={showManual}
+              onToggle={(e) => setShowManual((e.target as HTMLDetailsElement).open)}
+            >
+              <summary className={styles.summary}>Punya token sendiri?</summary>
+              <form onSubmit={submitManual} className={styles.form}>
+                <label className={styles.label} htmlFor="token">
+                  Token
+                </label>
+                <input
+                  id="token"
+                  className={styles.input}
+                  type="password"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  placeholder="Tempel token di sini"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <button className={styles.secondary} type="submit" disabled={busy || !token.trim()}>
+                  {busy ? 'Memeriksa…' : 'Masuk dengan token ini'}
+                </button>
+              </form>
+            </details>
+
             <p className={styles.hint}>
-              Tombol di atas memanggil <code>POST /auth/token</code> — sama seperti{' '}
-              <code>token.bat</code>. Token diverifikasi sebelum disimpan; yang salah tidak
-              pernah tersimpan.
+              Tombol <strong>Masuk</strong> membuat token dev via <code>POST /auth/token</code>{' '}
+              (sama seperti <code>token.bat</code>) dan memverifikasinya sebelum disimpan.
             </p>
           </>
         )}

@@ -68,24 +68,42 @@ def internal_positions_from_store(store: Optional[dict] = None) -> list[dict[str
     Reads ``execution.state_machine._order_store`` (or the injected ``store``)
     and emits one entry per order whose state indicates a confirmed position
     and that carries a broker ``ticket``.
+
+    LEDGER-SLTP T1: state is resolved per **ticket** using the latest record so
+    a ``closed`` state supersedes an earlier ``position_confirmed``/``filled``
+    record for the same ticket (the append-only ledger keeps one row per intent,
+    but a ticket that was later closed must never be reported as an open
+    internal position — otherwise reconciliation would flag a phantom
+    ``missing_in_broker`` and block all new orders).
     """
     if store is None:
         store = _internal_order_store()
 
-    positions: list[dict[str, Any]] = []
+    # Resolve the latest state per ticket (last writer wins, insertion-ordered).
+    latest_state_by_ticket: dict[str, str] = {}
+    record_by_ticket: dict[str, dict[str, Any]] = {}
     for record in list((store or {}).values()):
         if not isinstance(record, dict):
             continue
-        state = str(record.get("state", "")).lower()
         ticket = record.get("ticket")
-        if state in _POSITION_STATES and ticket is not None:
-            positions.append(
-                {
-                    "ticket": ticket,
-                    "symbol": record.get("symbol", ""),
-                    "volume": record.get("volume"),
-                }
-            )
+        if ticket is None:
+            continue
+        key = str(ticket)
+        latest_state_by_ticket[key] = str(record.get("state", "")).lower()
+        record_by_ticket[key] = record
+
+    positions: list[dict[str, Any]] = []
+    for key, state in latest_state_by_ticket.items():
+        if state not in _POSITION_STATES:
+            continue
+        record = record_by_ticket[key]
+        positions.append(
+            {
+                "ticket": record.get("ticket"),
+                "symbol": record.get("symbol", ""),
+                "volume": record.get("volume"),
+            }
+        )
     return positions
 
 

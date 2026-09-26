@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from ..strategy.endpoints import get_active_strategy_config
 from ..trading.engine import TradingEngine
 from .series import SUPPORTED_TIMEFRAMES, build_chart_payload
 
@@ -28,7 +29,9 @@ _MAX_BARS = 1000
 
 @router.get("/candles")
 async def get_chart_candles(
-    symbol: str = Query(..., min_length=1, max_length=32, description="Symbol, e.g. XAUUSD"),
+    symbol: str = Query(
+        ..., min_length=1, max_length=32, description="Symbol, e.g. XAUUSD"
+    ),
     timeframe: str = Query("H1", description="M1..MN1"),
     bars: int = Query(300, ge=_MIN_BARS, le=_MAX_BARS, description="Number of candles"),
     ema_fast: int = Query(20, ge=1, le=400, description="Fast EMA period (overlay)"),
@@ -60,14 +63,20 @@ async def get_chart_candles(
             f"Pilihan: {', '.join(SUPPORTED_TIMEFRAMES)}",
         )
     if ema_slow <= ema_fast:
-        raise HTTPException(status_code=400, detail="ema_slow harus lebih besar dari ema_fast.")
+        raise HTTPException(
+            status_code=400, detail="ema_slow harus lebih besar dari ema_fast."
+        )
 
     before_dt: Optional[datetime] = None
     if before:
         try:
-            before_dt = datetime.fromisoformat(before.replace("Z", "+00:00")).replace(tzinfo=None)
+            before_dt = datetime.fromisoformat(before.replace("Z", "+00:00")).replace(
+                tzinfo=None
+            )
         except ValueError:
-            raise HTTPException(status_code=400, detail="`before` harus format ISO-8601.")
+            raise HTTPException(
+                status_code=400, detail="`before` harus format ISO-8601."
+            )
 
     from ..mt5 import connector
 
@@ -142,7 +151,9 @@ def _symbol_matches(chart_symbol: str, position_symbol: str) -> bool:
 
 @router.get("/analysis")
 async def get_chart_analysis(
-    symbol: str = Query(..., min_length=1, max_length=32, description="Symbol, e.g. XAUUSD"),
+    symbol: str = Query(
+        ..., min_length=1, max_length=32, description="Symbol, e.g. XAUUSD"
+    ),
     timeframe: str = Query("H1", description="M1..MN1"),
     bars: int = Query(300, ge=50, le=_MAX_BARS, description="Bars used for analysis"),
 ) -> dict[str, Any]:
@@ -192,8 +203,10 @@ async def get_chart_analysis(
     except Exception:
         pass  # equity is only used for position sizing; keep the analysis honest
 
-    engine = TradingEngine()
-    result = engine.analyze(bars_data, symbol=symbol, timeframe=timeframe, account_equity=equity)
+    engine = TradingEngine(config=get_active_strategy_config())
+    result = engine.analyze(
+        bars_data, symbol=symbol, timeframe=timeframe, account_equity=equity
+    )
     signal = result.signal
 
     open_positions = []

@@ -69,7 +69,7 @@ def _hhmm(stamp: float) -> str:
 
 
 def _fmt_price(value: Optional[float]) -> str:
-    """Render a price level compactly without float noise."""
+    """Render a price level with stable decimals (2 above 100, else 5)."""
     if value is None:
         return "—"
     try:
@@ -78,7 +78,7 @@ def _fmt_price(value: Optional[float]) -> str:
         return str(value)
     if number != number:  # NaN
         return "—"
-    return f"{number:.10g}"
+    return f"{number:.2f}" if abs(number) > 100 else f"{number:.5f}"
 
 
 def _consensus_label(summary: str, confidence: float) -> str:
@@ -107,16 +107,16 @@ def render_signal_message(state: "SignalState") -> str:
 
         📐 RENCANA
         Entry : 4284.97
-        SL    : 4294.65
-        TP1   : 4275.29
-        TP2   : 4265.62
-        TPmax : 4255.94
+        TP1   : 4275.29  ⏳
+        TP2   : 4265.62  ✅ HIT 22:58
+        TPmax : 4255.94  ⏳
+        SL    : 4294.65  ⏳
 
         📌 Status: ENTRY TERBUKA #12345678
-           ⏳ TP1
-           ✅ TP2 — HIT 22:58
-           ⏳ TPmax
-           ⏳ SL
+
+    The ladder reads top-to-bottom Entry → TP1 → TP2 → TPmax → SL and each
+    hit marker (✅ TP / ❌ SL) sticks to its own row, so a TP/SL hit only
+    updates one line of the SAME message (edit-in-place).
     """
     meta = [f"🕒 {_hhmm(state.created_at)}"]
     consensus = str(state.consensus or "").strip()
@@ -133,17 +133,22 @@ def render_signal_message(state: "SignalState") -> str:
         " · ".join(meta),
     ]
 
-    # RENCANA block — only when at least one level is available.
+    # RENCANA block — Entry → TP1 → TP2 → TPmax → SL, markers inline.
     plan_rows: list[str] = []
-    for label, value in (
-        ("Entry", state.entry),
-        ("SL", state.sl),
-        ("TP1", state.tp1),
-        ("TP2", state.tp2),
-        ("TPmax", state.tpmax),
-    ):
-        if value is not None:
-            plan_rows.append(f"{label:<5} : {_fmt_price(value)}")
+    if state.entry is not None:
+        plan_rows.append(f"{'Entry':<5} : {_fmt_price(state.entry)}")
+    for key in _HIT_ORDER:
+        value = getattr(state, key, None)
+        if value is None:
+            continue
+        row = f"{_HIT_LABELS[key]:<5} : {_fmt_price(value)}"
+        if state.hits.get(key):
+            marker = "❌" if key == "sl" else "✅"
+            hit_at = str(state.hit_times.get(key) or "").strip()
+            row += f"  {marker} HIT" + (f" {hit_at}" if hit_at else "")
+        else:
+            row += "  ⏳"
+        plan_rows.append(row)
     if plan_rows:
         lines.append("")
         lines.append("📐 RENCANA")
@@ -155,17 +160,6 @@ def render_signal_message(state: "SignalState") -> str:
     if detail and state.status != STATUS_DONE:
         status_line += f" {detail}" if detail.startswith("#") else f": {detail}"
     lines.append(status_line)
-
-    # Hit checklist (⏳ pending / ✅ hit / ❌ hit for SL).
-    for key in _HIT_ORDER:
-        label = _HIT_LABELS[key]
-        if state.hits.get(key):
-            marker = "❌" if key == "sl" else "✅"
-            hit_at = str(state.hit_times.get(key) or "").strip()
-            suffix = f" — HIT {hit_at}" if hit_at else " — HIT"
-            lines.append(f"   {marker} {label}{suffix}")
-        else:
-            lines.append(f"   ⏳ {label}")
 
     if state.status == STATUS_DONE:
         lines.append(f"🏁 SELESAI: {detail}".rstrip())

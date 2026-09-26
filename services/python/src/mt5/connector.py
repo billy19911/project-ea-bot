@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import random
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from .schemas import OHLC, AccountInfo, Order, Position, SymbolInfo, Tick
 from .write_guard import MT5WriteGuard
@@ -167,6 +167,29 @@ _TIMEFRAME_SECONDS: dict[str, int] = {
     "W1": 604800,
     "MN1": 2592000,
 }
+
+
+def _mt5_timeframe(timeframe: str) -> Any:
+    """Resolve a timeframe label to its ``mt5.TIMEFRAME_*`` constant.
+
+    Importing MetaTrader5 lazily (inside the function) keeps the module
+    importable on machines without the MT5 package installed. The function
+    returns the constant for ``H1`` when the label is unrecognised.
+    """
+    import MetaTrader5 as mt5
+
+    _TF_MAP = {
+        "M1": mt5.TIMEFRAME_M1,
+        "M5": mt5.TIMEFRAME_M5,
+        "M15": mt5.TIMEFRAME_M15,
+        "M30": mt5.TIMEFRAME_M30,
+        "H1": mt5.TIMEFRAME_H1,
+        "H4": mt5.TIMEFRAME_H4,
+        "D1": mt5.TIMEFRAME_D1,
+        "W1": mt5.TIMEFRAME_W1,
+        "MN1": mt5.TIMEFRAME_MN1,
+    }
+    return _TF_MAP.get(str(timeframe).upper(), mt5.TIMEFRAME_H1)
 
 
 # ---------------------------------------------------------------------------
@@ -377,18 +400,7 @@ def get_ohlc(
         try:
             import MetaTrader5 as mt5
 
-            _TF_MAP = {
-                "M1": mt5.TIMEFRAME_M1,
-                "M5": mt5.TIMEFRAME_M5,
-                "M15": mt5.TIMEFRAME_M15,
-                "M30": mt5.TIMEFRAME_M30,
-                "H1": mt5.TIMEFRAME_H1,
-                "H4": mt5.TIMEFRAME_H4,
-                "D1": mt5.TIMEFRAME_D1,
-                "W1": mt5.TIMEFRAME_W1,
-                "MN1": mt5.TIMEFRAME_MN1,
-            }
-            tf = _TF_MAP.get(str(timeframe).upper(), mt5.TIMEFRAME_H1)
+            tf = _mt5_timeframe(timeframe)
             # Auto-resolve the broker's symbol name, then try the best
             # candidates in order until one returns bars. This makes charts and
             # backtests work regardless of suffix (XAUUSDc / XAUUSD247c / …).
@@ -480,6 +492,176 @@ def get_ohlc(
     return list(reversed(bars))
 
 
+def get_ohlc_range(
+    symbol: str,
+    timeframe: str = "H1",
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+) -> list[OHLC]:
+    """Return OHLC bars between start_date and end_date (oldest → newest).
+
+    Args:
+        symbol: Symbol name (broker suffix resolved automatically).
+        timeframe: MT5 timeframe label (M1..MN1).
+        start_date: Start datetime (UTC, inclusive).
+        end_date: End datetime (UTC, inclusive).
+
+    Returns:
+        OHLC bars in the date range, or empty list if dates invalid/no data.
+    """
+    if start_date is None or end_date is None:
+        return []
+    if start_date >= end_date:
+        return []
+
+    if _live_mode:
+        try:
+            import MetaTrader5 as mt5
+
+            tf = _mt5_timeframe(timeframe)
+
+            from .symbol_resolver import candidate_matches, resolve_symbol
+
+            resolved = resolve_symbol(symbol)
+            candidates = [resolved]
+            try:
+                all_syms = [str(s.name).upper() for s in (mt5.symbols_get() or [])]
+                for cand in candidate_matches(symbol, all_syms):
+                    if cand not in candidates:
+                        candidates.append(cand)
+            except Exception:  # noqa: BLE001
+                pass
+
+            start_ts = int(start_date.timestamp())
+            end_ts = int(end_date.timestamp())
+
+            for cand in candidates:
+                rates = mt5.copy_rates_range(cand, tf, start_ts, end_ts)
+                if rates is not None and len(rates) > 0:
+                    return [
+                        OHLC(
+                            symbol=cand,
+                            timeframe=timeframe,
+                            open=r["open"],
+                            high=r["high"],
+                            low=r["low"],
+                            close=r["close"],
+                            volume=float(r["tick_volume"]),
+                            time=datetime.fromtimestamp(r["time"]),
+                        )
+                        for r in rates
+                    ]
+            return []
+        except Exception:
+            return []
+
+    # Simulation: generate synthetic bars between start_date and end_date
+    if symbol not in SIMULATED_PRICES:
+        return []
+    base_price = SIMULATED_PRICES[symbol][0]
+    tf_seconds = _TIMEFRAME_SECONDS.get(str(timeframe).upper(), 3600)
+    bars = []
+    current = start_date
+    while current <= end_date:
+        open_ = round(base_price + random.uniform(-0.002, 0.002), 5)
+        close = round(base_price + random.uniform(-0.002, 0.002), 5)
+        high = round(max(open_, close) + random.uniform(0, 0.001), 5)
+        low = round(min(open_, close) - random.uniform(0, 0.001), 5)
+        bars.append(
+            OHLC(
+                symbol=symbol,
+                timeframe=timeframe,
+                open=open_,
+                high=high,
+                low=low,
+                close=close,
+                volume=random.uniform(100, 5000),
+                time=current.replace(tzinfo=None),
+            )
+        )
+        current += timedelta(seconds=tf_seconds)
+    return bars
+
+
+def get_data_info(symbol: str, timeframe: str = "H1") -> dict[str, Any]:
+    """Return metadata about available historical data for a symbol/timeframe.
+
+    Args:
+        symbol: Symbol name (broker suffix resolved automatically).
+        timeframe: MT5 timeframe label (M1..MN1).
+
+    Returns:
+        Dict with keys:
+            - available: bool (whether any data found)
+            - oldest_bar: datetime | None (earliest bar available)
+            - newest_bar: datetime | None (latest bar available)
+            - total_bars: int (approximate, capped at probed depth)
+            - max_bars_supported: int (platform limit)
+            - supports_date_range: bool (always True for MT5)
+    """
+    if _live_mode:
+        try:
+            import MetaTrader5 as mt5
+
+            tf = _mt5_timeframe(timeframe)
+
+            from .symbol_resolver import resolve_symbol
+
+            resolved = resolve_symbol(symbol)
+            # Probe: fetch 1 bar from 5 years ago to check depth
+            probe_start = datetime.now(timezone.utc) - timedelta(days=5 * 365)
+            probe_ts = int(probe_start.timestamp())
+            rates_old = mt5.copy_rates_from(resolved, tf, probe_ts, 1)
+            # Fetch latest bar
+            rates_new = mt5.copy_rates_from_pos(resolved, tf, 0, 1)
+
+            if rates_new is not None and len(rates_new) > 0:
+                newest = datetime.fromtimestamp(rates_new[0]["time"])
+            else:
+                newest = None
+
+            if rates_old is not None and len(rates_old) > 0:
+                oldest = datetime.fromtimestamp(rates_old[0]["time"])
+            else:
+                oldest = None
+
+            available = newest is not None
+            # Estimate total bars (not exact, just rough count)
+            total_bars = 0
+            if oldest is not None and newest is not None:
+                delta = newest - oldest
+                tf_seconds = _TIMEFRAME_SECONDS.get(str(timeframe).upper(), 3600)
+                total_bars = int(delta.total_seconds() / tf_seconds)
+
+            return {
+                "available": available,
+                "oldest_bar": oldest,
+                "newest_bar": newest,
+                "total_bars": total_bars,
+                "max_bars_supported": 100000,
+                "supports_date_range": True,
+            }
+        except Exception:
+            return {
+                "available": False,
+                "oldest_bar": None,
+                "newest_bar": None,
+                "total_bars": 0,
+                "max_bars_supported": 100000,
+                "supports_date_range": True,
+            }
+
+    # Simulation mode
+    return {
+        "available": symbol in SIMULATED_PRICES,
+        "oldest_bar": datetime.now(timezone.utc) - timedelta(days=365 * 5),
+        "newest_bar": datetime.now(timezone.utc),
+        "total_bars": 50000,
+        "max_bars_supported": 100000,
+        "supports_date_range": True,
+    }
+
+
 def get_positions() -> list[Position]:
     """Return open positions."""
     if _live_mode:
@@ -559,6 +741,44 @@ def get_positions() -> list[Position]:
             time_update=now,
         ),
     ]
+
+
+def get_positions_ex() -> tuple[bool, list[Position]]:
+    """Return open positions plus a read-verified flag.
+
+    ``get_positions()`` returns ``[]`` both when the broker genuinely holds no
+    positions AND when the live read fails — a caller that closes internal
+    ledger records on an empty list would therefore false-close on a terminal
+    hiccup. This variant disambiguates the two cases for the closure path
+    (LEDGER-SLTP T1).
+
+    Returns:
+        ``(ok, positions)`` where ``ok`` is True only when the position list
+        was read successfully:
+
+        * live mode, ``mt5.positions_get()`` returns ``None`` (read error) →
+          ``(False, [])``;
+        * live mode, empty result → ``(True, [])``;
+        * live mode, data → ``(True, [...])``;
+        * simulation mode → ``(True, [...simulated positions...])`` (the sim
+          list legitimately represents the broker's positions, so it is
+          verified).
+    """
+    if _live_mode:
+        try:
+            import MetaTrader5 as mt5
+
+            raw = mt5.positions_get()
+            if raw is None:
+                # Read failure — NOT an empty book. Signal unverified.
+                return False, []
+            positions = list(get_positions())
+            return True, positions
+        except Exception:
+            return False, []
+
+    # Simulation — the (synthetic) position list is authoritative here.
+    return True, list(get_positions())
 
 
 def get_orders() -> list[Order]:

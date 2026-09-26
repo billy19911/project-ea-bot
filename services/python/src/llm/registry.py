@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from typing import Any, Optional
 
 import httpx
-
 from src.llm.base import ModelInfo
 
 logger = logging.getLogger(__name__)
@@ -18,6 +18,12 @@ logger = logging.getLogger(__name__)
 STATE_CONNECTED = "CONNECTED"
 STATE_DEGRADED = "DEGRADED"
 STATE_DISCONNECTED = "DISCONNECTED"
+
+# Discovery timeout: deliberately short so an unreachable gateway can never tie
+# up a request (or the event loop, via ``asyncio.to_thread``) for long. This is
+# scoped to the ``GET /models`` discovery call only — chat/streaming calls keep
+# their own (longer) timeouts.
+DISCOVERY_TIMEOUT_S = 1.5
 
 
 class ModelRegistry:
@@ -38,6 +44,14 @@ class ModelRegistry:
         self._last_error: str | None = None
         self._last_success: bool = False
         self._source: str = "defaults"
+        # FIX-503 T1: negative cache + single-flight.
+        # ``failure_ttl`` is the window (seconds) during which a *failed*
+        # discovery is remembered so subsequent calls return immediately
+        # without touching the network. ``_lock`` serialises discovery so
+        # concurrent callers collapse into a single network attempt.
+        self.failure_ttl: float = 60.0
+        self._last_failure: float | None = None
+        self._lock = threading.Lock()
 
     @property
     def source(self) -> str:
@@ -130,7 +144,9 @@ class ModelRegistry:
             return "google/gemini-2.0-flash-lite:free"
         return "openai/gpt-4o-mini"
 
-    def calculate_cost(self, model_name: str, prompt_tokens: int, completion_tokens: int) -> float:
+    def calculate_cost(
+        self, model_name: str, prompt_tokens: int, completion_tokens: int
+    ) -> float:
         """Calculate estimated cost in USD for token usage."""
         model = self.get(model_name)
         if not model or model.is_free:
@@ -157,8 +173,13 @@ class ModelRegistry:
 
         The result is cached: if a successful discovery happened within
         ``cache_ttl`` seconds the network is not hit again unless ``force`` is
-        ``True``. On any failure the previous models are left intact
-        (fail-safe) and the error is recorded for :meth:`health`.
+        ``True``. Failures are *negatively* cached for ``failure_ttl`` seconds
+        so an unreachable gateway is not hammered on every request (FIX-503).
+        Concurrent callers are collapsed into a single network attempt via an
+        internal lock (single-flight).
+
+        On any failure the previous models are left intact (fail-safe) and the
+        error is recorded for :meth:`health`.
 
         Args:
             client: An OpenAI-compatible client exposing ``models.list()``.
@@ -171,33 +192,60 @@ class ModelRegistry:
             The list of models currently served by the registry.
         """
         now = time.time()
-        if not force and self._last_success and self._last_discovery is not None:
-            if (now - self._last_discovery) < cache_ttl:
+        if not force:
+            # Positive cache: a fresh success short-circuits the network.
+            if self._last_success and self._last_discovery is not None:
+                if (now - self._last_discovery) < cache_ttl:
+                    return self.list_models()
+            # Negative cache: a recent failure short-circuits the network too,
+            # returning the current (defaults/cached) state immediately.
+            if (
+                not self._last_success
+                and self._last_failure is not None
+                and (now - self._last_failure) < self.failure_ttl
+            ):
                 return self.list_models()
 
-        self._last_attempt = now
-        try:
-            entries = self._fetch_gateway_models(client)
-            discovered: dict[str, ModelInfo] = {}
-            for entry in entries:
-                info = self._normalize_model(entry)
-                if info is not None:
-                    discovered[info.name] = info
+        # Single-flight: only one caller performs the network attempt; the rest
+        # wait, then re-check the (now updated) caches.
+        with self._lock:
+            now = time.time()
+            if not force:
+                if self._last_success and self._last_discovery is not None:
+                    if (now - self._last_discovery) < cache_ttl:
+                        return self.list_models()
+                if (
+                    not self._last_success
+                    and self._last_failure is not None
+                    and (now - self._last_failure) < self.failure_ttl
+                ):
+                    return self.list_models()
 
-            if not discovered:
-                raise ValueError("Gateway returned no usable models")
+            self._last_attempt = now
+            try:
+                entries = self._fetch_gateway_models(client)
+                discovered: dict[str, ModelInfo] = {}
+                for entry in entries:
+                    info = self._normalize_model(entry)
+                    if info is not None:
+                        discovered[info.name] = info
 
-            self._models = discovered
-            self._last_discovery = now
-            self._last_success = True
-            self._last_error = None
-            self._source = "gateway"
-            logger.info("Discovered %d models from gateway", len(discovered))
-        except Exception as exc:  # noqa: BLE001 - fail-safe: never raise
-            self._last_success = False
-            self._last_error = f"{type(exc).__name__}: {exc}"
-            self._source = "defaults"
-            logger.warning("Model discovery failed, keeping cached models: %s", exc)
+                if not discovered:
+                    raise ValueError("Gateway returned no usable models")
+
+                self._models = discovered
+                self._last_discovery = now
+                self._last_success = True
+                self._last_error = None
+                self._last_failure = None
+                self._source = "gateway"
+                logger.info("Discovered %d models from gateway", len(discovered))
+            except Exception as exc:  # noqa: BLE001 - fail-safe: never raise
+                self._last_success = False
+                self._last_error = f"{type(exc).__name__}: {exc}"
+                self._last_failure = time.time()
+                self._source = "defaults"
+                logger.warning("Model discovery failed, keeping cached models: %s", exc)
 
         return self.list_models()
 
@@ -218,9 +266,11 @@ class ModelRegistry:
                 logger.debug("Raw gateway fetch failed, falling back to SDK: %s", exc)
 
             # Imported lazily to avoid a circular import at module load time.
+            # The fallback client is scoped to discovery only: it uses the short
+            # discovery timeout so a hanging gateway cannot block the caller.
             from src.llm.nine_router import NineRouterClient
 
-            client = NineRouterClient().client
+            client = NineRouterClient(timeout=DISCOVERY_TIMEOUT_S).client
 
         response = client.models.list()
         # OpenAI SDK returns an object with ``.data``; tolerate plain lists.
@@ -238,7 +288,9 @@ class ModelRegistry:
         api_key = router.api_key
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
-        response = httpx.get(f"{base}/models", headers=headers, timeout=5.0)
+        response = httpx.get(
+            f"{base}/models", headers=headers, timeout=DISCOVERY_TIMEOUT_S
+        )
         response.raise_for_status()
         payload = response.json()
         data = payload["data"] if isinstance(payload, dict) else payload

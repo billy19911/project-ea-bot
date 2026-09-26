@@ -647,22 +647,24 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
         </section>
         <section className={s.card}>
           <h2>Agents ({aiControl.agents?.length})</h2>
-          <table className={s.table}>
-            <thead><tr><th>Agent</th><th>Type</th><th>Status</th><th>Runs</th><th>Priority</th><th>Last active</th><th>Errors</th></tr></thead>
-            <tbody>
-              {agentsPage.rows.map((a: any) => (
-                <tr key={a.name}>
-                  <td><strong>{a.name}</strong></td>
-                  <td>{a.type}</td>
-                  <td><span className={`${s.badge} ${badgeClass(a.status, s)}`}>{a.status}</span></td>
-                  <td>{a.invocations ?? 0}</td>
-                  <td>{priorityLabel(a.priority)}</td>
-                  <td>{formatLastActive(a.lastActive ?? a.last_active)}</td>
-                  <td>{(a.errors ?? a.error_count ?? a.errorCount ?? 0) > 0 ? <span className={`${s.badge} ${s.warning}`}>{a.errors ?? a.error_count ?? a.errorCount}</span> : '0'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className={s.tableWrapper}>
+            <table className={s.table}>
+              <thead><tr><th>Agent</th><th>Type</th><th>Status</th><th>Runs</th><th>Priority</th><th>Last active</th><th>Errors</th></tr></thead>
+              <tbody>
+                {agentsPage.rows.map((a: any) => (
+                  <tr key={a.name}>
+                    <td><strong>{a.name}</strong></td>
+                    <td>{a.type}</td>
+                    <td><span className={`${s.badge} ${badgeClass(a.status, s)}`}>{a.status}</span></td>
+                    <td>{a.invocations ?? 0}</td>
+                    <td>{priorityLabel(a.priority)}</td>
+                    <td>{formatLastActive(a.lastActive ?? a.last_active)}</td>
+                    <td>{(a.errors ?? a.error_count ?? a.errorCount ?? 0) > 0 ? <span className={`${s.badge} ${s.warning}`}>{a.errors ?? a.error_count ?? a.errorCount}</span> : '0'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {agentsPage.pager}
         </section>
       </div>

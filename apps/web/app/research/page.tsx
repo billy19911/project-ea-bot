@@ -148,7 +148,7 @@ export default function Home() {
         return;
       }
       if (!ovRes.ok || !exRes.ok) {
-        setError('Layanan riset tidak menjawab — periksa Python API (:8000).');
+        setError('Layanan riset tidak menjawab — periksa Python API (:8787).');
         return;
       }
       const ov = (await ovRes.json()) as Overview;
@@ -166,7 +166,7 @@ export default function Home() {
       setCmpA((current) => (resultIds.has(current) ? current : ''));
       setCmpB((current) => (resultIds.has(current) ? current : ''));
     } catch {
-      setError('Layanan riset tidak menjawab — periksa Python API (:8000).');
+      setError('Layanan riset tidak menjawab — periksa Python API (:8787).');
     }
   }, []);
 

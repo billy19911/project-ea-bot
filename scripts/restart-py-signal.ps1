@@ -1,7 +1,7 @@
 # EA Bot - restart HANYA service Python API, memakai port dari .env.runtime.
 # Dipakai setelah perubahan .env.runtime (mis. mengaktifkan TELEGRAM_SIGNAL_BOT_TOKEN).
-# Berbeda dari restart-py.ps1 yang masih hardcode :8000 (stale), script ini
-# membaca PY_PORT dari .env.runtime sehingga cocok dengan start-all.ps1.
+# Berbeda dari restart-py.ps1 yang juga membaca PY_PORT dari .env.runtime,
+# script ini mengekspor juga env bot sinyal (TELEGRAM_SIGNAL_*).
 $ErrorActionPreference = 'SilentlyContinue'
 $root = 'C:\xampp\htdocs\project-ea-bot'
 

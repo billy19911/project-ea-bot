@@ -96,7 +96,9 @@ def test_backtest_provenance_records_requested_vs_actual_bars(monkeypatch):
     class _TimedBar:
         def __init__(self, close: float, idx: int) -> None:
             self.close = close
-            self.time = datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp() + idx * 3600
+            self.time = (
+                datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp() + idx * 3600
+            )
 
     closes = [100.0 + (i % 10) for i in range(120)]
     bars = [_TimedBar(c, i) for i, c in enumerate(closes)]
@@ -117,7 +119,9 @@ def test_backtest_provenance_records_requested_vs_actual_bars(monkeypatch):
 
 
 def test_create_experiment_rejects_inverted_emas():
-    res = client.post("/research/experiments", json={"fast_ema_period": 10, "slow_ema_period": 5})
+    res = client.post(
+        "/research/experiments", json={"fast_ema_period": 10, "slow_ema_period": 5}
+    )
     assert res.status_code == 400
     assert "slow_ema_period" in res.json()["detail"]
 
@@ -166,7 +170,9 @@ def test_backtest_runs_on_real_bars_and_is_json_safe(monkeypatch):
     # Deterministic wave: EMA crossover trades must be produced.
     closes = [100.0 + (i % 10) for i in range(200)]
     monkeypatch.setattr(connector, "is_live_mode", lambda: True)
-    monkeypatch.setattr(connector, "get_ohlc", lambda *a, **k: [_Bar(c) for c in closes])
+    monkeypatch.setattr(
+        connector, "get_ohlc", lambda *a, **k: [_Bar(c) for c in closes]
+    )
     exp_id = _create_experiment()
     res = client.post(
         f"/research/experiments/{exp_id}/backtest",
@@ -217,7 +223,9 @@ def test_backtest_unknown_experiment_is_404():
 def test_compare_requires_results_and_is_json_safe(monkeypatch):
     closes = [100.0 + (i % 7) for i in range(150)]
     monkeypatch.setattr(connector, "is_live_mode", lambda: True)
-    monkeypatch.setattr(connector, "get_ohlc", lambda *a, **k: [_Bar(c) for c in closes])
+    monkeypatch.setattr(
+        connector, "get_ohlc", lambda *a, **k: [_Bar(c) for c in closes]
+    )
     exp_a = _create_experiment(2, 6)
     exp_b = _create_experiment(5, 15)
 
@@ -252,7 +260,9 @@ def test_ranking_orders_and_splits_insufficient_sample():
 
     engine = get_research_engine()
     hypothesis_id = _ensure_baseline(engine)
-    engine.create_strategy_version("strong", {"fast_ema_period": 2, "slow_ema_period": 4})
+    engine.create_strategy_version(
+        "strong", {"fast_ema_period": 2, "slow_ema_period": 4}
+    )
     engine.create_strategy_version("weak", {"fast_ema_period": 2, "slow_ema_period": 4})
     strong = engine.create_experiment(hypothesis_id, "strong")
     weak = engine.create_experiment(hypothesis_id, "weak")
@@ -297,3 +307,130 @@ def test_ranking_orders_and_splits_insufficient_sample():
     assert len(data["insufficient_sample"]) == 1
     assert data["insufficient_sample"][0]["id"] == weak.id
     assert "minimum 10" in data["insufficient_sample"][0]["reason"]
+
+
+def test_backtest_accepts_up_to_100k_bars(monkeypatch):
+    """Backtest request validates bars up to 100,000."""
+    monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+    monkeypatch.setattr(connector, "get_ohlc", lambda *a, **k: [_Bar(100.0)] * 150)
+    exp_id = _create_experiment()
+    # 100k is the new upper limit
+    res = client.post(
+        f"/research/experiments/{exp_id}/backtest",
+        json={"symbol": "XAUUSD", "timeframe": "H1", "bars": 100000},
+    )
+    assert res.status_code == 200
+    # 100,001 should be rejected by pydantic
+    over = client.post(
+        f"/research/experiments/{exp_id}/backtest",
+        json={"symbol": "XAUUSD", "timeframe": "H1", "bars": 100001},
+    )
+    assert over.status_code == 422
+
+
+def test_backtest_date_range_mode_calls_get_ohlc_range(monkeypatch):
+    """Date-range mode branches to get_ohlc_range and records mode in provenance."""
+    from datetime import datetime, timezone
+
+    class _TimedBar:
+        def __init__(self, close: float, idx: int) -> None:
+            self.close = close
+            self.high = close
+            self.low = close
+            self.time = (
+                datetime(2023, 1, 1, tzinfo=timezone.utc).timestamp() + idx * 3600
+            )
+
+    closes = [100.0 + (i % 8) for i in range(180)]
+    bars = [_TimedBar(c, i) for i, c in enumerate(closes)]
+
+    monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+    range_called = []
+
+    def fake_range(symbol, tf, start, end):
+        range_called.append((symbol, tf, start, end))
+        return bars
+
+    monkeypatch.setattr(connector, "get_ohlc_range", fake_range)
+    exp_id = _create_experiment()
+    res = client.post(
+        f"/research/experiments/{exp_id}/backtest",
+        json={
+            "symbol": "XAUUSD",
+            "timeframe": "H1",
+            "start_date": "2023-01-01T00:00:00Z",
+            "end_date": "2023-12-31T23:59:59Z",
+        },
+    )
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["ok"] is True
+    assert data["provenance"]["mode"] == "date_range"
+    assert data["provenance"]["start_date"] == "2023-01-01T00:00:00Z"
+    assert data["provenance"]["end_date"] == "2023-12-31T23:59:59Z"
+    assert data["provenance"]["requested_bars"] is None
+    assert len(range_called) == 1
+    assert range_called[0][0] == "XAUUSD"
+    assert range_called[0][1] == "H1"
+
+
+def test_backtest_date_range_validates_format(monkeypatch):
+    """Invalid date strings are rejected with 400."""
+    monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+    exp_id = _create_experiment()
+    bad = client.post(
+        f"/research/experiments/{exp_id}/backtest",
+        json={
+            "symbol": "XAUUSD",
+            "timeframe": "H1",
+            "start_date": "not-a-date",
+            "end_date": "2023-12-31T23:59:59Z",
+        },
+    )
+    assert bad.status_code == 400
+    assert "Format tanggal tidak valid" in bad.text
+
+
+def test_backtest_date_range_rejects_inverted_dates(monkeypatch):
+    """start_date >= end_date is rejected."""
+    monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+    exp_id = _create_experiment()
+    inv = client.post(
+        f"/research/experiments/{exp_id}/backtest",
+        json={
+            "symbol": "XAUUSD",
+            "timeframe": "H1",
+            "start_date": "2024-01-01T00:00:00Z",
+            "end_date": "2023-01-01T00:00:00Z",
+        },
+    )
+    assert inv.status_code == 400
+    assert "lebih awal" in inv.text
+
+
+def test_data_info_endpoint_returns_metadata(monkeypatch):
+    """/data-info returns metadata from connector.get_data_info."""
+    fake_info = {
+        "available": True,
+        "oldest_bar_time": 1640995200.0,
+        "newest_bar_time": 1703980800.0,
+        "max_bars_supported": 100000,
+        "timeframes": ["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"],
+    }
+    monkeypatch.setattr(connector, "get_data_info", lambda *a, **k: fake_info)
+    res = client.get("/research/data-info?symbol=XAUUSD&timeframe=H1")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is True
+    assert data["symbol"] == "XAUUSD"
+    assert data["timeframe"] == "H1"
+    assert data["info"]["available"] is True
+    assert data["info"]["max_bars_supported"] == 100000
+
+
+def test_data_info_validates_symbol_and_timeframe():
+    """/data-info rejects invalid symbol/timeframe."""
+    bad_sym = client.get("/research/data-info?symbol=BAD!")
+    assert bad_sym.status_code == 400
+    bad_tf = client.get("/research/data-info?timeframe=H99")
+    assert bad_tf.status_code == 400

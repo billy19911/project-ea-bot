@@ -132,11 +132,11 @@ def test_render_contains_signal_and_plan() -> None:
     assert "🎯 SIGNAL FINAL · XAUUSD SELL" in text
     assert "📐 RENCANA" in text
     assert "Entry : 4284.97" in text
-    assert "SL    : 4294.65" in text
-    assert "TPmax : 4255.94" in text
+    assert "TP1   : 4275.29  ⏳" in text
+    assert "TP2   : 4265.62  ✅ HIT 22:58" in text
+    assert "TPmax : 4255.94  ⏳" in text
+    assert "SL    : 4294.65  ⏳" in text
     assert "📌 Status: ENTRY TERBUKA #12345678" in text
-    assert "✅ TP2 — HIT 22:58" in text
-    assert "⏳ TP1" in text
 
 
 def test_render_sl_marker_is_cross() -> None:
@@ -149,7 +149,30 @@ def test_render_sl_marker_is_cross() -> None:
         hit_times={"sl": "10:00"},
     )
     text = render_signal_message(state)
-    assert "❌ SL — HIT 10:00" in text
+    assert "Entry : 1.10000" in text
+    assert "SL    : 1.09500  ❌ HIT 10:00" in text
+
+
+def test_render_level_rows_follow_entry_tp1_tp2_tpmax_sl_order() -> None:
+    """The ladder reads top-to-bottom Entry → TP1 → TP2 → TPmax → SL."""
+    state = SignalState(
+        symbol="XAUUSD",
+        direction="SELL",
+        entry=4284.97,
+        sl=4294.65,
+        tp1=4275.29,
+        tp2=4265.62,
+        tpmax=4255.94,
+    )
+    text = render_signal_message(state)
+    order = [
+        text.index("Entry : 4284.97"),
+        text.index("TP1   : 4275.29"),
+        text.index("TP2   : 4265.62"),
+        text.index("TPmax : 4255.94"),
+        text.index("SL    : 4294.65"),
+    ]
+    assert order == sorted(order)
 
 
 def test_render_without_levels_omits_plan() -> None:
@@ -234,7 +257,7 @@ def test_observe_price_tp1_edits_once_then_idempotent() -> None:
     # SELL: TP1 hits when price <= 4275.29.
     assert tracker.observe_price("XAUUSD", 4275.0) is True
     assert len(transport.edits) == 1
-    assert "✅ TP1" in transport.edits[0][2]
+    assert "TP1   : 4275.29  ✅ HIT" in transport.edits[0][2]
 
     # Same hit again → no additional edit.
     assert tracker.observe_price("XAUUSD", 4270.0) is False
@@ -249,7 +272,7 @@ def test_observe_price_sl_hit_marks_cross() -> None:
 
     # SELL: SL hits when price >= 4294.65.
     assert tracker.observe_price("XAUUSD", 4295.0) is True
-    assert "❌ SL" in transport.edits[-1][2]
+    assert "SL    : 4294.65  ❌ HIT" in transport.edits[-1][2]
 
 
 def test_observe_price_without_state_is_false() -> None:

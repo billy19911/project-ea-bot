@@ -139,7 +139,9 @@ def build_gateway_from_env() -> TelegramGateway:
     read-only command surface (legacy behaviour) but sends nothing.
     """
     token = os.getenv("TELEGRAM_BOT_TOKEN") or ""
-    raw_allowlist = os.getenv("TELEGRAM_ALLOWED_CHAT_IDS") or os.getenv("TELEGRAM_CHAT_IDS") or ""
+    raw_allowlist = (
+        os.getenv("TELEGRAM_ALLOWED_CHAT_IDS") or os.getenv("TELEGRAM_CHAT_IDS") or ""
+    )
     allowlist = _parse_allowlist(raw_allowlist)
 
     transport: Optional[HttpTelegramTransport] = None
@@ -344,8 +346,12 @@ def get_digest() -> Optional[PipelineDigest]:
         if not _digest_enabled_from_env():
             return None
         digest = PipelineDigest(
-            window_s=_float_from_env("TELEGRAM_DIGEST_WINDOW_S", _DIGEST_WINDOW_S_DEFAULT),
-            max_items=int(_float_from_env("TELEGRAM_DIGEST_MAX_ITEMS", _DIGEST_MAX_ITEMS_DEFAULT)),
+            window_s=_float_from_env(
+                "TELEGRAM_DIGEST_WINDOW_S", _DIGEST_WINDOW_S_DEFAULT
+            ),
+            max_items=int(
+                _float_from_env("TELEGRAM_DIGEST_MAX_ITEMS", _DIGEST_MAX_ITEMS_DEFAULT)
+            ),
         )
         _set_digest_singleton(digest)
     return digest
@@ -387,7 +393,9 @@ def _consensus_pct(summary: str, confidence: Any) -> str:
     ``confidence`` field.
     """
     raw = ""
-    match = _MARKET_CONF_RE.search(summary or "") or _CONFIDENCE_RE.search(summary or "")
+    match = _MARKET_CONF_RE.search(summary or "") or _CONFIDENCE_RE.search(
+        summary or ""
+    )
     if match:
         raw = match.group(1)
     else:
@@ -437,35 +445,54 @@ def _digest_group_lines(batch: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
+def _fmt_price(value: Any) -> str:
+    """Render a price level with stable decimals (2 above 100, else 5)."""
+    if value is None:
+        return "—"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if number != number:  # NaN
+        return "—"
+    return f"{number:.2f}" if abs(number) > 100 else f"{number:.5f}"
+
+
 def _format_levels(levels: Any) -> str:
-    """Render an Entry/SL/TP1/TP2/TPmax ladder as one compact line.
+    """Render an Entry/SL/TP1/TP2/TPmax ladder as a readable multi-line block.
 
     The ladder is produced by the pipeline (``trading.level_plan``): from the
     real order when one exists (source "order"), otherwise an indicative ATR
     plan for the setup (source "analysis"). Returns "" when no usable ladder.
+    Each level sits on its own row (Entry → TP1 → TP2 → TPmax → SL) so the
+    message stays readable on a phone::
+
+        📐 RENCANA BUY (indikatif)
+        Entry : 2000.00
+        TP1   : 2003.00
+        TP2   : 2006.00
+        TPmax : 2009.00
+        SL    : 1997.00
     """
     if not isinstance(levels, dict):
         return ""
     entry = levels.get("entry")
     sl = levels.get("sl")
-    tp1 = levels.get("tp1")
-    tp2 = levels.get("tp2")
-    tpmax = levels.get("tpmax")
     if entry in (None, "") or sl in (None, ""):
         return ""
     direction = str(levels.get("direction") or "").upper()
     label = f" {direction}" if direction in ("BUY", "SELL") else ""
-    parts = [
-        f"Entry {entry}",
-        f"SL {sl}",
-        f"TP1 {tp1}",
-        f"TP2 {tp2}",
-        f"TPmax {tpmax}",
-    ]
-    line = f"📐 Level{label}: " + " · ".join(parts)
+    header = f"📐 RENCANA{label}"
     if str(levels.get("source") or "") == "analysis":
-        line += " (indikatif)"
-    return line
+        header += " (indikatif)"
+    rows = [f"{'Entry':<5} : {_fmt_price(entry)}"]
+    for key, name in (("tp1", "TP1"), ("tp2", "TP2"), ("tpmax", "TPmax")):
+        value = levels.get(key)
+        if value in (None, ""):
+            continue
+        rows.append(f"{name:<5} : {_fmt_price(value)}")
+    rows.append(f"{'SL':<5} : {_fmt_price(sl)}")
+    return "\n".join([header, *rows])
 
 
 def format_pipeline_report(summary: dict[str, Any]) -> str:
@@ -482,7 +509,9 @@ def format_pipeline_report(summary: dict[str, Any]) -> str:
     decision = str(summary.get("decision") or "—")
     direction = _market_direction(summary.get("summary"))
     tail = f" · arah {direction}" if direction else ""
-    consensus = _consensus_pct(str(summary.get("summary") or ""), summary.get("confidence"))
+    consensus = _consensus_pct(
+        str(summary.get("summary") or ""), summary.get("confidence")
+    )
     if consensus:
         tail += f" (konsensus {consensus})"
     lines.append(f"🎯 {decision}{tail}")
@@ -516,9 +545,13 @@ def format_pipeline_digest(items: list[dict[str, Any]]) -> str:
         label = symbols[0] if len(symbols) == 1 else f"{len(symbols)} simbol"
         header += f" · {label}"
 
-    directions = Counter(d for d in (_market_direction(item.get("summary")) for item in batch) if d)
+    directions = Counter(
+        d for d in (_market_direction(item.get("summary")) for item in batch) if d
+    )
     neutral = len(batch) - sum(directions.values())
-    direction_line = " · ".join(f"{name} ({count})" for name, count in directions.most_common())
+    direction_line = " · ".join(
+        f"{name} ({count})" for name, count in directions.most_common()
+    )
     if neutral:
         if direction_line:
             direction_line += f" · netral ({neutral})"
@@ -526,7 +559,9 @@ def format_pipeline_digest(items: list[dict[str, Any]]) -> str:
             direction_line = f"netral ({neutral})"
 
     decisions = Counter(str(item.get("decision") or "—") for item in batch)
-    decision_line = " · ".join(f"{name} ({count})" for name, count in decisions.most_common())
+    decision_line = " · ".join(
+        f"{name} ({count})" for name, count in decisions.most_common()
+    )
     executed = sum(1 for item in batch if item.get("executed"))
     execution_line = f"eksekusi {executed}" if executed else "tanpa eksekusi"
 
@@ -547,7 +582,9 @@ def format_pipeline_digest(items: list[dict[str, Any]]) -> str:
             lines.append(f"💬 {reason}")
     # Level ladder: one line per digest — prefer a real order ladder, else the
     # first indicative plan in the batch (keeps the message compact).
-    ladders = [item.get("levels") for item in batch if isinstance(item.get("levels"), dict)]
+    ladders = [
+        item.get("levels") for item in batch if isinstance(item.get("levels"), dict)
+    ]
     order_ladders = [lv for lv in ladders if str(lv.get("source") or "") == "order"]
     chosen = order_ladders[0] if order_ladders else (ladders[0] if ladders else None)
     level_line = _format_levels(chosen)
@@ -635,7 +672,9 @@ def summarize_pipeline_result(result: dict[str, Any]) -> dict[str, Any]:
         "executed": bool(record.get("executed", False)),
         "trace_id": str(record.get("trace_id") or ""),
         "symbol": str(record.get("symbol") or ""),
-        "levels": record.get("levels") if isinstance(record.get("levels"), dict) else None,
+        "levels": (
+            record.get("levels") if isinstance(record.get("levels"), dict) else None
+        ),
     }
 
 
@@ -659,7 +698,9 @@ def queue_pipeline_result(result: dict[str, Any]) -> bool:
         summary["queued_at"] = time.time()
         return digest.add(summary)
     except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
-        logger.warning("Telegram cycle report failed (%s); cycle unaffected", type(exc).__name__)
+        logger.warning(
+            "Telegram cycle report failed (%s); cycle unaffected", type(exc).__name__
+        )
         return False
 
 
@@ -691,5 +732,7 @@ def notify_pipeline_result(
         summary = summarize_pipeline_result(result)
         return bool(gw.notify("pipeline_result", format_pipeline_report(summary)))
     except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
-        logger.warning("Telegram pipeline report failed (%s); cycle unaffected", type(exc).__name__)
+        logger.warning(
+            "Telegram pipeline report failed (%s); cycle unaffected", type(exc).__name__
+        )
         return False

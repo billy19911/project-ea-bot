@@ -1,0 +1,74 @@
+CERT-A1 lint report
+==============================================================================
+SECTION: flake8 (services/python)
+COMMAND: ./.venv/Scripts/python.exe -m flake8 --max-line-length=100 --extend-ignore=E203,W503 src
+==============================================================================
+src\agents\analysts\structure_analyst.py:100:101: E501 line too long (102 > 100 characters)
+src\agents\analysts\structure_analyst.py:123:101: E501 line too long (106 > 100 characters)
+src\agents\analysts\structure_analyst.py:124:101: E501 line too long (109 > 100 characters)
+src\agents\analysts\structure_analyst.py:365:23: E741 ambiguous variable name 'l'
+src\research\engine.py:16:1: F401 'trading.indicators.ema' imported but unused
+
+
+EXIT_CODE: 1
+
+==============================================================================
+SECTION: black --check (services/python)
+COMMAND: ./.venv/Scripts/python.exe -m black --check src
+==============================================================================
+
+would reformat C:\xampp\htdocs\project-ea-bot\services\python\src\telegram\transport.py
+would reformat C:\xampp\htdocs\project-ea-bot\services\python\src\system\settings_store.py
+would reformat C:\xampp\htdocs\project-ea-bot\services\python\src\telegram\gateway.py
+would reformat C:\xampp\htdocs\project-ea-bot\services\python\src\system\endpoints.py
+would reformat C:\xampp\htdocs\project-ea-bot\services\python\src\agents\analysts\momentum_analyst.py
+would reformat C:\xampp\htdocs\project-ea-bot\services\python\src\telegram\signal_lifecycle.py
+would reformat C:\xampp\htdocs\project-ea-bot\services\python\src\agents\analysts\structure_analyst.py
+
+Oh no! 💥 💔 💥
+7 files would be reformatted, 184 files would be left unchanged.
+
+
+EXIT_CODE: 1
+
+==============================================================================
+SECTION: eslint (web)
+COMMAND: npm run lint --workspace=project-ea-bot-web
+==============================================================================
+
+> project-ea-bot-web@1.0.0 lint
+> eslint app/ components/ lib/
+
+
+
+EXIT_CODE: 0
+
+==============================================================================
+SECTION: eslint (api)
+COMMAND: npm run lint --workspace=project-ea-bot-api
+==============================================================================
+
+> project-ea-bot-api@1.0.0 lint
+> eslint src/
+
+
+C:\xampp\htdocs\project-ea-bot\apps\api\src\index.ts
+  18:50  warning  'AuthRequest' is defined but never used    @typescript-eslint/no-unused-vars
+  22:27  warning  'redactSecrets' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\xampp\htdocs\project-ea-bot\apps\api\src\logger.ts
+  30:13  warning  'pretty' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\xampp\htdocs\project-ea-bot\apps\api\src\metrics.ts
+  142:9  warning  'metricsText' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\xampp\htdocs\project-ea-bot\apps\api\src\middleware\websocket.ts
+    9:10  warning  'wsRateLimitCheck' is defined but never used  @typescript-eslint/no-unused-vars
+  145:17  warning  'data' is assigned a value but never used     @typescript-eslint/no-unused-vars
+
+✖ 6 problems (0 errors, 6 warnings)
+
+
+
+EXIT_CODE: 0
+

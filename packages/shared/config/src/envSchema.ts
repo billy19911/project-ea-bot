@@ -18,7 +18,7 @@ export const envSchema = z.object({
     .refine((val) => !isNaN(Number(val)) && Number(val) > 0 && Number(val) < 65536, {
       message: "PORT must be a number between 1 and 65535",
     })
-    .default("3000"),
+    .default("3789"),
 
   // ------------------------------------------------------------------
   // Logging (shared across all services)
@@ -96,7 +96,7 @@ export const envSchema = z.object({
     .refine((val) => !isNaN(Number(val)) && Number(val) > 0, {
       message: "PYTHON_SERVICE_PORT must be a positive number",
     })
-    .default("8000"),
+    .default("8787"),
 });
 
 // Infer the TypeScript type from the schema

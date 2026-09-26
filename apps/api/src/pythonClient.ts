@@ -17,7 +17,7 @@ import https from 'node:https';
 import { URL } from 'node:url';
 
 /** Default Python service base URL when `PYTHON_SERVICE_URL` is unset. */
-export const DEFAULT_PYTHON_SERVICE_URL = 'http://127.0.0.1:8000';
+export const DEFAULT_PYTHON_SERVICE_URL = 'http://127.0.0.1:8787';
 
 /** Default request timeout in milliseconds. */
 export const DEFAULT_TIMEOUT_MS = 5000;

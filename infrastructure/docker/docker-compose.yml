@@ -5,10 +5,10 @@ api:
     - ../../apps/api:/app
   command: sh -c "npm install && npm run dev"
   ports:
-    - "3001:3001"
+    - "3789:3789"
   environment:
     - NODE_ENV=development
-    - PORT=3001
+    - PORT=3789
     - HOST=0.0.0.0
   depends_on:
     - db
@@ -20,11 +20,11 @@ web:
     - ../../apps/web:/app
   command: sh -c "npm install && npm run dev"
   ports:
-    - "3000:3000"
+    - "4321:4321"
   environment:
     - NODE_ENV=development
-    - PORT=3000
-    - NEXT_PUBLIC_API_URL=http://localhost:3001
+    - PORT=4321
+    - NEXT_PUBLIC_API_URL=http://localhost:3789
   depends_on:
     - api
 
@@ -33,9 +33,9 @@ python:
   working_dir: /app
   volumes:
     - ../../services/python:/app
-  command: sh -c "pip install -r requirements.txt && uvicorn src.main:app --reload --host 0.0.0.0 --port 8000"
+  command: sh -c "pip install -r requirements.txt && uvicorn src.main:app --reload --host 0.0.0.0 --port 8787"
   ports:
-    - "8000:8000"
+    - "8787:8787"
   environment:
     - PYTHONUNBUFFERED=1
     - PYTHONPATH=/app:/app/src

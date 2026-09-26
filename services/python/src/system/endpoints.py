@@ -14,6 +14,7 @@ previously hard-coded demo data (PRD_V2 §25/§26/§27). Design rules:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
@@ -160,8 +161,11 @@ async def ai_models() -> dict[str, Any]:
     """
     registry = get_model_registry()
     try:
-        # force=False keeps the internal TTL cache; discovery itself is fail-safe.
-        registry.discover_from_gateway(force=False)
+        # Discovery is blocking network I/O: run it in a worker thread so the
+        # event loop (and every other endpoint) is never stalled while the LLM
+        # gateway is slow or unreachable. force=False keeps the caches
+        # (positive + negative) and discovery itself is fail-safe.
+        await asyncio.to_thread(registry.discover_from_gateway, force=False)
     except Exception as exc:  # noqa: BLE001 - discovery must never break the API
         logger.warning("Model discovery raised unexpectedly: %s", exc)
 

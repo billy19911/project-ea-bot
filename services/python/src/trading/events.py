@@ -73,6 +73,15 @@ class EventTypes(Enum):
     EXPOSURE_LIMIT_REACHED = "EXPOSURE_LIMIT_REACHED"
     LIQUIDITY_WARNING = "LIQUIDITY_WARNING"
 
+    # --- Lifecycle / risk-monitor events ---
+    # Produced as dict payloads by the position-close detector
+    # (orchestration/runtime) and the risk monitor (risk/monitor). The
+    # supervisor routes TRADE_CLOSE to ReviewLead and RISK_* to RiskLead.
+    TRADE_CLOSE = "TRADE_CLOSE"
+    RISK_DRAWDOWN = "RISK_DRAWDOWN"
+    RISK_EXPOSURE = "RISK_EXPOSURE"
+    RISK_MARGIN = "RISK_MARGIN"
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -218,7 +227,10 @@ class EventDetector:
             if ema_fast_val > ema_slow_val:
                 diff_pct = (ema_fast_val - ema_slow_val) / ema_slow_val
                 sev = min(0.5 + diff_pct * 0.5, 1.0)
-                desc = f"EMA bullish: fast={ema_fast_val:.2f}" f" > slow={ema_slow_val:.2f}"
+                desc = (
+                    f"EMA bullish: fast={ema_fast_val:.2f}"
+                    f" > slow={ema_slow_val:.2f}"
+                )
                 events.append(
                     DetectedEvent(
                         event_type=EventTypes.TREND_BULLISH,
@@ -231,7 +243,10 @@ class EventDetector:
             elif ema_fast_val < ema_slow_val:
                 diff_pct = (ema_slow_val - ema_fast_val) / ema_fast_val
                 sev = min(0.5 + diff_pct * 0.5, 1.0)
-                desc = f"EMA bearish: fast={ema_fast_val:.2f}" f" < slow={ema_slow_val:.2f}"
+                desc = (
+                    f"EMA bearish: fast={ema_fast_val:.2f}"
+                    f" < slow={ema_slow_val:.2f}"
+                )
                 events.append(
                     DetectedEvent(
                         event_type=EventTypes.TREND_BEARISH,
@@ -254,7 +269,9 @@ class EventDetector:
 
         # --- Trend strengthening / weakening (ADX-based) ---
         adx_cond = (
-            adx_val is not None and prev_state is not None and prev_state.adx_value is not None
+            adx_val is not None
+            and prev_state is not None
+            and prev_state.adx_value is not None
         )
         if adx_cond:
             if adx_val > prev_state.adx_value + 2.0:  # type: ignore
@@ -379,7 +396,10 @@ class EventDetector:
                 prev_close = prev_state.close
                 if close_price > bb_upper and prev_close <= bb_upper:
                     sev = min((close_price - bb_upper) / bb_upper, 1.0)
-                    desc = f"Price broke above BB upper:" f" {close_price:.2f} > {bb_upper:.2f}"
+                    desc = (
+                        f"Price broke above BB upper:"
+                        f" {close_price:.2f} > {bb_upper:.2f}"
+                    )
                     events.append(
                         DetectedEvent(
                             event_type=EventTypes.BREAKOUT,
@@ -391,7 +411,10 @@ class EventDetector:
                     )
                 if close_price < bb_lower and prev_close >= bb_lower:
                     sev = min((bb_lower - close_price) / bb_lower, 1.0)
-                    desc = f"Price broke below BB lower:" f" {close_price:.2f} < {bb_lower:.2f}"
+                    desc = (
+                        f"Price broke below BB lower:"
+                        f" {close_price:.2f} < {bb_lower:.2f}"
+                    )
                     events.append(
                         DetectedEvent(
                             event_type=EventTypes.BREAKDOWN,
@@ -406,7 +429,10 @@ class EventDetector:
             if prev_state is not None and prev_state.close is not None:
                 prev_c = prev_state.close
                 if prev_c > bb_upper and close_price < bb_middle:
-                    desc = f"Reversal from upper band:" f" {prev_c:.2f} -> {close_price:.2f}"
+                    desc = (
+                        f"Reversal from upper band:"
+                        f" {prev_c:.2f} -> {close_price:.2f}"
+                    )
                     events.append(
                         DetectedEvent(
                             event_type=EventTypes.REVERSAL,
@@ -417,7 +443,10 @@ class EventDetector:
                         )
                     )
                 elif prev_c < bb_lower and close_price > bb_middle:
-                    desc = f"Reversal from lower band:" f" {prev_c:.2f} -> {close_price:.2f}"
+                    desc = (
+                        f"Reversal from lower band:"
+                        f" {prev_c:.2f} -> {close_price:.2f}"
+                    )
                     events.append(
                         DetectedEvent(
                             event_type=EventTypes.REVERSAL,
@@ -437,7 +466,9 @@ class EventDetector:
                         1.0,
                     )
                     desc = (
-                        f"BB width expanding:" f" {prev_state.BB_width:.3f}" f" -> {bb_width:.3f}"
+                        f"BB width expanding:"
+                        f" {prev_state.BB_width:.3f}"
+                        f" -> {bb_width:.3f}"
                     )
                     events.append(
                         DetectedEvent(
@@ -454,7 +485,9 @@ class EventDetector:
                         1.0,
                     )
                     desc = (
-                        f"BB width contracting:" f" {prev_state.BB_width:.3f}" f" -> {bb_width:.3f}"
+                        f"BB width contracting:"
+                        f" {prev_state.BB_width:.3f}"
+                        f" -> {bb_width:.3f}"
                     )
                     events.append(
                         DetectedEvent(

@@ -23,6 +23,69 @@ Status: CONNECTED (live `getMe` + live send test)
 Research routing: daily cron job `11c1fbc7c261` (08:00 Asia/Jakarta) delivered to
 `telegram:926385109`; real run completed with 10 findings persisted to the ledger.
 
+## INFRASTRUCTURE FIX (2026-09-25)
+```
+Symptom:  Every gateway agent turn failed:
+          "No module named 'pydantic_core._pydantic_core'"
+Root cause: gateway/run.py:422 shim (_ensure_windows_gateway_venv_imports)
+          picks a venv via VIRTUAL_ENV, else falls back to project_root/venv,
+          then injects its site-packages at sys.path[1]. Both spawn paths
+          (desktop VIRTUAL_ENV=hermes-agent\venv; scheduled-task VBS
+          VIRTUAL_ENV=tools -> fallback) hit the stale legacy
+          hermes-agent/venv (Python 3.11.16 / cp311), whose site-packages
+          shadowed the PM-managed cp314 environment.
+Fix:      Legacy venv MOVED (not deleted) to backups/legacy-venv-20260925.
+          No code changed. Gateway restarted via scheduled task -> PID 25388.
+Verified: - exact production error reproduced in isolation pre-fix, gone post-fix
+          - live agent turn output: GATEWAY-TURN-OK
+          - post-restart: 0 pydantic errors; 4 platforms connected
+```
+Correct runtime: PM-managed env `installs/125698b26551e7f0/environments/
+ea94f174.../venv` (cp314, `pydantic_core` + `openai 2.24.0`).
+
+## FREE API MODEL RADAR (added 2026-09-25)
+```
+Command:   /freemodels — news scan for free-API models usable via 9Router
+Sources:   provider blogs/promo pages (e.g. DeepSeek V4.1 Flash free promo),
+           9Router live catalog http://localhost:20128/v1/models
+Baseline:  profiles/popoy/research/9router-free-snapshot.json (49 free ids)
+Diff:      NEW / GONE / ending-soon expiry tracking vs snapshot
+Delivery:  compact Telegram format — sections: LIVE NOW (cap + "N more"),
+           NEW, NO LONGER FREE, ENDING SOON, PROMO, one-line summary
+           Verified live: job completed, output rendered, delivery_outcome
+           'delivered' on Telegram (test run 2026-09-25 20:34 WIB)
+Integrated: supervisor skill v1.1.0 — specialist #7 (Free API model scout),
+           fan-out + fact-check + daily 08:00 job now include the free sweep
+```
+
+## SPLIT TELEGRAM DELIVERY (added 2026-09-26)
+```
+Goal:      Daily briefing split into separate Telegram messages, one per
+           section (user request): e.g. msg 1 = free API models, msg 2 =
+           global news, msg 3 = trends, ... one message per section.
+Mechanism: Job deliver=local suppresses the automatic final-message delivery;
+           the agent itself sends each section via the official `hermes send`
+           CLI (designed for scripts/cron — no LLM, no gateway round-trip):
+             bin\hermes.cmd --profile popoy send --to telegram:926385109
+                            --json --file "<section>.txt"
+           Job prompt explicitly overrides the default cron hint ("do NOT use
+           send_message or try to deliver the output yourself") because this
+           job's automatic delivery is suppressed. Skill phase 4b documents
+           the per-section send order + failure retry.
+Verified:  - cron-context test job (deliver=local): 3 sends, message_id 20-22,
+             delivery_outcome 'suppressed' (no duplicate) — PASS
+           - REAL daily job run 2026-09-26 00:16-00:29 WIB: 8 separate
+             messages sent (message_id 24-31), all "success": true,
+             delivery_outcome 'suppressed', no [CRON_FAILURE] — PASS
+           - Sections in order: FREE API MODELS / NEWS / TRENDS /
+             TOP DISCOVERIES / AI / OPPORTUNITIES / UNVERIFIED / CHANGED
+Failure:   job --failure-deliver telegram:926385109 — if delivery is
+           impossible the agent emits [CRON_FAILURE] and the failure notice
+           still reaches the user (never silently lost).
+Scope:     Only the daily cron briefing is split; interactive /discover,
+           /research etc. still reply as a single normal report.
+```
+
 ## ROUTING
 ```
 Main       → Xynn
@@ -86,6 +149,9 @@ Commands:     /research  /discover  /xscan  /trends   (/github-research paused)
 1. Re-enable the GitHub researcher when the daily API limit clears:
    `hermes --profile popoy config set skills.disabled '[]'`
    and restore the DEVELOPER / GITHUB section in the supervisor skill.
-2. `~/.hermes` is a stale legacy directory — safe to delete manually if desired.
+2. `~/.hermes` is a legacy directory (1.7 MB) — NOT deleted: it still holds a
+   standalone config.yaml pointing at the 9Router endpoint
+   (`codebuddy-deepseekv4.1flashfree`). Left untouched; safe to delete manually
+   only if that config is no longer wanted.
 3. Optional: the trading inbound poller is disabled by design (only one getUpdates
    consumer per bot token, which the Hermes gateway owns).

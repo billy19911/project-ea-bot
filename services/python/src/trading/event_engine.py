@@ -19,7 +19,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from .events import DetectedEvent, EventTypes
 
@@ -76,6 +76,12 @@ EVENT_PRIORITY_MAP: dict[EventTypes, EventPriority] = {
     EventTypes.STOCH_OVERSOLD: EventPriority.MEDIUM,
     # --- Candlestick pattern: BACKGROUND (analytics/housekeeping) ---
     EventTypes.DOJI: EventPriority.BACKGROUND,
+    # --- Trade lifecycle: NORMAL (review/learning is not latency-critical) ---
+    EventTypes.TRADE_CLOSE: EventPriority.NORMAL,
+    # --- Risk-monitor events: CRITICAL ---
+    EventTypes.RISK_DRAWDOWN: EventPriority.CRITICAL,
+    EventTypes.RISK_EXPOSURE: EventPriority.CRITICAL,
+    EventTypes.RISK_MARGIN: EventPriority.CRITICAL,
 }
 
 
@@ -93,6 +99,29 @@ PRIORITY_ORDER: tuple[EventPriority, ...] = (
 def get_priority(event_type: EventTypes) -> EventPriority:
     """Return priority for an event type (default NORMAL)."""
     return EVENT_PRIORITY_MAP.get(event_type, EventPriority.NORMAL)
+
+
+def _event_priority(event: Any) -> EventPriority:
+    """Resolve queue priority for a DetectedEvent or dict payload.
+
+    Producers such as the position-close detector (orchestration/runtime) and
+    the risk monitor (risk/monitor) enqueue plain dicts carrying an
+    ``event_type`` string. DetectedEvent objects carry the enum directly.
+    Unknown/missing types fall back to NORMAL (never raises).
+    """
+    raw: Any = None
+    if isinstance(event, dict):
+        raw = event.get("event_type")
+    else:
+        raw = getattr(event, "event_type", None)
+    if isinstance(raw, EventTypes):
+        return get_priority(raw)
+    if isinstance(raw, str):
+        try:
+            return get_priority(EventTypes(raw))
+        except ValueError:
+            return EventPriority.NORMAL
+    return EventPriority.NORMAL
 
 
 @dataclass
@@ -131,8 +160,12 @@ class EventQueue:
     def enqueue(self, event: DetectedEvent) -> bool:
         """Add event to queue.
 
+        Accepts a :class:`DetectedEvent` or a dict payload carrying an
+        ``event_type`` string (producer contract of the position-close
+        detector and the risk monitor).
+
         Args:
-            event: Detected event to enqueue.
+            event: Detected event (object or dict) to enqueue.
 
         Returns:
             True if enqueued, False if queue full.
@@ -140,9 +173,11 @@ class EventQueue:
         with self._lock:
             if len(self._queue) >= self._max_size:
                 return False
-            priority = get_priority(event.event_type)
+            priority = _event_priority(event)
             self._queue.append(
-                PrioritizedEvent(event=event, priority=priority, sequence=self._sequence)
+                PrioritizedEvent(
+                    event=event, priority=priority, sequence=self._sequence
+                )
             )
             self._sequence += 1
             return True
@@ -157,7 +192,8 @@ class EventQueue:
             for i in range(1, len(self._queue)):
                 cand = self._queue[i]
                 if (cand.priority.value > best.priority.value) or (
-                    cand.priority.value == best.priority.value and cand.sequence < best.sequence
+                    cand.priority.value == best.priority.value
+                    and cand.sequence < best.sequence
                 ):
                     best = cand
                     best_idx = i
@@ -251,7 +287,9 @@ class EventHistory:
                 break
         return results
 
-    def get_counts_by_type(self, since: Optional[datetime] = None) -> dict[EventTypes, int]:
+    def get_counts_by_type(
+        self, since: Optional[datetime] = None
+    ) -> dict[EventTypes, int]:
         """Count stored events by type, optionally filtered by time."""
         with self._lock:
             snapshot = list(self._history)

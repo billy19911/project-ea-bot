@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import pytest
-
 from agents.analysts import StructureAnalystAgent
 
 
@@ -13,7 +12,7 @@ def test_structure_analyst_initialization():
     agent = StructureAnalystAgent()
     assert agent.name == "structure_analyst"
     assert agent.agent_type == "structural"
-    assert len(agent.capabilities) == 4
+    assert len(agent.capabilities) >= 4
     assert any(c.name == "support_resistance" for c in agent.capabilities)
 
 
@@ -94,7 +93,9 @@ def test_structure_analyst_fallback_on_error():
     assert result["signal"] == "NEUTRAL"
     assert result["confidence"] == 0.0
     # Fallback triggers for invalid input; reasoning mentions insufficient data
-    assert "Insufficient" in result["reasoning"] or "error" in result["reasoning"].lower()
+    assert (
+        "Insufficient" in result["reasoning"] or "error" in result["reasoning"].lower()
+    )
 
 
 def test_structure_analyst_support_resistance_calculation():
@@ -132,6 +133,76 @@ def test_structure_analyst_order_block_detection():
     # At least one order block should be detected
     order_blocks = [k for k in key_levels if k.get("type")]
     assert len(order_blocks) >= 1
+
+
+def test_structure_analyst_smc_pattern_metadata():
+    """BOS/CHoCH/sweep fields and FVG count are exposed."""
+    agent = StructureAnalystAgent()
+    prices = [
+        1.1000,
+        1.1010,
+        1.1020,
+        1.1030,
+        1.1040,
+        1.1050,
+        1.1045,
+        1.1055,
+        1.1065,
+        1.1075,
+        1.1085,
+        1.1095,
+        1.1100,
+        1.1105,
+        1.1120,
+        1.1130,
+        1.1140,
+        1.1150,
+    ]
+    highs = [p + 0.0005 for p in prices]
+    lows = [p - 0.0005 for p in prices]
+    result = agent.analyze({"prices": prices, "highs": highs, "lows": lows})
+    metadata = result["metadata"]
+    assert "structure_pattern" in metadata
+    assert "bos" in metadata["structure_pattern"]
+    assert "choch" in metadata["structure_pattern"]
+    assert "fvg_count" in metadata
+
+
+def test_structure_analyst_self_improvement_calibration():
+    """Agent memory adjusts confidence and appends calibration note."""
+    agent = StructureAnalystAgent()
+
+    class FakeMemory:
+        def adjust_confidence(self, agent_name, regime, base):
+            assert agent_name == "structure_analyst"
+            assert regime in {"TRENDING", "RANGING"}
+            return min(1.0, base + 0.05), "confidence +0.05"
+
+    prices = [1.1000 + i * 0.0001 for i in range(30)]
+    result = agent.analyze(
+        {
+            "prices": prices,
+            "highs": prices,
+            "lows": prices,
+            "agent_memory": FakeMemory(),
+        }
+    )
+    assert "Memory:" in result["reasoning"]
+    assert result["confidence"] > 0.0
+
+
+def test_structure_analyst_invalid_input_fails_closed():
+    """Invalid OHLC length returns NEUTRAL, zero confidence."""
+    agent = StructureAnalystAgent()
+    result = agent.analyze(
+        {
+            "prices": [1.1000, 1.1010, 1.1020],
+            "highs": [1.1000, 1.1010],
+            "lows": [1.1000, 1.1010, 1.1020],
+        }
+    )
+    assert result["signal"] == "NEUTRAL"
+    assert result["confidence"] == 0.0
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
@@ -128,7 +129,11 @@ export default function StrategyCenterPage() {
       activeKey="strategy"
       eyebrow="EA BOT / PUSAT STRATEGI"
       title="Pusat Strategi"
-
+      actions={
+        <Link href="/strategy-lab" style={{ textDecoration: 'none' }}>
+          <button className={styles.btnCreate}>+ Buat Strategi</button>
+        </Link>
+      }
     >
 
         {notice && <div className={styles.notice}>{notice}</div>}

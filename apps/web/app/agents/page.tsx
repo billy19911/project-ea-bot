@@ -86,6 +86,7 @@ interface Lesson {
 interface LearningAnalytics {
   available?: boolean;
   lessons?: Lesson[];
+  total?: number;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -271,7 +272,11 @@ export default function AgentsPage() {
     if (a?.name) agentTypeByName.set(a.name, a.type ?? '-');
   }
 
-  const lessons = Array.isArray(learning?.lessons) ? (learning!.lessons ?? []).slice(0, 10) : [];
+  // Store is append-only (oldest first): show the 10 LATEST, newest on top.
+  const allLessons = Array.isArray(learning?.lessons) ? learning!.lessons ?? [] : [];
+  const lessons = allLessons.slice(-10).reverse();
+  const totalLessons =
+    typeof learning?.total === 'number' ? learning.total : allLessons.length;
 
   const activeAgentCount = agentList.filter((a) => a.status === 'active').length;
   const lastCycleAt = decisions[0]?.recorded_at ?? null;
@@ -531,17 +536,22 @@ export default function AgentsPage() {
             {!learning?.available || lessons.length === 0 ? (
               <p className={styles.muted}>Belum ada pelajaran terekam.</p>
             ) : (
-              lessons.map((lesson, i) => (
-                <div key={lesson.id || i} className={styles.lesson}>
-                  <div className={styles.lessonHead}>
-                    <span className={outcomeBadgeClass(lesson.outcome)}>
-                      {lesson.outcome || '—'}
-                    </span>
-                    {lesson.symbol && <span className={styles.lessonSymbol}>{lesson.symbol}</span>}
+              <>
+                <p className={styles.muted}>
+                  {lessons.length} terbaru dari {totalLessons} pelajaran
+                </p>
+                {lessons.map((lesson, i) => (
+                  <div key={lesson.id || i} className={styles.lesson}>
+                    <div className={styles.lessonHead}>
+                      <span className={outcomeBadgeClass(lesson.outcome)}>
+                        {lesson.outcome || '—'}
+                      </span>
+                      {lesson.symbol && <span className={styles.lessonSymbol}>{lesson.symbol}</span>}
+                    </div>
+                    {lesson.text && <p className={styles.lessonText}>{lesson.text}</p>}
                   </div>
-                  {lesson.text && <p className={styles.lessonText}>{lesson.text}</p>}
-                </div>
-              ))
+                ))}
+              </>
             )}
           </div>
         </aside>

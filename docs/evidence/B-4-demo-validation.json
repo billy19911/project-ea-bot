@@ -1,0 +1,508 @@
+{
+  "account": {
+    "login": 49662626,
+    "server": "HFMarketsGlobal-Demo",
+    "trade_mode": 0,
+    "balance": 493586729.26,
+    "equity": 493577921.73,
+    "currency": "IDR",
+    "leverage": 1000
+  },
+  "symbol_info": {
+    "name": "#BTCUSD",
+    "volume_min": 0.01,
+    "volume_step": 0.01,
+    "digits": 3,
+    "filling_mode": 1
+  },
+  "tick": {
+    "symbol": "#BTCUSD",
+    "bid": 83864.969,
+    "ask": 83904.969,
+    "time": 1790440901,
+    "spread": 40.0,
+    "captured_at": "2026-09-26T13:41:40.734187+00:00"
+  },
+  "position": {
+    "ticket": 1353670649,
+    "symbol": "#BTCUSD",
+    "volume": 0.01,
+    "price_open": 83913.594,
+    "sl": 0.0,
+    "tp": 0.0,
+    "magic": 84004,
+    "comment": "B4DEMO",
+    "type": 0,
+    "profit": -8807.53
+  },
+  "ledger_path": "logs\\order_state.jsonl",
+  "ledger_intent_id": "b4-t1-1353670649",
+  "result": "already_validated",
+  "skipped_submit": true,
+  "request": {
+    "symbol": "#BTCUSD",
+    "order_type": "BUY",
+    "volume": 0.01,
+    "magic": 84004,
+    "comment": "B4DEMO"
+  },
+  "order_check": {
+    "retcode": 0,
+    "comment": "Done"
+  },
+  "execution_result": {
+    "success": true,
+    "ticket": 1353670649,
+    "error_code": 0,
+    "error_message": "",
+    "retries": 0
+  },
+  "t1": {
+    "timestamp": "2026-09-26T13:41:40.749124+00:00",
+    "terminal_path": "E:\\MT5 XYNN EA\\MetaTrader 5 BIL 2\\terminal64.exe",
+    "terminal_id": "bil2",
+    "dry_run": true,
+    "symbol": "#BTCUSD",
+    "account": {
+      "login": 49662626,
+      "server": "HFMarketsGlobal-Demo",
+      "trade_mode": 0,
+      "balance": 493586729.26,
+      "equity": 493577921.73,
+      "currency": "IDR",
+      "leverage": 1000
+    },
+    "tick": {
+      "symbol": "#BTCUSD",
+      "bid": 83864.969,
+      "ask": 83904.969,
+      "time": 1790440901,
+      "spread": 40.0,
+      "captured_at": "2026-09-26T13:41:40.734187+00:00"
+    },
+    "request": {
+      "symbol": "#BTCUSD",
+      "order_type": "BUY",
+      "volume": 0.01,
+      "magic": 84004,
+      "comment": "B4DEMO"
+    },
+    "order_check": {
+      "retcode": 0,
+      "comment": "Done"
+    },
+    "execution_result": {
+      "success": true,
+      "ticket": 1353670649,
+      "error_code": 0,
+      "error_message": "",
+      "retries": 0
+    },
+    "position": {
+      "ticket": 1353670649,
+      "symbol": "#BTCUSD",
+      "volume": 0.01,
+      "price_open": 83913.594,
+      "sl": 0.0,
+      "tp": 0.0,
+      "magic": 84004,
+      "comment": "B4DEMO",
+      "type": 0,
+      "profit": -8807.53
+    },
+    "python_version": "3.11.16",
+    "steps": [
+      {
+        "name": "preflight",
+        "ok": true,
+        "detail": "connected login=49662626 server=HFMarketsGlobal-Demo"
+      },
+      {
+        "name": "demo_guard",
+        "ok": true,
+        "detail": "account is DEMO (trade_mode=0)"
+      },
+      {
+        "name": "market_check",
+        "ok": true,
+        "detail": "tick bid=83864.969 ask=83904.969"
+      },
+      {
+        "name": "open_position_guard",
+        "ok": true,
+        "detail": "already validated — ticket=1353670649 left OPEN"
+      }
+    ]
+  },
+  "t2": {
+    "timestamp": "2026-09-26T13:50:35.872256+00:00",
+    "terminal_path": "E:\\MT5 XYNN EA\\MetaTrader 5 BIL 2\\terminal64.exe",
+    "terminal_id": "bil2",
+    "t1_ticket": 1353670649,
+    "t1_ticket_matched": true,
+    "has_critical": true,
+    "total_mismatches": 17,
+    "matched": [
+      1353670649
+    ],
+    "missing_in_broker": [
+      1348784058,
+      1348874223,
+      1348874358,
+      1348963010,
+      1348984819,
+      1349697094,
+      1349909054,
+      1350068378,
+      1350246238,
+      1352094141,
+      1352313902,
+      1352414292,
+      1352414491,
+      1352688152
+    ],
+    "missing_internal": [],
+    "field_differences": [
+      {
+        "ticket": 1353670649,
+        "field": "volume",
+        "internal": null,
+        "broker": 0.01,
+        "category": "volume_mismatches",
+        "classification": "expected_ledger_shape_gap"
+      },
+      {
+        "ticket": 1353670649,
+        "field": "symbol",
+        "internal": "",
+        "broker": "#BTCUSD",
+        "category": "symbol_mismatches",
+        "classification": "expected_ledger_shape_gap"
+      },
+      {
+        "ticket": 1353670649,
+        "field": "magic",
+        "internal": 0,
+        "broker": 84004,
+        "category": "magic_mismatches",
+        "classification": "expected_ledger_shape_gap"
+      }
+    ],
+    "raw_report": {
+      "matched": [
+        1353670649
+      ],
+      "missing_in_broker": [
+        1348784058,
+        1348874223,
+        1348874358,
+        1348963010,
+        1348984819,
+        1349697094,
+        1349909054,
+        1350068378,
+        1350246238,
+        1352094141,
+        1352313902,
+        1352414292,
+        1352414491,
+        1352688152
+      ],
+      "missing_internal": [],
+      "volume_mismatches": [
+        {
+          "ticket": 1353670649,
+          "field": "volume",
+          "internal": null,
+          "broker": 0.01
+        }
+      ],
+      "sltp_mismatches": [],
+      "symbol_mismatches": [
+        {
+          "ticket": 1353670649,
+          "field": "symbol",
+          "internal": "",
+          "broker": "#BTCUSD"
+        }
+      ],
+      "magic_mismatches": [
+        {
+          "ticket": 1353670649,
+          "field": "magic",
+          "internal": 0,
+          "broker": 84004
+        }
+      ],
+      "matched_orders": [],
+      "orphan_orders": [],
+      "total_mismatches": 17,
+      "critical": true
+    },
+    "ledger_path": "logs\\order_state.jsonl",
+    "broker_live": true,
+    "result": "matched",
+    "python_version": "3.11.16",
+    "steps": [
+      {
+        "name": "t1_ticket",
+        "ok": true,
+        "detail": "t1 ticket=1353670649"
+      },
+      {
+        "name": "attach_connector",
+        "ok": true,
+        "detail": "connector live_mode=True path=E:\\MT5 XYNN EA\\MetaTrader 5 BIL 2\\terminal64.exe"
+      }
+    ]
+  },
+  "t3": {
+    "pre": {
+      "timestamp": "2026-09-26T14:00:06.569595+00:00",
+      "stage": "pre",
+      "terminal_path": "E:\\MT5 XYNN EA\\MetaTrader 5 BIL 2\\terminal64.exe",
+      "terminal_id": "bil2",
+      "t1_ticket": 1353670649,
+      "ledger_path": "logs\\order_state.jsonl",
+      "ledger_record": {
+        "intent_id": "b4-t1-1353670649",
+        "state": "position_confirmed",
+        "timestamp": "2026-09-26T13:41:40.749124+00:00",
+        "ticket": 1353670649
+      },
+      "arm_state": {
+        "selected_id": "bil2",
+        "execution_armed": true,
+        "armed_terminals": [
+          "bil2"
+        ],
+        "terminal_armed": true,
+        "terminal_selected": true,
+        "execution_permitted": true,
+        "saved_selection": "bil2"
+      },
+      "result": "pre_ok",
+      "python_version": "3.11.16",
+      "steps": [
+        {
+          "name": "t1_ticket",
+          "ok": true,
+          "detail": "t1 ticket=1353670649"
+        },
+        {
+          "name": "ledger_file_record",
+          "ok": true,
+          "detail": "ticket=1353670649 state=position_confirmed intent_id=b4-t1-1353670649 in logs\\order_state.jsonl"
+        },
+        {
+          "name": "arm",
+          "ok": true,
+          "detail": "terminal 'bil2' armed and execution permitted"
+        },
+        {
+          "name": "arm_state_pre",
+          "ok": true,
+          "detail": "armed=True armed_terminals=['bil2'] permitted=True"
+        }
+      ]
+    },
+    "stages_present": [
+      "pre",
+      "post"
+    ],
+    "both_stages_present": true,
+    "post": {
+      "timestamp": "2026-09-26T14:00:07.558223+00:00",
+      "stage": "post",
+      "terminal_path": "E:\\MT5 XYNN EA\\MetaTrader 5 BIL 2\\terminal64.exe",
+      "terminal_id": "bil2",
+      "t1_ticket": 1353670649,
+      "ledger_path": "logs\\order_state.jsonl",
+      "store_path": "logs\\order_state.jsonl",
+      "rehydrated_state": "position_confirmed",
+      "arm_state_post_restart": {
+        "selected_id": null,
+        "execution_armed": false,
+        "armed_terminals": [],
+        "terminal_armed": false,
+        "terminal_selected": false,
+        "execution_permitted": false,
+        "saved_selection": "bil2"
+      },
+      "arm_cleared": true,
+      "arm_state_after_rearm": {
+        "selected_id": "bil2",
+        "execution_armed": true,
+        "armed_terminals": [
+          "bil2"
+        ],
+        "terminal_armed": true,
+        "terminal_selected": true,
+        "execution_permitted": true,
+        "saved_selection": "bil2"
+      },
+      "t1_ticket_matched": true,
+      "has_critical": true,
+      "total_mismatches": 17,
+      "matched": [
+        1353670649
+      ],
+      "missing_in_broker": [
+        1348784058,
+        1348874223,
+        1348874358,
+        1348963010,
+        1348984819,
+        1349697094,
+        1349909054,
+        1350068378,
+        1350246238,
+        1352094141,
+        1352313902,
+        1352414292,
+        1352414491,
+        1352688152
+      ],
+      "missing_internal": [],
+      "field_differences": [
+        {
+          "ticket": 1353670649,
+          "field": "volume",
+          "internal": null,
+          "broker": 0.01,
+          "category": "volume_mismatches",
+          "classification": "expected_ledger_shape_gap"
+        },
+        {
+          "ticket": 1353670649,
+          "field": "symbol",
+          "internal": "",
+          "broker": "#BTCUSD",
+          "category": "symbol_mismatches",
+          "classification": "expected_ledger_shape_gap"
+        },
+        {
+          "ticket": 1353670649,
+          "field": "magic",
+          "internal": 0,
+          "broker": 84004,
+          "category": "magic_mismatches",
+          "classification": "expected_ledger_shape_gap"
+        }
+      ],
+      "raw_report": {
+        "matched": [
+          1353670649
+        ],
+        "missing_in_broker": [
+          1348784058,
+          1348874223,
+          1348874358,
+          1348963010,
+          1348984819,
+          1349697094,
+          1349909054,
+          1350068378,
+          1350246238,
+          1352094141,
+          1352313902,
+          1352414292,
+          1352414491,
+          1352688152
+        ],
+        "missing_internal": [],
+        "volume_mismatches": [
+          {
+            "ticket": 1353670649,
+            "field": "volume",
+            "internal": null,
+            "broker": 0.01
+          }
+        ],
+        "sltp_mismatches": [],
+        "symbol_mismatches": [
+          {
+            "ticket": 1353670649,
+            "field": "symbol",
+            "internal": "",
+            "broker": "#BTCUSD"
+          }
+        ],
+        "magic_mismatches": [
+          {
+            "ticket": 1353670649,
+            "field": "magic",
+            "internal": 0,
+            "broker": 84004
+          }
+        ],
+        "matched_orders": [],
+        "orphan_orders": [],
+        "total_mismatches": 17,
+        "critical": true
+      },
+      "broker_live": true,
+      "result": "recovered",
+      "python_version": "3.11.16",
+      "steps": [
+        {
+          "name": "t1_ticket",
+          "ok": true,
+          "detail": "t1 ticket=1353670649"
+        },
+        {
+          "name": "rehydrate",
+          "ok": true,
+          "detail": "ticket=1353670649 rehydrated state=position_confirmed from logs\\order_state.jsonl"
+        },
+        {
+          "name": "arm_cleared",
+          "ok": true,
+          "detail": "armed=False armed_terminals=[] (expected empty after restart)"
+        },
+        {
+          "name": "attach_connector",
+          "ok": true,
+          "detail": "connector live_mode=True path=E:\\MT5 XYNN EA\\MetaTrader 5 BIL 2\\terminal64.exe"
+        },
+        {
+          "name": "reconcile_post",
+          "ok": true,
+          "detail": "ticket=1353670649 matched=True critical=True mismatches=17"
+        },
+        {
+          "name": "arm",
+          "ok": true,
+          "detail": "terminal 'bil2' armed and execution permitted"
+        },
+        {
+          "name": "rearm",
+          "ok": true,
+          "detail": "re-armed 'bil2': armed=True permitted=True"
+        }
+      ]
+    }
+  },
+  "closure": {
+    "closed_at_utc": "2026-09-26T14:21:23+00:00",
+    "closed_at_server": "2026-09-26 17:21:23",
+    "method": "direct broker call via one-shot helper _b4_close.py (operational cleanup, NOT engine path)",
+    "ticket": 1353670649,
+    "symbol": "#BTCUSD",
+    "volume": 0.01,
+    "price_open": 83913.594,
+    "price_close": 83907.844,
+    "retcode": 10009,
+    "deal": 1207703177,
+    "filling": "FOK",
+    "realized_profit_idr": -1078.47,
+    "swap": 0.0,
+    "commission": 0.0,
+    "account_after": {
+      "balance": 493585650.79,
+      "equity": 493585650.79,
+      "positions": 0
+    }
+  },
+  "known_gaps_note": "See docs/evidence/B-4-demo-validation.md Known gaps: (1) ledger shape gap, (2) stale position_confirmed -> has_critical=True -> ReconciliationGuard fail-closes new orders, (3) validation order carried NO SL/TP (plan deviation) -> SL/TP attach path not exercised live."
+}

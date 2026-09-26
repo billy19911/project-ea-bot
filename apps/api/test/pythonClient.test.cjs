@@ -33,7 +33,7 @@ function setBaseUrl(url) {
 }
 
 test('defaults to the documented base URL when env is unset', () => {
-  assert.equal(DEFAULT_PYTHON_SERVICE_URL, 'http://127.0.0.1:8000');
+  assert.equal(DEFAULT_PYTHON_SERVICE_URL, 'http://127.0.0.1:8787');
 });
 
 test('successful proxy returns live data', async () => {

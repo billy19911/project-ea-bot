@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # Server
     host: str = Field(default="127.0.0.1", alias="HOST")
-    port: int = Field(default=8000, alias="PORT")
+    port: int = Field(default=8787, alias="PORT")
 
     # API authentication (audit P0-1). When ``PYTHON_API_KEY`` is set, every
     # request except the health/read-only probes below must present a matching
@@ -57,7 +57,27 @@ class Settings(BaseSettings):
     market_feed_interval_s: float = Field(default=60.0, alias="MARKET_FEED_INTERVAL_S")
     # Anti-spam: minimum seconds before the same (symbol, event_type) may be
     # re-emitted into the pipeline (and reported to Telegram) again.
-    market_feed_event_cooldown_s: float = Field(default=300.0, alias="MARKET_FEED_EVENT_COOLDOWN_S")
+    market_feed_event_cooldown_s: float = Field(
+        default=300.0, alias="MARKET_FEED_EVENT_COOLDOWN_S"
+    )
+
+    # Risk monitor (FIX B) — periodically checks account drawdown/exposure/margin
+    # via MT5 (read-only) and emits RISK_* events so the supervisor routes them
+    # to RiskLead. Default OFF: the operator must explicitly switch it on.
+    risk_monitor_enabled: bool = Field(default=False, alias="RISK_MONITOR_ENABLED")
+    risk_monitor_interval_s: float = Field(
+        default=60.0, alias="RISK_MONITOR_INTERVAL_S"
+    )
+    # Max drawdown fraction (0.05 = 5%) before RISK_DRAWDOWN is emitted.
+    risk_drawdown_threshold: float = Field(
+        default=0.05, alias="RISK_DRAWDOWN_THRESHOLD"
+    )
+    # Max exposure fraction (margin/equity, 0.30 = 30%) before RISK_EXPOSURE.
+    risk_exposure_threshold: float = Field(
+        default=0.30, alias="RISK_EXPOSURE_THRESHOLD"
+    )
+    # Min free-margin fraction (margin_free/equity, 0.20 = 20%) before RISK_MARGIN.
+    risk_margin_threshold: float = Field(default=0.20, alias="RISK_MARGIN_THRESHOLD")
 
     # Risk engine
     max_position_size: float = Field(default=1000.0, alias="MAX_POSITION_SIZE")
@@ -68,7 +88,14 @@ class Settings(BaseSettings):
     # every matching department lead / specialist run so departments genuinely
     # collaborate; ``first_match`` collapses to a single agent per cycle;
     # ``priority_based`` keeps all, ordered by priority.
-    supervisor_routing_policy: str = Field(default="all_match", alias="SUPERVISOR_ROUTING_POLICY")
+    supervisor_routing_policy: str = Field(
+        default="all_match", alias="SUPERVISOR_ROUTING_POLICY"
+    )
+
+    # Signal confidence filter (PRD_V2 §32). Proposals with confidence below
+    # this threshold are not actionable regardless of direction. Fail-closed:
+    # missing confidence treated as 0.0.
+    min_signal_confidence: float = Field(default=0.7, alias="MIN_SIGNAL_CONFIDENCE")
 
     model_config = {
         "env_file": ".env",

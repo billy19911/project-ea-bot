@@ -10,7 +10,6 @@ B-6: the runtime wires a read-only position monitor so a disappeared ticket
 from __future__ import annotations
 
 import pytest
-
 from execution.engine import ExecutionEngine, OrderRequest
 
 # ---------------------------------------------------------------------------
@@ -52,11 +51,14 @@ def test_pipeline_stamps_token_and_engine_accepts_it(monkeypatch):
                     "stop_loss": 1.0800,
                     "take_profit": 1.0950,
                     "size": 0.1,
+                    "confidence": 0.8,
                 },
             }
 
     class StubGate:
-        def validate_proposal(self, proposal, account_state, current_positions, market_info):
+        def validate_proposal(
+            self, proposal, account_state, current_positions, market_info
+        ):
             from risk.gate import GateDecision
 
             return GateDecision(
@@ -66,7 +68,9 @@ def test_pipeline_stamps_token_and_engine_accepts_it(monkeypatch):
                 metrics_snapshot={},
             )
 
-    engine = ExecutionEngine(mt5_connector=None, simulation_mode=True, require_approval=True)
+    engine = ExecutionEngine(
+        mt5_connector=None, simulation_mode=True, require_approval=True
+    )
     monkeypatch.setitem(sys.modules, "MetaTrader5", None)
 
     pipeline = TradingPipeline(
@@ -83,10 +87,14 @@ def test_direct_engine_call_without_token_is_blocked(monkeypatch):
     """A direct (un-gated) call to the executor fails closed under B-3."""
     import sys
 
-    engine = ExecutionEngine(mt5_connector=None, simulation_mode=True, require_approval=True)
+    engine = ExecutionEngine(
+        mt5_connector=None, simulation_mode=True, require_approval=True
+    )
     monkeypatch.setitem(sys.modules, "MetaTrader5", None)
 
-    result = engine.execute_order(OrderRequest(symbol="EURUSD", order_type="BUY", volume=0.1))
+    result = engine.execute_order(
+        OrderRequest(symbol="EURUSD", order_type="BUY", volume=0.1)
+    )
 
     assert result.success is False
     assert result.error_code == 403
@@ -125,7 +133,9 @@ def test_disappeared_ticket_fires_review_hook(monkeypatch):
     assert monitor is not None
     # Replace the detector's hook with a spy so we can assert the fire without
     # depending on the global review trigger's persistence.
-    monitor.close_detector = PositionCloseDetector(on_close=lambda rec: fired.append(rec))
+    monitor.close_detector = PositionCloseDetector(
+        on_close=lambda rec: fired.append(rec)
+    )
 
     class FakeConnector:
         def __init__(self):

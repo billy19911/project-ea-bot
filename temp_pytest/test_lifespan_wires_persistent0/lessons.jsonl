@@ -1,1 +1,0 @@
-{"trade_id": "T-BRIDGE", "symbol": "", "outcome": "win", "root_cause": "normal_loss", "lesson": "Trade T-BRIDGE: WIN (PnL=100.00). MAE=0.00%, MFE=0.45%. Timing=50, Decision=50, Execution=100.", "source": "review_auto_trigger"}

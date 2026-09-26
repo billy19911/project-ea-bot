@@ -1,7 +1,7 @@
 # EA Bot - restart HANYA service Python API, memuat .env.runtime.
 # Dipakai setelah perubahan kode Python agar kode baru aktif tanpa restart
 # service lain. Port ditentukan dari -Port, atau PY_PORT di .env.runtime
-# (fallback 8000). Pola sama dengan killweb.ps1 (kill listener + start ulang).
+# (fallback 8787). Pola sama dengan restart-py-signal.ps1 (kill listener + start ulang).
 param([int]$Port = 0)
 $ErrorActionPreference = 'SilentlyContinue'
 $root = 'C:\xampp\htdocs\project-ea-bot'
@@ -17,9 +17,9 @@ Get-Content (Join-Path $root '.env.runtime') | ForEach-Object {
 }
 Write-Host ('[env] ' + $envMap.Count + ' entri dimuat')
 
-# Resolve port: explicit -Port > PY_PORT di .env.runtime > 8000
+# Resolve port: explicit -Port > PY_PORT di .env.runtime > 8787
 if ($Port -le 0) {
-  if ($envMap['PY_PORT']) { $Port = [int]$envMap['PY_PORT'] } else { $Port = 8000 }
+  if ($envMap['PY_PORT']) { $Port = [int]$envMap['PY_PORT'] } else { $Port = 8787 }
 }
 Write-Host ('[port] restart Python API :' + $Port)
 
@@ -31,22 +31,31 @@ foreach ($p in $pids) {
 }
 Start-Sleep -Seconds 2
 
-# 3) Export env untuk service
-$env:MT5_LIVE_DATA = $envMap['MT5_LIVE_DATA']
-$env:NINE_ROUTER_BASE_URL = $envMap['NINE_ROUTER_BASE_URL']
-if ($envMap['NINE_ROUTER_API_KEY']) { $env:NINE_ROUTER_API_KEY = $envMap['NINE_ROUTER_API_KEY'] }
-if ($envMap['TELEGRAM_BOT_TOKEN']) { $env:TELEGRAM_BOT_TOKEN = $envMap['TELEGRAM_BOT_TOKEN'] }
-if ($envMap['TELEGRAM_ALLOWED_CHAT_IDS']) { $env:TELEGRAM_ALLOWED_CHAT_IDS = $envMap['TELEGRAM_ALLOWED_CHAT_IDS'] }
-if ($envMap['TELEGRAM_SIGNAL_BOT_TOKEN']) { $env:TELEGRAM_SIGNAL_BOT_TOKEN = $envMap['TELEGRAM_SIGNAL_BOT_TOKEN'] }
-if ($envMap['TELEGRAM_SIGNAL_CHAT_IDS']) { $env:TELEGRAM_SIGNAL_CHAT_IDS = $envMap['TELEGRAM_SIGNAL_CHAT_IDS'] }
-$env:MARKET_FEED_ENABLED = $envMap['MARKET_FEED_ENABLED']
-$env:MARKET_FEED_SYMBOLS = $envMap['MARKET_FEED_SYMBOLS']
-$env:MARKET_FEED_TIMEFRAME = $envMap['MARKET_FEED_TIMEFRAME']
-$env:MARKET_FEED_INTERVAL_S = $envMap['MARKET_FEED_INTERVAL_S']
-$env:MARKET_FEED_EVENT_COOLDOWN_S = $envMap['MARKET_FEED_EVENT_COOLDOWN_S']
-if ($envMap['TELEGRAM_DIGEST_ENABLED']) { $env:TELEGRAM_DIGEST_ENABLED = $envMap['TELEGRAM_DIGEST_ENABLED'] }
-if ($envMap['TELEGRAM_DIGEST_WINDOW_S']) { $env:TELEGRAM_DIGEST_WINDOW_S = $envMap['TELEGRAM_DIGEST_WINDOW_S'] }
-if ($envMap['TELEGRAM_DIGEST_MAX_ITEMS']) { $env:TELEGRAM_DIGEST_MAX_ITEMS = $envMap['TELEGRAM_DIGEST_MAX_ITEMS'] }
+# 3) Export env untuk service. Prinsip "explicit process env wins" (selaras dengan
+# services/python/src/env_bootstrap.py): hanya isi variabel yang BELUM di-set di
+# proses ini, agar override env (mis. drill Gate D: NINE_ROUTER_BASE_URL /
+# TELEGRAM_BOT_TOKEN) tidak tertimpa nilai .env.runtime.
+function Set-EnvDefault([string]$key, [string]$value) {
+  if (-not $value) { return }
+  if (-not [Environment]::GetEnvironmentVariable($key, 'Process')) {
+    Set-Item -Path ('Env:' + $key) -Value $value
+  }
+}
+Set-EnvDefault 'MT5_LIVE_DATA' $envMap['MT5_LIVE_DATA']
+Set-EnvDefault 'NINE_ROUTER_BASE_URL' $envMap['NINE_ROUTER_BASE_URL']
+Set-EnvDefault 'NINE_ROUTER_API_KEY' $envMap['NINE_ROUTER_API_KEY']
+Set-EnvDefault 'TELEGRAM_BOT_TOKEN' $envMap['TELEGRAM_BOT_TOKEN']
+Set-EnvDefault 'TELEGRAM_ALLOWED_CHAT_IDS' $envMap['TELEGRAM_ALLOWED_CHAT_IDS']
+Set-EnvDefault 'TELEGRAM_SIGNAL_BOT_TOKEN' $envMap['TELEGRAM_SIGNAL_BOT_TOKEN']
+Set-EnvDefault 'TELEGRAM_SIGNAL_CHAT_IDS' $envMap['TELEGRAM_SIGNAL_CHAT_IDS']
+Set-EnvDefault 'MARKET_FEED_ENABLED' $envMap['MARKET_FEED_ENABLED']
+Set-EnvDefault 'MARKET_FEED_SYMBOLS' $envMap['MARKET_FEED_SYMBOLS']
+Set-EnvDefault 'MARKET_FEED_TIMEFRAME' $envMap['MARKET_FEED_TIMEFRAME']
+Set-EnvDefault 'MARKET_FEED_INTERVAL_S' $envMap['MARKET_FEED_INTERVAL_S']
+Set-EnvDefault 'MARKET_FEED_EVENT_COOLDOWN_S' $envMap['MARKET_FEED_EVENT_COOLDOWN_S']
+Set-EnvDefault 'TELEGRAM_DIGEST_ENABLED' $envMap['TELEGRAM_DIGEST_ENABLED']
+Set-EnvDefault 'TELEGRAM_DIGEST_WINDOW_S' $envMap['TELEGRAM_DIGEST_WINDOW_S']
+Set-EnvDefault 'TELEGRAM_DIGEST_MAX_ITEMS' $envMap['TELEGRAM_DIGEST_MAX_ITEMS']
 
 # 4) Start ulang (hidden, detached)
 $pyDir = Join-Path $root 'services\python'
