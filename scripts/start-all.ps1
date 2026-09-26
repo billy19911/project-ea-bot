@@ -132,7 +132,7 @@ if (Test-Port $pyPort) {
   if (-not (Test-Path $pyExe)) { Fail "      venv Python tidak ditemukan: $pyExe"; exit 1 }
   Export-CommonEnv
   Start-Process -FilePath $pyExe `
-    -ArgumentList '-m', 'uvicorn', 'src.main:app', '--host', '127.0.0.1', '--port', "$pyPort" `
+    -ArgumentList '-m', 'uvicorn', 'src.main:app', '--host', '0.0.0.0', '--port', "$pyPort" `
     -WorkingDirectory $pyDir -WindowStyle Hidden `
     -RedirectStandardOutput (Join-Path $logDir 'python.log') `
     -RedirectStandardError (Join-Path $logDir 'python.err.log')
