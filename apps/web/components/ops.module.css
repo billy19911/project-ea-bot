@@ -419,6 +419,50 @@
   word-break: break-word;
 }
 
+/* Two-column responsive grid of key/value pairs (decision replay metadata
+ * and per-stage payloads). */
+.kvGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--sp-2) var(--sp-4);
+}
+
+/* Vertical stage timeline for the decision replay view ------------- */
+
+.timeline {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0 0 0 var(--sp-4);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.timelineItem {
+  position: relative;
+  padding-left: var(--sp-2);
+}
+
+.timelineItem::before {
+  content: '';
+  position: absolute;
+  left: calc(-1 * var(--sp-4) - 3px);
+  top: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+.timelineHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-1);
+}
+
 /* Horizontal proportion bar ----------------------------------------------- */
 
 .bar {

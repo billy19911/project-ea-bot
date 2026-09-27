@@ -26,6 +26,64 @@ type DecisionsBody = { decisions?: Decision[] };
 
 type ReplayBody = { value?: unknown; status?: string; source?: string };
 
+type ReplayStep = {
+  stage?: string;
+  payload?: Record<string, unknown>;
+  timestamp?: string;
+};
+
+type ReplayValue = {
+  decision_id?: string;
+  event_id?: string;
+  trade_id?: string;
+  execution_id?: string;
+  strategy_version?: string;
+  created_at?: string;
+  steps?: ReplayStep[];
+};
+
+/** Human labels + a semantic tone per stage so the timeline is scannable. */
+const STAGE_META: Record<string, { label: string; tone: string }> = {
+  EVENT: { label: 'Event', tone: 'pillNeutral' },
+  MARKET_SNAPSHOT: { label: 'Market snapshot', tone: 'pillNeutral' },
+  AGENTS_ACTIVATED: { label: 'Agents activated', tone: 'pillNeutral' },
+  AGENT_OUTPUTS: { label: 'Agent outputs', tone: 'pillNeutral' },
+  CONFLICTS: { label: 'Conflicts', tone: 'pillWarn' },
+  SUPERVISOR_SUMMARY: { label: 'Supervisor summary', tone: 'pillNeutral' },
+  TRADE_PROPOSAL: { label: 'Trade proposal', tone: 'pillOk' },
+  RISK_CHECKS: { label: 'Risk checks', tone: 'pillWarn' },
+  EXECUTION: { label: 'Execution', tone: 'pillOk' },
+  BROKER_RESULT: { label: 'Broker result', tone: 'pillOk' },
+  POSITION: { label: 'Position', tone: 'pillOk' },
+  RESULT: { label: 'Result', tone: 'pillNeutral' },
+  REVIEW: { label: 'Review', tone: 'pillNeutral' },
+};
+
+function stageMeta(stage: string | undefined) {
+  const key = String(stage ?? '').toUpperCase();
+  return STAGE_META[key] ?? { label: key || 'Step', tone: 'pillNeutral' };
+}
+
+function fmtTime(ts: string | undefined): string {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? ts : d.toLocaleString();
+}
+
+/** Render a payload value compactly (primitives inline, objects as JSON). */
+function PayloadValue({ value }: { value: unknown }) {
+  if (value === null || value === undefined) return <span>—</span>;
+  if (typeof value === 'boolean') return <span>{value ? 'true' : 'false'}</span>;
+  if (typeof value === 'number' || typeof value === 'string') {
+    return <span className={styles.mono}>{String(value)}</span>;
+  }
+  return (
+    <pre className={styles.mono} style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
+      {JSON.stringify(value, null, 2)}
+    </pre>
+  );
+}
+
 export default function DecisionReplayPage() {
   const list = useApiData<DecisionsBody>('/decisions');
   const decisions = useMemo(
@@ -69,7 +127,9 @@ export default function DecisionReplayPage() {
   }, [selected]);
 
   const current = decisions.find((d) => String(d.decision_id) === selected) ?? null;
-  const replayValue = replay?.value;
+  const replayValue = replay?.value as ReplayValue | null | undefined;
+  const steps = Array.isArray(replayValue?.steps) ? replayValue!.steps! : [];
+  const [showRaw, setShowRaw] = useState(false);
 
   return (
     <AppShell activeKey="decision-replay" eyebrow="Xynn / Decisions" title="Decision Replay">
@@ -127,9 +187,19 @@ export default function DecisionReplayPage() {
         <div className={styles.panel}>
           <div className={styles.panelHead}>
             <span className={styles.panelTitle}>Replayed snapshot</span>
-            <span className={styles.cardHint}>
-              {loadingReplay ? 'loading…' : replay?.status ?? '—'}
-            </span>
+            <div className={styles.row}>
+              <button
+                type="button"
+                className={styles.btn}
+                onClick={() => setShowRaw((v) => !v)}
+                disabled={replayValue == null}
+              >
+                {showRaw ? 'Timeline view' : 'Raw JSON'}
+              </button>
+              <span className={styles.cardHint}>
+                {loadingReplay ? 'loading…' : replay?.status ?? '—'}
+              </span>
+            </div>
           </div>
           <div className={styles.panelBody}>
             {replayError && <div className={styles.error}>{replayError}</div>}
@@ -142,10 +212,68 @@ export default function DecisionReplayPage() {
                 No stored snapshot for this decision — replay is honest about missing data instead
                 of inventing a graph.
               </p>
-            ) : (
+            ) : showRaw ? (
               <pre className={styles.mono} style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
                 {JSON.stringify(replayValue, null, 2)}
               </pre>
+            ) : (
+              <>
+                {/* Correlation ids */}
+                <div className={styles.kvGrid}>
+                  <div className={styles.kv}>
+                    <span className={styles.kvKey}>Decision</span>
+                    <span className={styles.kvVal}>{replayValue.decision_id || '—'}</span>
+                  </div>
+                  <div className={styles.kv}>
+                    <span className={styles.kvKey}>Event</span>
+                    <span className={styles.kvVal}>{replayValue.event_id || '—'}</span>
+                  </div>
+                  <div className={styles.kv}>
+                    <span className={styles.kvKey}>Strategy</span>
+                    <span className={styles.kvVal}>{replayValue.strategy_version || '—'}</span>
+                  </div>
+                  <div className={styles.kv}>
+                    <span className={styles.kvKey}>Created</span>
+                    <span className={styles.kvVal}>{fmtTime(replayValue.created_at)}</span>
+                  </div>
+                </div>
+
+                {/* Stage timeline */}
+                {steps.length === 0 ? (
+                  <p className={styles.empty}>Snapshot has no recorded stages.</p>
+                ) : (
+                  <ol className={styles.timeline}>
+                    {steps.map((step, i) => {
+                      const meta = stageMeta(step.stage);
+                      const entries = Object.entries(step.payload ?? {});
+                      return (
+                        <li key={`${step.stage ?? 'step'}-${i}`} className={styles.timelineItem}>
+                          <div className={styles.timelineHead}>
+                            <span className={`${styles.pill} ${styles[meta.tone] ?? ''}`}>
+                              {meta.label}
+                            </span>
+                            <span className={styles.cardHint}>{fmtTime(step.timestamp)}</span>
+                          </div>
+                          {entries.length === 0 ? (
+                            <p className={styles.cardHint}>No payload.</p>
+                          ) : (
+                            <div className={styles.kvGrid}>
+                              {entries.map(([k, v]) => (
+                                <div key={k} className={styles.kv}>
+                                  <span className={styles.kvKey}>{k}</span>
+                                  <span className={styles.kvVal}>
+                                    <PayloadValue value={v} />
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
+              </>
             )}
           </div>
         </div>
