@@ -197,8 +197,15 @@ class MT5ConnectionManager:
     # -- health check -----------------------------------------------------
 
     async def health_check(self) -> MT5Health:
-        """Run a health check against the MT5 connection."""
-        health = self._connector.health_check()
+        """Run a health check against the MT5 connection.
+
+        ``self._connector.health_check()`` performs a *blocking* MT5 call. It is
+        offloaded to a worker thread via ``asyncio.to_thread`` so that the
+        ``asyncio.wait_for`` deadline in :meth:`_health_check_loop` can actually
+        cancel it — otherwise a hung native call would stall the event loop and
+        the timeout would never fire.
+        """
+        health = await asyncio.to_thread(self._connector.health_check)
         self._last_health_check = health
         if health.connected:
             self._state = ConnectionState.AUTHENTICATED

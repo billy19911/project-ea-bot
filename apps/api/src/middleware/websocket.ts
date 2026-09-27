@@ -7,9 +7,13 @@ import { Request } from 'express';
 import { WebSocket, Server as WSServer } from 'ws';
 import jwt from 'jsonwebtoken';
 import { wsRateLimitCheck, wsConnectionOpen, wsConnectionClose } from './rateLimiter';
-import { AuthPayload } from './auth';
+import { AuthPayload, resolveJwtSecret } from './auth';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
+// Audit: share the same production guard as the HTTP auth middleware
+// (auth.ts). Previously this module silently fell back to the well-known dev
+// secret even in production, which would accept tokens signed with a public
+// secret if module-init order ever decoupled it from auth.ts.
+const JWT_SECRET = resolveJwtSecret();
 
 export interface WSAuthContext {
   userId: string;

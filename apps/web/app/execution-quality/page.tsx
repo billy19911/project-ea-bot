@@ -85,8 +85,13 @@ export default function ExecutionQualityPage() {
           </div>
           <div className={styles.panelBody}>
             <p className={styles.cardHint}>
-              Insights here inform the <strong>execution policy</strong> only — they never change a
-              strategy signal without separate validation.
+              Per-session and per-volatility breakdown is <strong>not yet collected</strong> by the
+              execution recorder — only the aggregate metrics above are available. This panel will
+              populate once the session/volatility attribution is wired end-to-end.
+            </p>
+            <p className={styles.cardHint} style={{ marginTop: 8 }}>
+              Such insights would inform the <strong>execution policy</strong> only — they never
+              change a strategy signal without separate validation.
             </p>
           </div>
         </div>

@@ -10,18 +10,26 @@
 // "Punya token sendiri?" agar halaman tetap sederhana. Terbuka otomatis bila
 // mint token dev gagal (mis. DEV_AUTH_ENABLED off).
 
-import { useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { FormEvent, Suspense, useEffect, useState } from 'react';
 import { API_BASE, getAuthToken } from '../../lib/api';
 import styles from './login.module.css';
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [alreadyIn, setAlreadyIn] = useState(false);
   const [showManual, setShowManual] = useState(false);
+
+  // Destination after a successful sign-in (set by the auth guard redirect).
+  const nextPath = (() => {
+    const raw = searchParams.get('next') || '/';
+    // Only allow same-site absolute paths (never protocol-relative/off-site).
+    return raw.startsWith('/') && !raw.startsWith('//') ? raw : '/';
+  })();
 
   useEffect(() => {
     setAlreadyIn(Boolean(getAuthToken()));
@@ -66,7 +74,7 @@ export default function LoginPage() {
         );
       }
       await verifyAndStore(data.token);
-      router.replace('/');
+      router.replace(nextPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Terjadi kesalahan.');
     } finally {
@@ -82,7 +90,7 @@ export default function LoginPage() {
     setError(null);
     try {
       await verifyAndStore(trimmed);
-      router.replace('/');
+      router.replace(nextPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Terjadi kesalahan.');
     } finally {
@@ -116,7 +124,7 @@ export default function LoginPage() {
               token lain.
             </p>
             <div className={styles.row}>
-              <button className={styles.primary} onClick={() => router.replace('/')}>
+              <button className={styles.primary} onClick={() => router.replace(nextPath)}>
                 Lanjut ke dashboard
               </button>
               <button className={styles.secondary} onClick={logout} disabled={busy}>
@@ -169,5 +177,14 @@ export default function LoginPage() {
         {error && <div className={styles.error}>{error}</div>}
       </div>
     </div>
+  );
+}
+
+// `useSearchParams` requires a Suspense boundary in the App Router.
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

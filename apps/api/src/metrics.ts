@@ -149,16 +149,18 @@ export async function getMetricsSummary() {
   const callMetrics = await llmCallsTotal.get();
   const costMetrics = await llmCostTotal.get();
 
-  // Build latency summaries per route
+  // Build latency summaries per route.
+  // A Prometheus histogram emits separate series for `_count` and `_sum`;
+  // aggregate those two (ignoring the `_bucket` series) to get an average.
   const latencies: Record<string, { count: number; sum: number }> = {};
   for (const val of httpMetrics.values) {
-    const route = (val.labels as any).route || 'unknown';
-    const method = (val.labels as any).method || 'GET';
+    const route = String((val.labels as any).route || 'unknown');
+    const method = String((val.labels as any).method || 'GET');
     const key = `${method} ${route}`;
     if (!latencies[key]) latencies[key] = { count: 0, sum: 0 };
-    if ((val.labels as any).le === '+Inf' || (val as any).metricName?.includes('count')) {
-      // sum and count are separate entries
-    }
+    const metricName = String((val as any).metricName || '');
+    if (metricName.endsWith('_count')) latencies[key].count += val.value;
+    else if (metricName.endsWith('_sum')) latencies[key].sum += val.value;
   }
 
   // Aggregate token usage per model
@@ -192,17 +194,21 @@ export async function getMetricsSummary() {
     requestCounts[key][status] = (requestCounts[key][status] || 0) + val.value;
   }
 
-  // Agent execution stats
+  // Agent execution stats (aggregate histogram `_count` / `_sum` per agent).
   const agentStats: Record<string, { count: number; sumSeconds: number }> = {};
   for (const val of agentMetrics.values) {
     const name = String((val.labels as any).agent_name || 'unknown');
     if (!agentStats[name]) agentStats[name] = { count: 0, sumSeconds: 0 };
+    const metricName = String((val as any).metricName || '');
+    if (metricName.endsWith('_count')) agentStats[name].count += val.value;
+    else if (metricName.endsWith('_sum')) agentStats[name].sumSeconds += val.value;
   }
 
   return {
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
     requests: requestCounts,
+    latencies,
     tokenUsage: tokensByModel,
     agentStats,
     recentErrors: getRecentErrors(20),

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, getAuthToken } from '../lib/api';
 import { cn } from '../lib/utils';
@@ -44,6 +44,14 @@ const NAV_GROUPS = [
       { key: 'control-plane', label: 'Control Plane', href: '/control-plane', icon: 'grid' },
       { key: 'market', label: 'Market', href: '/market', icon: 'candles' },
       { key: 'news', label: 'News', href: '/news', icon: 'news' },
+    ],
+  },
+  {
+    label: 'Trading',
+    items: [
+      { key: 'orders', label: 'Orders', href: '/orders', icon: 'bolt' },
+      { key: 'positions', label: 'Positions', href: '/positions', icon: 'activity' },
+      { key: 'trade-history', label: 'Trade History', href: '/trade-history', icon: 'clock' },
     ],
   },
   {
@@ -101,6 +109,19 @@ const NAV_GROUPS = [
     ],
   },
 ];
+
+/**
+ * Flat list of navigable pages for the command palette (Ctrl/⌘ K), derived
+ * from NAV_GROUPS so the two can never drift apart.
+ */
+const COMMAND_ITEMS = NAV_GROUPS.flatMap(group =>
+  group.items.map(item => ({
+    key: item.key,
+    label: item.label,
+    href: item.href,
+    group: group.label,
+  }))
+);
 
 type IconProps = { name: string };
 function Icon({ name }: IconProps) {
@@ -228,6 +249,7 @@ export default function AppShell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [terminal, setTerminal] = useState<TerminalState | null>(null);
   const [terminalKnown, setTerminalKnown] = useState(false);
   const [account, setAccount] = useState<AccountState | null>(null);
@@ -249,6 +271,17 @@ export default function AppShell({
   useEffect(() => {
     setDrawerOpen(false);
   }, [pathname]);
+
+  // Client-side auth guard: if a protected page is visited with no token in
+  // localStorage, send the user to /login (preserving the attempted path).
+  // This runs after mount (localStorage is unavailable during SSR). It is a
+  // UX guard only — data is still protected server-side by the JWT check.
+  useEffect(() => {
+    if (pathname === '/login') return;
+    if (!getAuthToken()) {
+      router.replace(`/login?next=${encodeURIComponent(pathname || '/')}`);
+    }
+  }, [pathname, router]);
 
   // Apply the persisted collapse state after mount (hydration-safe), then
   // persist subsequent changes. Guarded by collapsedReady so the initial
@@ -542,7 +575,11 @@ export default function AppShell({
         </header>
         {children}
       </main>
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        items={COMMAND_ITEMS}
+      />
     </div>
   );
 }

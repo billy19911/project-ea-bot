@@ -54,8 +54,13 @@ def can_invoke(agent: "BaseAgent", permission: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Guarded operations (stubs for now – real implementations will call Risk Gate,
-# Execution Engine, and MT5 connector respectively)
+# Guarded operations.
+#
+# These helpers enforce agent permissions and are FAIL-CLOSED: when a real
+# collaborator (RiskGate, pipeline, MT5 write guard) is not supplied, they
+# refuse rather than reporting success. The production order path lives in
+# ``orchestration.pipeline`` (Risk Gate → guards → ExecutionEngine); these
+# helpers are convenience wrappers for permission-checked callers.
 # ---------------------------------------------------------------------------
 
 
@@ -87,18 +92,34 @@ def submit_to_risk_gate(
             "checks_passed": decision.checks_passed,
             "metrics_snapshot": decision.metrics_snapshot,
         }
-    return {"accepted": True, "agent": agent.name}
+    # Fail-CLOSED: without a real gate we cannot approve. Never silently accept
+    # (audit finding — the previous ``{"accepted": True}`` was a fail-open hole).
+    return {
+        "accepted": False,
+        "agent": agent.name,
+        "reason": "No RiskGate supplied — refusing to approve (fail-closed).",
+    }
 
 
 def propose_execution(agent: "BaseAgent", proposal: dict[str, Any]) -> dict[str, Any]:
     """Propose an order to the Execution Engine.
 
     Only agents with ``PROPOSE_EXECUTION`` may call this.
+
+    Fail-CLOSED: this helper is not wired to the deterministic pipeline, so it
+    never reports acceptance. Agents must route proposals through
+    ``orchestration.pipeline`` (Risk Gate → guards → ExecutionEngine), not here.
     """
     require_permission(agent, PERM_PROPOSE_EXECUTION)
-    # Stub: in production this will enqueue the proposal for Risk Gate then
-    # Execution
-    return {"accepted": True, "proposer": agent.name, **proposal}
+    return {
+        "accepted": False,
+        "proposer": agent.name,
+        "reason": (
+            "propose_execution is not wired to the execution pipeline; route the "
+            "proposal through orchestration.pipeline (fail-closed)."
+        ),
+        "proposal": proposal,
+    }
 
 
 def send_to_mt5(

@@ -18,8 +18,8 @@
 > *caller-enforced* dan sebagian modul governance/learning belum ter-wire ke runtime — detail
 > di laporan RC (bagian Component Verification & Dead/Orphaned Code).
 
-- ✅ **Tests**: 1943 Python + 46 Node passing; Web typecheck/lint bersih (**+10 test RC → 1953** setelah perbaikan B-3/B-6, commit `02a577c`)
-- ✅ **Safety boundary**: Risk Gate deterministik ter-wire di pipeline (fail-closed) **dan** kini ditegakkan di executor: `ExecutionEngine(require_approval=True)` menolak order tanpa `approval_token` (fail-closed). Sebagian guard lain (permission guards, `MT5WriteGuard`, `MultiLevelBreaker` di jalur trade) **belum ter-wire** ke runtime produksi. Lihat `docs/audit/RELEASE_READINESS_REPORT.md`.
+- ✅ **Tests**: 2416 Python + 61 Node passing; Web `tsc` + lint bersih
+- ✅ **Safety boundary**: Risk Gate deterministik ter-wire di pipeline (fail-closed) **dan** kini ditegakkan di executor: `ExecutionEngine(require_approval=True)` menolak order tanpa `approval_token` (fail-closed). Helper permission (`agents/permissions.py`) kini **fail-closed** (menolak saat tidak ada RiskGate / tidak terhubung pipeline). Lihat `docs/audit/RELEASE_READINESS_REPORT.md`.
 - ✅ **DevOps and linting:** Black, isort, flake8 passing, CI/CD blueprint integrated
 - ✅ **Documentation:** README, CHANGELOG, PRD V2, ARCHITECTURE_MAP dibuat
 

@@ -116,7 +116,11 @@ export default function CertificationPage() {
               )}
             </div>
           ) : (
-            <div className={styles.empty}>Loading certification gate…</div>
+            <div className={styles.empty}>
+              {error
+                ? 'Certification gate unavailable — see the error above.'
+                : 'No certification report yet. Run the gate to generate one.'}
+            </div>
           )}
         </div>
       </div>

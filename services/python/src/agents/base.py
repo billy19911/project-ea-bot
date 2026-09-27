@@ -501,10 +501,16 @@ class UnsupportedSentimentAgent(BaseAgent):
 
 
 # ---------------------------------------------------------------------------
-# Backwards-compatibility aliases (audit P3-4)
+# Backwards-compatibility aliases (audit P3-4) — DEPRECATED
 # ---------------------------------------------------------------------------
-# The old names are kept so existing imports keep working, but they now map to
-# the clearly-named UNSUPPORTED stubs above. New code should import the REAL
-# analysts from ``agents.analysts``.
+# These names map to the clearly-named UNSUPPORTED stubs above (they return
+# ``status="UNSUPPORTED"`` — they DO NOT perform real analysis).
+#
+# .. warning::
+#    Do NOT use these aliases in new code. Import the REAL deterministic
+#    analysts from :mod:`agents.analysts` instead:
+#        from agents.analysts import FundamentalAnalystAgent, NewsSentimentAgent
+#    The aliases are retained only so legacy imports (``agents/__init__.py`` and
+#    the PRD_V2 §25 placeholder tests) keep working.
 FundamentalAnalystAgent = UnsupportedFundamentalAgent
 SentimentAnalystAgent = UnsupportedSentimentAgent

@@ -69,3 +69,70 @@ test('redactToken removes token query values for safe logging (P2-12)', () => {
   );
   assert.equal(ws.redactToken('/ws?x=1'), '/ws?x=1');
 });
+
+test('websocket refuses tokens signed with the legacy dev secret in production', () => {
+  // The WS layer must reject the legacy public dev secret in production, not
+  // silently accept it via a private fallback (audit finding).
+  const apiDir = path.join(__dirname, '..');
+  const script = `
+    process.env.NODE_ENV = 'production';
+    process.env.JWT_SECRET = 'real-production-secret';
+    const jwt = require('jsonwebtoken');
+    const ws = require('./dist/middleware/websocket.js');
+    const legacy = jwt.sign({ userId: 'attacker', role: 'admin' }, 'dev-secret-change-in-production');
+    const req = { headers: { authorization: 'Bearer ' + legacy }, url: '/ws' };
+    const ok = ws.wsAuthHandler(req);
+    process.stdout.write(String(ok));
+  `;
+  const result = spawnSync(process.execPath, ['-e', script], {
+    cwd: apiDir,
+    env: { ...process.env, NODE_ENV: 'production', JWT_SECRET: 'real-production-secret' },
+    encoding: 'utf8',
+  });
+  assert.equal((result.stdout || '').trim(), 'false');
+});
+
+function invokeSanitize(body, query = {}) {
+  const security = require('../dist/middleware/security.js');
+  return new Promise((resolve) => {
+    const req = { body, query, method: 'POST', path: '/strategies', headers: {} };
+    const res = {
+      statusCode: 200,
+      status(code) { this.statusCode = code; return this; },
+      json(payload) { resolve({ status: this.statusCode, body: payload, next: false }); },
+    };
+    security.sanitizeInput(req, res, () => resolve({ status: 200, next: true }));
+  });
+}
+
+test('sanitizer allows legitimate symbols and free-text (no false positives)', async () => {
+  // Regression: the old pattern rejected broker symbols and text containing
+  // apostrophes/quotes/brackets. These are all legitimate.
+  const legit = [
+    { symbol: 'BTCUSD#' },
+    { symbol: 'EUR_USD+' },
+    { note: "broker's rejection" },
+    { description: 'Buy the dip (support + rebound)' },
+    { comment: 'trend-following' },
+  ];
+  for (const body of legit) {
+    const result = await invokeSanitize(body);
+    assert.equal(result.next, true, `should allow: ${JSON.stringify(body)}`);
+  }
+});
+
+test('sanitizer still blocks real injection signatures', async () => {
+  const attacks = [
+    { q: '1; DROP TABLE users' },
+    { q: "1' OR '1'='1' UNION SELECT password FROM users" },
+    { q: '<script>alert(1)</script>' },
+    { q: 'javascript:alert(1)' },
+    { q: '<img onerror=alert(1)>' },
+    { q: '../../etc/passwd' },
+  ];
+  for (const body of attacks) {
+    const result = await invokeSanitize(body);
+    assert.equal(result.status, 400, `should block: ${JSON.stringify(body)}`);
+    assert.equal(result.next, false);
+  }
+});

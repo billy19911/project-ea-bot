@@ -3,6 +3,30 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Fixed — Audit Komprehensif: Bug, Fail-Closed Hardening, Dead Code & UX
+- **`risk/monitor.py` — leak state MT5**: `_get_account_info()` tidak lagi memanggil `mt5.initialize()` tiap poll (yang tanpa `shutdown()` bisa meng-clobber binding terminal milik konektor utama). Kini membaca via konektor bersama `mt5.connector.get_account_info()` — satu sesi MT5 yang konsisten (fail-safe bila MT5 absen).
+- **`execution/engine.py` — tabrakan ticket simulasi**: generator ticket `int(time.time()*1000) % 1_000_000` diganti `_next_simulated_ticket()` (monotonic counter + ms) sehingga dua fill simulasi dalam milidetik sama tidak pernah bertabrakan. +1 test regresi.
+- **`apps/api/src/middleware/security.ts` — sanitizer terlalu agresif**: pola menolak semua string berisi `' " < > -- exec script` (memblokir simbol broker seperti `BTCUSD#`, deskripsi bebas, catatan ber-apostrof). Diganti daftar signature serangan high-signal (SQLi keyword, `<script`, `javascript:`, event handler, path traversal, null byte). +4 test (false-positive + masih memblokir serangan).
+- **`apps/api/src/middleware/websocket.ts` — JWT fallback tanpai guard produksi**: kini memakai `resolveJwtSecret()` bersama `auth.ts` (throw di produksi), tidak lagi fallback ke secret dev publik. +1 test.
+- **`apps/api/src/index.ts` — hapus endpoint `/signals` stub**: array in-memory non-persisten yang tidak dipakai UI dan diiklankan di `GET /` — dihapus (dead write surface).
+- **`apps/api/src/metrics.ts` — agent stats selalu nol**: agregasi histogram `_count`/`_sum` diperbaiki (sebelumnya tidak akumulasi); `latencies` kini benar-benar di-return.
+- **`services/python/src/agents/permissions.py` — fail-closed**: `submit_to_risk_gate` tanpa `RiskGate` kini menolak (bukan `accepted: True`); `propose_execution` tidak lagi melaporkan acceptance palsu. Test disesuaikan.
+- **`services/python/src/mt5/connection_manager.py`**: `health_check()` async tidak lagi memanggil panggilan blocking sinkron di event loop — di-offload via `asyncio.to_thread` agar `wait_for` timeout benar-benar bekerja.
+
+### Removed — Dead Code
+- `services/python/src/live_readiness/gate.py` — duplikat `LiveReadinessEvaluator` + `DynamicMockHandler` yang ter-shadow, tidak pernah di-import.
+- `services/python/src/mt5/_constants.py` — duplikat `SIMULATED_SYMBOLS/PRICES`, tidak pernah di-import.
+- `infrastructure/docker/Dockerfile` — file rusak (berisi config Vite).
+
+### Fixed — Web UX
+- **Command palette (⌘K/Ctrl+K) fungsional**: input filter + navigasi keyboard (`↑`/`↓`/Enter/Esc) + routing nyata; sebelumnya hanya teks statis.
+- **Auth guard client-side**: halaman terproteksi kini redirect ke `/login?next=…` bila tidak ada token; `/login` menghormati `?next=` (validasi same-site).
+- **Nav**: `/orders`, `/positions`, `/trade-history` ditambahkan; `risk/page.tsx` `activeKey` diperbaiki.
+- **Empty states jujur**: `certification` tidak lagi selamanya "Loading…"; panel `execution-quality` menyatakan breakdown belum dikoleksi.
+
+### Verifikasi
+- Python **2416 passed**, Node API **61 passed**, Web `tsc` + `lint` bersih.
+
 ### Added — Level Entry/SL/TP1/TP2/TPmax di Laporan Sinyal (sesuai model analisa project)
 - **`trading/level_plan.py` (BARU)**: matematika murni mengubah model risiko project (`MoneyManager`: SL = 1.5 × ATR, TP = 3.0 × ATR = 2R) menjadi ladder pelaporan **TP1 = 1R, TP2 = 2R (= TP produksi), TPmax = 3R**. Fungsi `build_level_plan` (dari order nyata — SL persis order, tetap konsisten apa pun SL/TP yang dibawa), `indicative_levels` (ATR, saat belum ada order), `direction_from_text`, `extract_price_atr` (membaca snapshot feed loop: `volatility.price/atr`, `market_state`, `prices`, `market_info`). **Tidak pernah mengarang level**: tanpa arah/harga/ATR → `None`.
 - **`orchestration/pipeline.py`**: field baru `levels` di `PipelineResult` (+ `to_dict()`) — diisi ladder **order** di jalur proposal/gate dan ladder **indikatif** di jalur no-trade, sehingga laporan tetap membawa Entry/SL/TP1/TP2/TPmax meski siklus berakhir `NO_TRADE`/`WAIT`/`BLOCKED`. Di jalur proposal, bila proposal tak membawa stop yang bisa dipakai (mis. ATR belum tersedia untuk melengkapinya — kondisi live yang membuat gate menolak `stop_loss`), laporan jatuh ke ladder indikatif, bukan kosong. Best-effort: error pelaporan tak pernah menggagalkan siklus.

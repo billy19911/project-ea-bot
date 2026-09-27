@@ -107,7 +107,7 @@ export default function RiskPage() {
 
   return (
     <AppShell
-      activeKey="overview"
+      activeKey="risk-center"
       eyebrow="Xynn / Risk"
       title="Risk Center"
       actions={<RiskBadge level={breakerLevel} />}

@@ -24,6 +24,8 @@ function resolveJwtSecret(): string {
   return 'dev-secret-change-in-production';
 }
 
+export { resolveJwtSecret };
+
 const JWT_SECRET = resolveJwtSecret();
 const JWT_EXPIRY = process.env.JWT_EXPIRY || '24h';
 

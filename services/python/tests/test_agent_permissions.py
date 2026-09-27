@@ -69,7 +69,9 @@ def test_can_invoke_returns_bool():
 def test_submit_to_risk_gate_requires_permission():
     agent = _StubAgent("risk_officer", permissions=["SUBMIT_TO_RISK_GATE"])
     result = submit_to_risk_gate(agent, {"symbol": "EURUSD"})
-    assert result == {"accepted": True, "agent": "risk_officer"}
+    # Fail-closed: without a real RiskGate injected, approval must be refused.
+    assert result["accepted"] is False
+    assert result["agent"] == "risk_officer"
 
 
 def test_submit_to_risk_gate_rejects_unauthorized():
@@ -81,7 +83,8 @@ def test_submit_to_risk_gate_rejects_unauthorized():
 def test_propose_execution_requires_permission():
     agent = _StubAgent("proposer", permissions=["PROPOSE_EXECUTION"])
     result = propose_execution(agent, {"symbol": "EURUSD", "side": "BUY"})
-    assert result["accepted"] is True
+    # Fail-closed: the helper is not wired to the pipeline, so it never accepts.
+    assert result["accepted"] is False
     assert result["proposer"] == "proposer"
 
 

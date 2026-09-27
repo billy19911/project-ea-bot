@@ -29,13 +29,35 @@ export function validatePayload(req: Request, res: Response, next: NextFunction)
 
 /**
  * Sanitize and validate request query/body parameters
+ *
+ * NOTE: This is a defence-in-depth tripwire, NOT the primary injection
+ * defence. Parameterised queries / schema validation in the downstream Python
+ * service are authoritative. The previous pattern
+ * (`/'|"|--|\/*|\*\/|xp_|sp_|exec|script|<|>/`) rejected many legitimate
+ * requests — e.g. broker symbols (`BTCUSD#`, `EUR_USD+`), free-text
+ * descriptions, or notes containing an apostrophe ("broker's rejection").
+ *
+ * This version blocks only high-signal, unambiguous attack signatures so it
+ * no longer breaks normal traffic:
+ *   - SQL comment / stacked-query metacharacters
+ *   - common SQLi keyword combos (UNION SELECT, DROP TABLE, ...)
+ *   - script tags, `javascript:` URIs, inline event handlers
+ *   - path traversal (`../`) and null bytes
  */
 export function sanitizeInput(req: Request, res: Response, next: NextFunction): void {
-  // Basic SQLi/XSS check: reject if input contains suspicious patterns
-  const suspicious = /('|"|-{2}|\/\*|\*\/|xp_|sp_|exec|script|<|>)/gi;
+  const ATTACK_SIGNATURES: RegExp[] = [
+    /(--|;--|\/\*|\*\/)/, // SQL comment / block-comment metachars
+    /\b(union\s+select|drop\s+table|insert\s+into|delete\s+from|update\s+\w+\s+set)\b/i,
+    /<\s*script/i, // script tag
+    /javascript\s*:/i, // javascript: URI
+    /\bon\w+\s*=/i, // inline event handler (onerror=, onload=)
+    /\.\.\//, // path traversal
+    /\x00/, // null byte
+  ];
 
   const checkField = (val: any): boolean => {
-    if (typeof val === 'string') return suspicious.test(val);
+    if (typeof val === 'string') return ATTACK_SIGNATURES.some(re => re.test(val));
+    if (Array.isArray(val)) return val.some(checkField);
     if (typeof val === 'object' && val !== null) {
       return Object.values(val).some(checkField);
     }

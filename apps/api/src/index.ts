@@ -1237,32 +1237,10 @@ app.get('/', (req, res) => {
     service: process.env.SERVICE_NAME || 'api',
     endpoints: {
       health: 'GET /health',
-      signals: 'GET /signals, POST /signals',
       metrics: 'GET /metrics',
       observability: 'GET /observability/metrics, GET /observability/errors, GET /observability/trend',
     },
   });
-});
-
-// Trade signals endpoints
-const signals: any[] = [];
-
-app.get('/signals', (req, res) => {
-  const log = (req as any).log;
-  log.info({ count: signals.length }, 'signals.list');
-  res.json({ signals, count: signals.length });
-});
-
-app.post('/signals', (req, res) => {
-  const log = (req as any).log;
-  const signal = {
-    id: `sig_${Date.now()}`,
-    ...req.body,
-    timestamp: Date.now(),
-  };
-  signals.push(signal);
-  log.info({ signalId: signal.id }, 'signal.created');
-  res.status(201).json(signal);
 });
 
 // 404 handler
