@@ -293,7 +293,7 @@ export default function ObservabilityPage() {
   return (
     <AppShell
       activeKey="observability"
-      eyebrow="EA BOT / OBSERVABILITY"
+      eyebrow="Xynn / Observability"
       title="Observability Sistem"
       actions={
         <>

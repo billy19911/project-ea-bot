@@ -344,7 +344,7 @@ export default function ControlPlanePage() {
   return (
     <AppShell
       activeKey="control-plane"
-      eyebrow="EA BOT / CONTROL PLANE"
+      eyebrow="Xynn / Control Plane"
       title={TAB_LABEL[tab] ?? 'Control Plane'}
       actions={
         <>

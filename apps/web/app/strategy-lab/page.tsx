@@ -144,7 +144,7 @@ export default function StrategyLabPage() {
   return (
     <AppShell
       activeKey="strategy-lab"
-      eyebrow="EA BOT / LABORATORIUM STRATEGI"
+      eyebrow="Xynn / Strategy Lab"
       title="Laboratorium Strategi"
     >
       <div className={styles.pageBody}>

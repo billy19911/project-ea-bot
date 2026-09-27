@@ -13,7 +13,7 @@ type EnvState = {
   is_live: boolean;
   live_allowed: boolean;
   reason: string;
-  preconditions: Record<string, boolean>;
+  preconditions?: Record<string, boolean>;
   precondition_details?: Record<string, PreconditionDetail>;
   arm_note?: string;
 };
@@ -82,7 +82,7 @@ export default function EnvironmentPage() {
           <div className={styles.panelBody}>
             <div className={styles.grid}>
               {state &&
-                Object.entries(state.preconditions).map(([key, ok]) => {
+                Object.entries(state.preconditions ?? {}).map(([key, ok]) => {
                   const detail = state.precondition_details?.[key];
                   return (
                     <div key={key} className={styles.card}>
@@ -112,7 +112,7 @@ export default function EnvironmentPage() {
                   eksekusi live selalu <strong>REJECTED</strong> tanpa peduli konfigurasi lain.
                 </li>
                 {state &&
-                  Object.entries(state.preconditions)
+                  Object.entries(state.preconditions ?? {})
                     .filter(([, ok]) => !ok)
                     .map(([key]) => (
                       <li key={key}>

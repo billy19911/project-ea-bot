@@ -304,7 +304,7 @@ export default function Home() {
       </Head>
       <AppShell
         activeKey="research"
-        eyebrow="EA BOT / PUSAT RISET"
+        eyebrow="Xynn / Research"
         title="Pusat Riset"
         actions={
           <span className={`${styles.badge} ${styles.success}`}>

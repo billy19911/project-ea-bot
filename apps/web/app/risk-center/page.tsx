@@ -77,7 +77,7 @@ export default function RiskCenterPage() {
         <div className={styles.grid}>
           <div className={styles.card}>
             <span className={styles.cardLabel}>Circuit breaker</span>
-            <span className={styles.cardValue} style={{ fontSize: 'var(--fs-xl)' }}>
+            <span className={`${styles.cardValue} ${styles.cardValueMd}`}>
               {b?.level ?? '—'}
             </span>
             <span className={styles.cardHint}>

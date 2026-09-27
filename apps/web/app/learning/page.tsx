@@ -72,7 +72,7 @@ export default function LearningPage() {
           </div>
           <div className={styles.card}>
             <span className={styles.cardLabel}>Source</span>
-            <span className={styles.cardValue} style={{ fontSize: 'var(--fs-lg)' }}>
+            <span className={`${styles.cardValue} ${styles.cardValueSm}`}>
               {data?.available ? 'available' : 'empty'}
             </span>
             <span className={styles.cardHint}>{data?.source ?? '—'}</span>

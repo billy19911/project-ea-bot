@@ -5,12 +5,11 @@ import { useApiData } from '@/lib/useApiData';
 import styles from '@/components/ops.module.css';
 
 /**
- * System Health — environment preconditions + service health + dashboard roll-up.
+ * System Health — environment preconditions + service health roll-up.
  *
  * Composed from real read-only sources:
  *   - `/v2/environment`  live preconditions (arm, risk gate, reconciliation, strategy)
- *   - `/system/health`   per-component certification
- *   - `/v2/dashboard`    aggregated Phase-49 payload
+ *   - `/system/health`   per-component status (Node returns `status` strings)
  */
 
 type Preconditions = {
@@ -30,10 +29,23 @@ type EnvValue = {
 
 type EnvBody = { value?: EnvValue | null; source?: string };
 
+// `/system/health` returns `status` as a string ("healthy"/"down"/...), NOT an
+// `ok` boolean — reading `.ok` left every component shown as failing.
+type HealthComponent = { name?: string; status?: string; detail?: string };
 type HealthBody = {
-  components?: Array<{ name?: string; ok?: boolean; detail?: string }>;
-  ok?: boolean;
+  overall?: string;
+  components?: HealthComponent[];
+  checked_at?: string;
+  source?: string;
 };
+
+function statusOk(status: string | undefined): boolean | undefined {
+  if (status == null || status === '') return undefined;
+  const s = status.toLowerCase();
+  if (['healthy', 'ok', 'up', 'running', 'pass', 'connected'].includes(s)) return true;
+  if (['degraded', 'warn', 'warning'].includes(s)) return undefined;
+  return false;
+}
 
 function OkPill({ ok, label }: { ok: boolean | undefined; label: string }) {
   const cls =
@@ -50,7 +62,6 @@ export default function SystemHealthPage() {
   const health = useApiData<HealthBody>('/system/health', {
     pick: (body) => (body as HealthBody) ?? null,
   });
-  const dash = useApiData<unknown>('/v2/dashboard');
 
   const pre = env.data?.value?.preconditions;
   const components = Array.isArray(health.data?.components) ? health.data!.components! : [];
@@ -71,24 +82,27 @@ export default function SystemHealthPage() {
         <div className={styles.grid}>
           <div className={styles.card}>
             <span className={styles.cardLabel}>Environment</span>
-            <span className={styles.cardValue} style={{ fontSize: 'var(--fs-xl)' }}>
-              {env.data?.value?.environment ?? '—'}
-            </span>
+            <span className={styles.cardValue}>{env.data?.value?.environment ?? '—'}</span>
             <span className={styles.cardHint}>{env.data?.value?.is_live ? 'live' : 'not live'}</span>
           </div>
           <div className={styles.card}>
             <span className={styles.cardLabel}>Live allowed</span>
-            <span className={styles.cardValue} style={{ fontSize: 'var(--fs-xl)' }}>
+            <span className={styles.cardValue}>
               {env.data?.value == null ? '—' : env.data.value.live_allowed ? 'YES' : 'NO'}
             </span>
             <span className={styles.cardHint}>all preconditions</span>
+          </div>
+          <div className={styles.card}>
+            <span className={styles.cardLabel}>Overall</span>
+            <span className={styles.cardValue}>{health.data?.overall ?? '—'}</span>
+            <span className={styles.cardHint}>service roll-up</span>
           </div>
           <div className={styles.card}>
             <span className={styles.cardLabel}>Components OK</span>
             <span className={styles.cardValue}>
               {components.length === 0
                 ? '—'
-                : `${components.filter((c) => c.ok).length}/${components.length}`}
+                : `${components.filter((c) => statusOk(c.status) === true).length}/${components.length}`}
             </span>
             <span className={styles.cardHint}>certification</span>
           </div>
@@ -103,7 +117,6 @@ export default function SystemHealthPage() {
               onClick={() => {
                 void env.refresh();
                 void health.refresh();
-                void dash.refresh();
               }}
             >
               Refresh
@@ -112,7 +125,11 @@ export default function SystemHealthPage() {
           <div className={styles.panelBody}>
             <div className={styles.row}>
               {checks.map((c) => (
-                <OkPill key={c.key} ok={c.ok} label={`${c.label}: ${c.ok === true ? 'met' : c.ok === false ? 'missing' : 'unknown'}`} />
+                <OkPill
+                  key={c.key}
+                  ok={c.ok}
+                  label={`${c.label}: ${c.ok === true ? 'met' : c.ok === false ? 'missing' : 'unknown'}`}
+                />
               ))}
             </div>
             {env.data?.value?.reason && (
@@ -144,7 +161,7 @@ export default function SystemHealthPage() {
                     <tr key={String(c.name ?? i)}>
                       <td>{c.name ?? '—'}</td>
                       <td>
-                        <OkPill ok={c.ok} label={c.ok ? 'ok' : 'fail'} />
+                        <OkPill ok={statusOk(c.status)} label={c.status ?? '—'} />
                       </td>
                       <td>{c.detail ?? '—'}</td>
                     </tr>

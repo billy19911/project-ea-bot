@@ -27,7 +27,7 @@ import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 import Pagination from '../../components/ui/pagination';
 
-type SourceState = 'live' | 'unavailable';
+type SourceState = 'live' | 'defaults' | 'unavailable';
 
 type AiModel = { id: string; provider: string; context: number; is_free: boolean; capabilities?: string[] };
 type ModelsState = { models: AiModel[]; source: SourceState };
@@ -71,6 +71,9 @@ export default function SettingsPage() {
   const [modelsState, setModelsState] = useState<ModelsState>({ models: [], source: 'unavailable' });
   const [payload, setPayload] = useState<SettingsPayload | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
+  // Track whether the operator has edited the form. Auto-refresh must NOT wipe
+  // unsaved input — that was a real UX bug (every 10 s poll reset the draft).
+  const [dirty, setDirty] = useState(false);
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'unauthorized' | 'unavailable'>('loading');
   const [saving, setSaving] = useState(false);
   const [modelPage, setModelPage] = useState(1);
@@ -91,9 +94,16 @@ export default function SettingsPage() {
       }
       const data: SettingsPayload = await res.json();
       setPayload(data);
-      setDraft(
-        Object.fromEntries((data.writable ?? []).map((k) => [k.key, String(k.value)])),
-      );
+      // Only seed the draft when the operator has not started editing; otherwise
+      // a background refresh would discard unsaved changes.
+      setDirty((isDirty) => {
+        if (!isDirty) {
+          setDraft(
+            Object.fromEntries((data.writable ?? []).map((k) => [k.key, String(k.value)])),
+          );
+        }
+        return isDirty;
+      });
       setLoadState('ready');
     } catch {
       setLoadState('unavailable');
@@ -113,9 +123,13 @@ export default function SettingsPage() {
         }
         const data = await res.json();
         if (cancelled) return;
+        // `source` may be "live" (dynamic discovery) or "defaults" (gateway
+        // unreachable but a built-in model list is served). "defaults" means
+        // models ARE available — do not label it "gateway unavailable".
+        const src = String(data.source ?? '');
         setModelsState({
           models: Array.isArray(data.models) ? data.models : [],
-          source: data.source === 'live' ? 'live' : 'unavailable',
+          source: src === 'live' ? 'live' : src === 'defaults' ? 'defaults' : 'unavailable',
         });
       } catch {
         if (!cancelled) setModelsState({ models: [], source: 'unavailable' });
@@ -186,9 +200,10 @@ export default function SettingsPage() {
           ? `Tersimpan & diterapkan: ${keys.map((k) => `${k} = ${applied[k]}`).join(', ')}`
           : 'Tersimpan.',
       });
+      setDirty(false);
       await load();
     } catch {
-      setNotice({ kind: 'error', text: 'Gagal menyimpan — kesalahan jaringan.' });
+      setNotice({ kind: 'error', text: 'Gagal menyimpan — layanan tidak menjawab.' });
     } finally {
       setSaving(false);
     }
@@ -202,7 +217,7 @@ export default function SettingsPage() {
         <title>EA Bot — Pengaturan</title>
         <meta name="description" content="Pengaturan runtime EA Bot" />
       </Head>
-      <AppShell activeKey="settings" eyebrow="EA BOT / PENGATURAN" title="Pengaturan">
+      <AppShell activeKey="settings" eyebrow="Xynn / Settings" title="Pengaturan">
         {notice && (
           <div className={notice.kind === 'error' ? styles.noticeError : styles.notice}>{notice.text}</div>
         )}
@@ -227,6 +242,13 @@ export default function SettingsPage() {
 
               {loadState === 'loading' && <p className={styles.mutedText}>Memuat pengaturan…</p>}
 
+              {dirty && (
+                <p className={styles.mutedText}>
+                  Ada perubahan belum disimpan. Auto-refresh tidak akan menimpa input Anda —
+                  klik Simpan untuk menerapkan.
+                </p>
+              )}
+
               {loadState === 'unauthorized' && (
                 <p className={styles.mutedText}>
                   Belum masuk — token tidak ada atau kedaluwarsa. Buka{' '}
@@ -250,9 +272,10 @@ export default function SettingsPage() {
                             <input
                               type="checkbox"
                               checked={(draft[knob.key] ?? String(knob.value)) === '1'}
-                              onChange={(e) =>
-                                setDraft((d) => ({ ...d, [knob.key]: e.target.checked ? '1' : '0' }))
-                              }
+                              onChange={(e) => {
+                                setDirty(true);
+                                setDraft((d) => ({ ...d, [knob.key]: e.target.checked ? '1' : '0' }));
+                              }}
                             />{' '}
                             {knob.key}
                           </span>
@@ -270,7 +293,10 @@ export default function SettingsPage() {
                             max={knob.maximum}
                             step={knob.key.includes('interval') ? '0.1' : '1'}
                             value={draft[knob.key] ?? String(knob.value)}
-                            onChange={(e) => setDraft((d) => ({ ...d, [knob.key]: e.target.value }))}
+                            onChange={(e) => {
+                              setDirty(true);
+                              setDraft((d) => ({ ...d, [knob.key]: e.target.value }));
+                            }}
                           />
                           <small className={styles.fieldHint}>
                             {knob.description} Rentang {knob.minimum}–{knob.maximum} · dipakai oleh{' '}
@@ -345,11 +371,19 @@ export default function SettingsPage() {
               <div className={styles.registry}>
                 {modelsState.models.length === 0 ? (
                   <div>
-                    <strong>{modelsState.source === 'live' ? 'Tidak ada model' : 'Gateway tidak terhubung'}</strong>
+                    <strong>
+                      {modelsState.source === 'live'
+                        ? 'Tidak ada model'
+                        : modelsState.source === 'defaults'
+                          ? 'Model bawaan'
+                          : 'Gateway tidak terhubung'}
+                    </strong>
                     <span>
                       {modelsState.source === 'live'
                         ? 'Registry kosong — tambahkan model di gateway.'
-                        : 'Buka halaman Masuk lalu muat ulang.'}
+                        : modelsState.source === 'defaults'
+                          ? 'Menampilkan daftar model bawaan; gateway belum mengembalikan daftar live.'
+                          : 'Buka halaman Masuk lalu muat ulang.'}
                     </span>
                   </div>
                 ) : (

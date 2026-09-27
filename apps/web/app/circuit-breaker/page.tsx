@@ -134,8 +134,8 @@ export default function CircuitBreakerPage() {
           </div>
           <div className={styles.card}>
             <span className={styles.cardLabel}>Trigger</span>
-            <span className={styles.cardValue} style={{ fontSize: 15 }}>
-              {state?.trigger ?? '—'}
+            <span className={`${styles.cardValue} ${styles.cardValueMd}`}>
+              {state?.trigger ?? '-'}
             </span>
             <span className={styles.cardHint}>{state?.reason || 'No active trigger'}</span>
           </div>

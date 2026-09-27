@@ -169,14 +169,14 @@ export default function DecisionReplayPage() {
           <div className={styles.grid}>
             <div className={styles.card}>
               <span className={styles.cardLabel}>Decision</span>
-              <span className={styles.cardValue} style={{ fontSize: 'var(--fs-lg)' }}>
+              <span className={`${styles.cardValue} ${styles.cardValueSm}`}>
                 {current.decision ?? '—'}
               </span>
               <span className={styles.cardHint}>{current.event_type ?? '—'}</span>
             </div>
             <div className={styles.card}>
               <span className={styles.cardLabel}>Symbol</span>
-              <span className={styles.cardValue} style={{ fontSize: 'var(--fs-lg)' }}>
+              <span className={`${styles.cardValue} ${styles.cardValueSm}`}>
                 {current.symbol ?? '—'}
               </span>
               <span className={styles.cardHint}>original status: {current.status ?? '—'}</span>

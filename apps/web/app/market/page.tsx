@@ -405,7 +405,7 @@ export default function MarketPage() {
   return (
     <AppShell
       activeKey="market"
-      eyebrow="EA BOT / PASAR"
+      eyebrow="Xynn / Market"
       title="Pasar"
       actions={
         <>

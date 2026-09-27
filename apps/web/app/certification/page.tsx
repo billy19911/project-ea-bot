@@ -90,16 +90,27 @@ export default function CertificationPage() {
                       </span>
                     </div>
                     <div className={styles.checkGrid}>
-                      {Object.entries(g.checks).map(([name, ok]) => (
-                        <div
-                          key={name}
-                          className={`${styles.check} ${ok ? styles.checkOk : styles.checkMiss}`}
-                          title={ok ? 'Passed' : 'Not passing'}
-                        >
-                          <span className={styles.checkIcon} aria-hidden>{ok ? '✓' : '✕'}</span>
-                          <span className={styles.checkLabel}>{name.replace(/_/g, ' ')}</span>
-                        </div>
-                      ))}
+                      {Object.entries(g.checks).map(([name, ok]) => {
+                        // `ok` may be true / false / null (unknown). Unknown must
+                        // NOT be shown as a failure — render it neutrally.
+                        const state = ok === true ? 'ok' : ok === false ? 'miss' : 'unknown';
+                        const cls = state === 'ok' ? styles.checkOk : styles.checkMiss;
+                        const icon = state === 'ok' ? '✓' : state === 'miss' ? '✕' : '?';
+                        const title =
+                          state === 'ok'
+                            ? 'Passed'
+                            : state === 'miss'
+                              ? 'Not passing'
+                              : 'Unknown / not measured';
+                        return (
+                          <div key={name} className={`${styles.check} ${cls}`} title={title}>
+                            <span className={styles.checkIcon} aria-hidden>
+                              {icon}
+                            </span>
+                            <span className={styles.checkLabel}>{name.replace(/_/g, ' ')}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                     {failed.length > 0 && (
                       <div className={styles.gateFailed}>

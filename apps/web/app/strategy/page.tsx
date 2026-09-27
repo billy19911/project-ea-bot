@@ -128,7 +128,7 @@ export default function StrategyCenterPage() {
   return (
     <AppShell
       activeKey="strategy"
-      eyebrow="EA BOT / PUSAT STRATEGI"
+      eyebrow="Xynn / Strategy"
       title="Pusat Strategi"
       actions={
         <Link href="/strategy-lab" style={{ textDecoration: 'none' }}>

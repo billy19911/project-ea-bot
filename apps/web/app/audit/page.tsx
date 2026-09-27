@@ -62,7 +62,7 @@ export default function AuditPage() {
           </div>
           <div className={styles.card}>
             <span className={styles.cardLabel}>Source</span>
-            <span className={styles.cardValue} style={{ fontSize: 'var(--fs-lg)' }}>
+            <span className={`${styles.cardValue} ${styles.cardValueSm}`}>
               {data?.source ?? '—'}
             </span>
             <span className={styles.cardHint}>in-process</span>

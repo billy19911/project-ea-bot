@@ -60,6 +60,17 @@
   word-break: break-word;
 }
 
+/* Size modifiers for card values whose text is long/wordy (a status word, a
+   source name, a symbol) rather than a big number. Use these instead of inline
+   `style={{ fontSize }}` so all card values share one scale. */
+.cardValueMd {
+  font-size: var(--fs-xl);
+}
+
+.cardValueSm {
+  font-size: var(--fs-lg);
+}
+
 .cardHint {
   font-size: var(--fs-xs);
   color: var(--text-muted);
@@ -104,6 +115,16 @@
   width: 100%;
   border-collapse: collapse;
   font-size: var(--fs-sm);
+}
+
+/* Wrap a bare <table> (used by full-page tables) so it gets the card frame
+   and horizontal scroll behaviour of the panel tables. */
+.tableWrapper {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow-x: auto;
+  padding: var(--sp-2);
 }
 
 .table th {
