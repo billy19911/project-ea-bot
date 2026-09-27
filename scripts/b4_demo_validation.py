@@ -208,7 +208,19 @@ class DemoValidationHarness:
         return self._connector_module
 
     def _log(self, message: str) -> None:
-        print(message, file=self._out)
+        """Print a step line without ever crashing on the console encoding.
+
+        On Windows the default/redirected stream is often cp1252, which cannot
+        encode the non-ASCII glyphs used in our human-readable details (e.g. the
+        arrow character). Logging must never abort a validation run, so fall
+        back to an encoding-safe rendering when the stream rejects the text.
+        """
+        try:
+            print(message, file=self._out)
+        except UnicodeEncodeError:
+            enc = getattr(self._out, "encoding", None) or "ascii"
+            safe = message.encode(enc, errors="replace").decode(enc, errors="replace")
+            print(safe, file=self._out)
 
     def _record(self, name: str, ok: bool, detail: str = "", **data: Any) -> StepResult:
         step = StepResult(name=name, ok=ok, detail=detail, data=data)

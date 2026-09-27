@@ -17,6 +17,10 @@
 >
 > **FOURTH UPDATE (same session):** All six **P3** cleanup items were then **fixed**. Test count 1935 → **1943** (all green). **The only remaining open item is P2-15 (deferred).** See §14 "P3 fixes applied".
 >
+> **FIFTH UPDATE — P2-15 CLOSED, no open items remain.** P2-15 ("in-memory order state machine") was resolved by the B-5 durable persistence work: `execution.state_machine.set_store()` attaches an `OrderStateStore` (`src/persistence/order_state_store.py`) and `src/main.py` wires it at startup, so the ledger survives a restart instead of living only in process memory. Verified by `test_b4_demo_validation.py` rehydration round-trips. **Every P0/P1/P2/P3 item in this audit is now fixed**, and all 8 release blockers in `RELEASE_BLOCKERS.md` are closed.
+>
+> **PHASE-3 HARDENING (Windows console encoding):** A full-suite run surfaced 3 real failures in `tests/test_b4_demo_validation.py` (`test_recovery_post_rehydrates_reconciles_and_rearms`, `test_recovery_post_writes_t3_section_preserving_t1_t2`, `test_recovery_pre_and_post_merge_into_both_stages`). Root cause was **not** logic: the harness `_log` helper printed non-ASCII glyphs to a cp1252 stream on Windows, raising `UnicodeEncodeError` that the generic handler converted into a hard exit 1 — i.e. a live DEMO restart-recovery could abort for a cosmetic reason. `scripts/b4_demo_validation.py::_log` now degrades to an encoding-safe rendering. Full suite: **2412 passed**.
+>
 > **RELEASE-CANDIDATE RE-VERIFICATION (commit `cfc8551`):** A later independent RC audit re-checked the "FIXED" claims against actual source. Most hold, but **two claims did not survive re-verification** and were corrected inline below:
 > - **P1-6 (trade-close → review → learning) — was NOT wired at runtime.** `PositionCloseDetector` and `PositionMonitor` were defined but **not instantiated anywhere in `src/`**; no runtime producer emitted `TRADE_CLOSE`/`POST_TRADE_REVIEW`. **NOW FIXED** in commit `02a577c` (runtime drives the monitor + close detector per cycle).
 > - **P2-1 (AppShell fake realtime) — the "faked" note is STALE.** `apps/web/components/AppShell.tsx` now polls the real `/health` endpoint for its LIVE/DEGRADED/OFFLINE badge.
@@ -512,7 +516,7 @@ P2-1 … P2-14 fixed with isolated changes + regression tests. **P2-15** (durabl
 - `black --check` clean (329 files); `isort --check` clean; `flake8` clean.
 
 ### Residual / deferred
-- **P2-15** durable order-state persistence: DEFERRED (needs a DB write path; not small/isolated).
+- **P2-15** durable order-state persistence: **CLOSED** (see §15) — realised via the B-5 `OrderStateStore`.
 - WS query-string token is still accepted as a fallback for compatibility, but the frontend no longer uses it.
 
 ---
@@ -535,20 +539,23 @@ All six low-priority cleanup items fixed.
 - Node API build clean; web `tsc` + lint clean; `black`/`isort`/`flake8` clean.
 
 ### Remaining open
-- **P2-15** — durable order-state persistence (deferred; needs a DB write path).
+- **None.** P2-15 is closed (see §15).
 
 ---
 
 ## 15. Final status
 
-| Priority | Total | Fixed | Deferred |
+| Priority | Total | Fixed | Open |
 |---|---|---|---|
 | P0 (critical) | 3 | 3 | 0 |
 | P1 (high) | 6 (+1 follow-up) | 7 | 0 |
-| P2 (medium) | 15 | 14 | 1 (P2-15) |
+| P2 (medium) | 15 | 15 | 0 |
 | P3 (low) | 6 | 6 | 0 |
 
-**Test suite: 1843 → 1943** across the four fix sessions; all green. `black`/`isort`/`flake8` clean; Node 46/46; web `tsc`/lint clean. The single deferred item (P2-15) is a low-priority durability enhancement requiring a DB write path.
+**No open audit items remain.** Test suite: **2412 passed** after the P2-15 closure and the Windows-console-encoding hardening (§ top-of-file updates); `black`/`isort`/`flake8` clean; Node 46/46; web `tsc`/lint clean.
+
+### P2-15 closure detail
+P2-15 originally read *"`state_machine` order store is in-memory (not durable)"*. This is resolved: `execution/state_machine.py` now exposes `set_store(store)`, and `src/main.py` constructs a durable `OrderStateStore` (`src/persistence/order_state_store.py`, JSONL-backed) and attaches it at startup, so the order ledger rehydrates across restarts. `tests/test_b4_demo_validation.py` proves the round-trip (write → fresh store → state present from disk). The module still degrades gracefully to in-memory when no store is attached (backward compatible, e.g. unit tests).
 
 
 

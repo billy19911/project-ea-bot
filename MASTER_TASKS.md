@@ -1,5 +1,16 @@
 # MASTER TASKS — XynnBot Architecture Correction & Completion
 
+> **⚠️ STATUS: COMPLETE (historical ledger) — NOT a to-do list.**
+> Every EPIC 00–19 below has been implemented and verified. This file is retained
+> as a historical execution ledger and as a record of the original scope/rules.
+> Do **not** treat unchecked or unmarked lines here as outstanding work.
+>
+> Authoritative current state lives in:
+> - `docs/audit/DEEP_E2E_AUDIT.md` — **no open P0/P1/P2/P3 items remain**
+> - `docs/audit/RELEASE_BLOCKERS.md` — **all 8 blockers closed**
+> - `docs/audit/RELEASE_READINESS_REPORT.md` — RC readiness, drift & dead-code notes
+> - `ARCHITECTURE_MAP.md` — current module/entry-point map
+
 **Execution model:** Audit first, then patch existing repository.  
 **Rule:** One task at a time, verify, checkpoint, then continue.
 

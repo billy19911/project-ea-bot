@@ -163,6 +163,19 @@ Hard risk limits (drawdown, daily loss, exposure, dll) **tidak boleh** diubah ol
 
 ---
 
+## Runtime Security & Execution Mode
+
+Beberapa detail penting yang **wajib** dipahami sebelum menjalankan sistem di luar laptop lokal:
+
+- **Python service tidak punya autentikasi sendiri.** FastAPI-nya (port `8787`) hanya dilindungi oleh **loopback bind default** (`HOST=127.0.0.1`). Jangan pernah `HOST=0.0.0.0` tanpa reverse-proxy ber-auth di depannya — endpoint seperti `POST /mt5/terminals/arm` (switch arm-live) dan `/mt5/orders/execute` akan terbuka. Node API (`:3789`) meneruskan `PYTHON_API_KEY`; set key ini di produksi.
+- **CORS dibatasi allowlist.** Node API memakai `CORS_ALLOWED_ORIGINS` (default origin dev lokal), bukan wildcard. Tambahkan origin produksi Anda secara eksplisit.
+- **Eksekusi: simulasi vs nyata.** Default eksekusi bersifat **simulasi/paper** kecuali terminal benar-benar di-arm dan environment `LIVE` diaktifkan secara eksplisit. `ExecutionEngine(require_approval=True)` menolak order tanpa `approval_token` (fail-closed).
+- **Risk Gate di dalam pipeline** bersifat deterministik dan fail-closed; guard tambahan (permission guards, `MT5WriteGuard`, `MultiLevelBreaker`) sebagian **belum** ter-wire ke jalur trade produksi — lihat `docs/audit/RELEASE_READINESS_REPORT.md`.
+
+> Ringkasnya: di dalam pipeline Risk Gate tidak bisa dilewati, tetapi di **batas jaringan** keamanan bergantung pada konfigurasi Anda (bind loopback, `PYTHON_API_KEY`, CORS allowlist).
+
+---
+
 ## Getting Started
 
 ### Prasyarat
