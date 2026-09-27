@@ -47,11 +47,22 @@ const NAV_GROUPS = [
     ],
   },
   {
+    label: 'Decisions',
+    items: [
+      { key: 'decisions', label: 'Decisions', href: '/decisions', icon: 'bolt' },
+      { key: 'decision-replay', label: 'Decision Replay', href: '/decision-replay', icon: 'clock' },
+      { key: 'why-no-trade', label: 'Why No Trade', href: '/why-no-trade', icon: 'alert' },
+      { key: 'execution', label: 'Execution', href: '/execution', icon: 'activity' },
+    ],
+  },
+  {
     label: 'Risk & Ops',
     items: [
+      { key: 'risk-center', label: 'Risk Center', href: '/risk-center', icon: 'shield' },
       { key: 'circuit-breaker', label: 'Circuit Breaker', href: '/circuit-breaker', icon: 'shield' },
       { key: 'incidents', label: 'Incidents', href: '/incidents', icon: 'alert' },
       { key: 'execution-quality', label: 'Execution Quality', href: '/execution-quality', icon: 'bolt' },
+      { key: 'reconciliation', label: 'Reconciliation', href: '/reconciliation', icon: 'grid' },
       { key: 'observability', label: 'Observability', href: '/observability', icon: 'activity' },
       { key: 'slo', label: 'System SLO', href: '/slo', icon: 'clock' },
     ],
@@ -65,18 +76,26 @@ const NAV_GROUPS = [
       { key: 'strategy', label: 'Strategy', href: '/strategy', icon: 'trend' },
       { key: 'strategy-lab', label: 'Strategy Lab', href: '/strategy-lab', icon: 'flask' },
       { key: 'backtest', label: 'Backtest', href: '/backtest', icon: 'activity' },
+      { key: 'learning', label: 'Learning', href: '/learning', icon: 'cpu' },
+      { key: 'performance', label: 'Performance', href: '/performance', icon: 'trend' },
     ],
   },
   {
     label: 'Research',
-    items: [{ key: 'research', label: 'Research', href: '/research', icon: 'flask' }],
+    items: [
+      { key: 'research', label: 'Research', href: '/research', icon: 'flask' },
+      { key: 'walk-forward', label: 'Walk-Forward', href: '/walk-forward', icon: 'trend' },
+      { key: 'monte-carlo', label: 'Monte Carlo', href: '/monte-carlo', icon: 'activity' },
+    ],
   },
   {
     label: 'System',
     items: [
       { key: 'environment', label: 'Environment', href: '/environment', icon: 'server' },
+      { key: 'system-health', label: 'System Health', href: '/system-health', icon: 'gauge' },
       { key: 'accounts', label: 'Accounts', href: '/accounts', icon: 'layers' },
       { key: 'certification', label: 'Certification', href: '/certification', icon: 'check-badge' },
+      { key: 'audit', label: 'Audit Trail', href: '/audit', icon: 'clock' },
       { key: 'system-readiness', label: 'Readiness', href: '/system-readiness', icon: 'shield' },
       { key: 'settings', label: 'Settings', href: '/settings', icon: 'sliders' },
     ],

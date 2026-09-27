@@ -350,6 +350,112 @@
   font-weight: 500;
 }
 
+/* Inputs & filter chips --------------------------------------------------- */
+
+.input {
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-family: inherit;
+  min-width: 200px;
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.chip:hover:not(:disabled) {
+  border-color: var(--text-muted);
+}
+
+.chipActive {
+  background: var(--primary-soft, var(--neutral-muted));
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* Key/value list ---------------------------------------------------------- */
+
+.kv {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: 8px var(--sp-4);
+  align-items: baseline;
+}
+
+.kvKey {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.kvVal {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+/* Horizontal proportion bar ----------------------------------------------- */
+
+.bar {
+  position: relative;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--neutral-muted);
+  overflow: hidden;
+}
+
+.barFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--primary);
+  border-radius: var(--r-full);
+  transition: width var(--dur-med, 240ms) var(--ease);
+}
+
+.barFillDanger {
+  background: var(--danger);
+}
+
+.barFillOk {
+  background: var(--success);
+}
+
+/* Soft danger-tinted panel (honest degradation notice) -------------------- */
+
+.notice {
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--warning-border);
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+}
+
 /* Responsif --------------------------------------------------------------- */
 
 @media (max-width: 920px) {

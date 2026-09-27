@@ -77,3 +77,68 @@ services/python/mt5_selected.json
 
 # Env backups may contain live bot tokens — never commit them.
 .env.runtime.bak-*
+
+# ============================================================================
+# Scratch / throwaway session artifacts (audit probes, recon dumps, ad-hoc
+# investigations). These were never meant to be versioned; they pile up at the
+# repo root and in services/python/ during debugging sessions. Real Python
+# source named `_*.py` (e.g. `__init__.py`, `_constants.py`, `_connector_base.py`)
+# is explicitly kept tracked via the negation rules below.
+# ============================================================================
+# Archived scratch (see scripts/archive-scratch.ps1).
+archive/
+_scratch/
+/tmp-npmfwd/
+/tmp-npmfwd-*/
+
+# Root-level scratch text/json dumps: `_q12.txt`, `b4_cert1.txt`, `_ac.json`, …
+/_*.txt
+/_*.json
+/_*.log
+/_*.ps1
+/b4_*.txt
+/b4_*.json
+/recon_*.txt
+/_*.py
+
+# services/python scratch dumps and one-off probe scripts.
+/services/python/recon_*.txt
+/services/python/_dump*.txt
+/services/python/_*.txt
+/services/python/_*.json
+/services/python/_probe_*.py
+/services/python/_recon*.py
+/services/python/_*_probe.py
+/services/python/git_log.txt
+/services/python/git_status.txt
+/services/python/_fullsuite*.log
+/services/python/_sym*.txt
+/services/python/_t[0-9].txt
+# services/python one-off probe_*.py scripts and stray .bak files.
+/services/python/probe_*.py
+/services/python/*.bak
+/services/python/_tf/
+/tf/
+/_tf/
+
+# scripts/ leftovers: temporary helpers and ad-hoc probes.
+/scripts/.tmp-*
+/scripts/_*.ps1
+/scripts/probe_*.ps1
+/scripts/_*.py
+
+# Never ignore real package source that happens to start with an underscore.
+!**/__init__.py
+!**/__main__.py
+!/services/python/src/**/_*.py
+# scripts/ holds real operational tooling; re-include committed helpers, then
+# re-apply the scratch ignores last so they still win for throwaway files.
+!scripts/
+!scripts/*.py
+!scripts/*.ps1
+!scripts/*.md
+/scripts/.tmp-*
+/scripts/_*.ps1
+/scripts/probe_*.ps1
+/scripts/_*.py
+/scripts/restart-web-webscript.ps1.tmp
