@@ -354,9 +354,18 @@ async def lifespan(app: FastAPI):
         from .trading.feed_loop import MarketFeedLoop
 
         runtime = get_runtime()
+        all_symbols = [s.strip() for s in settings.market_feed_symbols.split(",") if s.strip()]
+        # FOKUS #5: primary vs fallback — XAUUSD (gold) always primary; crypto
+        # (BTCUSD, ETHUSD) are fallback instruments only when primary markets
+        # are closed (weekend/holiday). First symbol becomes primary; others are
+        # treated as fallback. This makes gold the main trading instrument and
+        # uses crypto as a weekend side-instrument.
+        primary_symbols = [all_symbols[0]] if all_symbols else []
+        fallback_symbols = all_symbols[1:] if len(all_symbols) > 1 else None
         feed = MarketFeedLoop(
             queue=runtime.queue,
-            symbols=[s.strip() for s in settings.market_feed_symbols.split(",") if s.strip()],
+            symbols=primary_symbols,
+            fallback_symbols=fallback_symbols,
             timeframe=settings.market_feed_timeframe,
             interval_s=settings.market_feed_interval_s,
             event_cooldown_s=settings.market_feed_event_cooldown_s,
@@ -371,8 +380,9 @@ async def lifespan(app: FastAPI):
         )
         feed_task = asyncio.create_task(feed.run())
         logger.info(
-            "Market feed loop started (symbols=%s, timeframe=%s, interval=%ss)",
-            settings.market_feed_symbols,
+            "Market feed loop started (primary=%s, fallback=%s, timeframe=%s, interval=%ss)",
+            ",".join(primary_symbols),
+            ",".join(fallback_symbols or []) or "-",
             settings.market_feed_timeframe,
             settings.market_feed_interval_s,
         )

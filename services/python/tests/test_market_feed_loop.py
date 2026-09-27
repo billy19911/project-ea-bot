@@ -498,3 +498,55 @@ def _detected_event():
         timestamp="2024-01-01T00:00:00+00:00",
         symbol="EURUSD",
     )
+
+
+# ---------------------------------------------------------------------------
+# Primary vs fallback symbols (gold main / crypto weekend side-instrument)
+# ---------------------------------------------------------------------------
+def _session(open_, reason=""):
+    return {"symbol": "?", "asset_class": "non_crypto", "open": open_, "reason": reason}
+
+
+def test_fallback_not_polled_while_primary_open():
+    """When the primary market is open, the fallback instrument is NOT polled."""
+    connector = FakeConnector({"XAUUSD": _bars("XAUUSD"), "BTCUSD": _bars("BTCUSD")})
+    loop = _loop(
+        symbols=["XAUUSD"],
+        fallback_symbols=["BTCUSD"],
+        connector=connector,
+        session_provider=lambda sym: _session(True, "open"),
+    )
+
+    loop.poll_once()
+
+    polled = {c[0] for c in connector.calls}
+    assert polled == {"XAUUSD"}, "fallback must not be polled when primary open: %s" % polled
+
+
+def test_fallback_polled_when_primary_closed():
+    """When every primary market is closed (weekend), the fallback IS polled."""
+    connector = FakeConnector({"XAUUSD": _bars("XAUUSD"), "BTCUSD": _bars("BTCUSD")})
+    loop = _loop(
+        symbols=["XAUUSD"],
+        fallback_symbols=["BTCUSD"],
+        connector=connector,
+        session_provider=lambda sym: _session(sym == "BTCUSD", "closed"),
+    )
+
+    loop.poll_once()
+
+    polled = {c[0] for c in connector.calls}
+    assert "BTCUSD" in polled, "fallback must be polled on weekend: %s" % polled
+    assert "XAUUSD" not in polled, "closed primary must be skipped: %s" % polled
+
+
+def test_no_fallback_configured_keeps_behaviour():
+    """Without fallback symbols the loop polls only the primaries."""
+    connector = FakeConnector({"XAUUSD": _bars("XAUUSD")})
+    loop = _loop(
+        symbols=["XAUUSD"],
+        connector=connector,
+        session_provider=lambda s: _session(True),
+    )
+    loop.poll_once()
+    assert {c[0] for c in connector.calls} == {"XAUUSD"}

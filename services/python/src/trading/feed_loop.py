@@ -103,9 +103,17 @@ class MarketFeedLoop:
         multi_timeframe_enabled: bool = False,
         multi_timeframe_list: str = "M15,H1,H4",
         multi_timeframe_min_strength: float = 0.0,
+        fallback_symbols: Optional[list[str]] = None,
     ) -> None:
         self.queue = queue
         self.symbols = [str(s).strip() for s in (symbols or []) if str(s).strip()]
+        # FOKUS: primary vs fallback symbols. Primaries (e.g. XAUUSD) are always
+        # polled when their market is open. Fallbacks (e.g. #BTCUSD) are polled
+        # ONLY when every primary market is closed (weekend/holiday) — so crypto
+        # is a weekend side-instrument, never a competitor to gold during the
+        # trading week.
+        self.fallback_symbols = [str(s).strip() for s in (fallback_symbols or []) if str(s).strip()]
+        self._all_symbols = [*self.symbols, *self.fallback_symbols]
         self.timeframe = str(timeframe or "M5")
         self.interval_s = float(interval_s)
         self.count = int(count)
@@ -168,26 +176,60 @@ class MarketFeedLoop:
         Returns:
             The number of detected events emitted this cycle. Zero on any
             read/detection failure (fail-safe) — never raises.
+
+        Ordering (primary vs fallback):
+            Primary symbols are polled first. Fallback symbols (crypto) are
+            polled ONLY when **no** primary market is currently open — i.e. a
+            weekend/holiday. This keeps gold the main instrument during the
+            trading week and uses crypto as a weekend side-instrument.
         """
         emitted = 0
+        any_primary_open = False
         for symbol in self.symbols:
-            emitted += self._poll_symbol(symbol)
-        return emitted
-
-    def _poll_symbol(self, symbol: str) -> int:
-        """Poll one symbol; returns the number of events emitted (0 on skip)."""
-        session: Optional[dict] = None
-        try:
-            session = self._session_status(symbol)
-            if not session.get("open", True):
+            session = self._safe_session(symbol)
+            if session is not None and not session.get("open", True):
                 logger.info(
                     "Market feed: %s market closed (%s) — skipping",
                     symbol,
                     session.get("reason"),
                 )
-                return 0
+                continue
+            any_primary_open = True
+            emitted += self._poll_symbol(symbol, session)
+
+        # Fallbacks only when every primary market is closed.
+        if self.fallback_symbols and not any_primary_open:
+            logger.info(
+                "Market feed: all primary markets closed — polling fallback symbols %s",
+                ", ".join(self.fallback_symbols),
+            )
+            for symbol in self.fallback_symbols:
+                emitted += self._poll_symbol(symbol, self._safe_session(symbol))
+        return emitted
+
+    def _safe_session(self, symbol: str) -> Optional[dict]:
+        """Return the session status for *symbol*, or None (fail-open)."""
+        try:
+            return self._session_status(symbol)
         except Exception as exc:  # noqa: BLE001 — fail-open, never block on session check
             logger.debug("Market feed session check skipped: %s", exc)
+            return None
+
+    def _poll_symbol(self, symbol: str, session: Optional[dict] = None) -> int:
+        """Poll one symbol; returns the number of events emitted (0 on skip).
+
+        ``session`` may be pre-resolved by the caller (``poll_once``); when
+        ``None`` it is resolved here. A closed market returns 0.
+        """
+        if session is None:
+            session = self._safe_session(symbol)
+        if session is not None and not session.get("open", True):
+            logger.info(
+                "Market feed: %s market closed (%s) — skipping",
+                symbol,
+                session.get("reason"),
+            )
+            return 0
 
         try:
             bars = self._connector.get_ohlc(symbol, self.timeframe, self.count)
