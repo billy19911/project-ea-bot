@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import Pagination, { usePagination } from '@/components/ui/pagination';
 import { useApiData } from '@/lib/useApiData';
 import styles from '@/components/ops.module.css';
 
@@ -62,6 +63,9 @@ export default function DecisionsPage() {
     }
     return c;
   }, [all]);
+
+  const { page, pageSize, setPage, setPageSize, slice } = usePagination(rows.length, 25);
+  const pageRows = slice(rows);
 
   return (
     <AppShell activeKey="decisions" eyebrow="Xynn / Decisions" title="Decisions">
@@ -133,7 +137,7 @@ export default function DecisionsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((d, i) => (
+                  {pageRows.map((d, i) => (
                     <tr key={String(d.decision_id ?? i)}>
                       <td className={styles.mono}>{d.decision_id ?? '—'}</td>
                       <td>{d.event_type ?? '—'}</td>
@@ -157,6 +161,15 @@ export default function DecisionsPage() {
               </table>
             )}
           </div>
+          {rows.length > 0 && (
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              total={rows.length}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
+          )}
         </div>
       </div>
     </AppShell>

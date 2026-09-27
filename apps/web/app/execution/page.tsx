@@ -1,6 +1,7 @@
 'use client';
 
 import AppShell from '@/components/AppShell';
+import Pagination, { usePagination } from '@/components/ui/pagination';
 import { useApiData, fmtNum, fmtPct } from '@/lib/useApiData';
 import styles from '@/components/ops.module.css';
 
@@ -41,6 +42,10 @@ export default function ExecutionPage() {
   const executed = (Array.isArray(d.data?.decisions) ? d.data!.decisions! : []).filter(
     (x) => x.executed === true || String(x.status ?? '').toUpperCase() === 'EXECUTED'
   );
+
+  // /decisions is newest-first; keep that order and page the window.
+  const { page, pageSize, setPage, setPageSize, slice } = usePagination(executed.length, 25);
+  const pageRows = slice(executed);
 
   const cards = [
     { label: 'Average slippage', value: fmtNum(num('average_slippage'), 6), hint: 'price units' },
@@ -115,7 +120,7 @@ export default function ExecutionPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {executed.map((x, i) => {
+                  {pageRows.map((x, i) => {
                     const r = x.execution_result ?? {};
                     const orderId =
                       (r['order_id'] as number | string | undefined) ??
@@ -142,6 +147,15 @@ export default function ExecutionPage() {
               </table>
             )}
           </div>
+          {executed.length > 0 && (
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              total={executed.length}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
+          )}
         </div>
       </div>
     </AppShell>

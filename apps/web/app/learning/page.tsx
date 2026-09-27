@@ -1,6 +1,7 @@
 'use client';
 
 import AppShell from '@/components/AppShell';
+import Pagination, { usePagination } from '@/components/ui/pagination';
 import { useApiData } from '@/lib/useApiData';
 import styles from '@/components/ops.module.css';
 
@@ -39,9 +40,14 @@ function outcomePill(outcome: string): string {
 
 export default function LearningPage() {
   const { data, error, loading, refresh } = useApiData<LearningBody>('/learning/analytics');
-  const lessons = Array.isArray(data?.lessons) ? data!.lessons! : [];
+  // The store is append-only (oldest first), so reverse to show the NEWEST
+  // lessons first — consistent with the /agents page.
+  const lessons = Array.isArray(data?.lessons) ? [...data!.lessons!].reverse() : [];
   const byOutcome = data?.by_outcome ?? {};
   const total = data?.total ?? 0;
+
+  const { page, pageSize, setPage, setPageSize, slice } = usePagination(lessons.length, 25);
+  const pageItems = slice(lessons);
 
   return (
     <AppShell activeKey="learning" eyebrow="Xynn / Learning" title="Learning">
@@ -105,7 +111,7 @@ export default function LearningPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {lessons.map((l, i) => (
+                  {pageItems.map((l, i) => (
                     <tr key={`${String(l.id ?? 'lesson')}-${i}`}>
                       <td className={styles.mono}>{l.id ?? '—'}</td>
                       <td>{l.category || '—'}</td>
@@ -122,6 +128,15 @@ export default function LearningPage() {
               </table>
             )}
           </div>
+          {lessons.length > 0 && (
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              total={lessons.length}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
+          )}
         </div>
       </div>
     </AppShell>

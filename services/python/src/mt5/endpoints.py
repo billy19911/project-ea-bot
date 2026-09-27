@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Any
+
 from fastapi import APIRouter, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -22,6 +25,13 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/mt5", tags=["mt5-paper-trading"])
+
+
+def _field(obj: Any, name: str) -> Any:
+    """Read ``name`` from a dict or object (fail-safe to None)."""
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
 
 
 # ---------------------------------------------------------------------------
@@ -208,8 +218,21 @@ async def get_market_ohlc(
 
 @router.get("/positions", response_model=PositionsResponse)
 async def get_positions() -> PositionsResponse:
-    """Get all open positions (read-only)."""
+    """Get all open positions (read-only), newest-opened first.
+
+    MT5 returns positions in an unspecified order, so we sort explicitly by the
+    open time (descending) — the newest position appears first in the UI.
+    """
     positions = connector.get_positions()
+
+    def _key(p: Any) -> Any:
+        stamp = _field(p, "time") or _field(p, "time_update")
+        return stamp or datetime.min
+
+    try:
+        positions = sorted(positions, key=_key, reverse=True)
+    except Exception:  # noqa: BLE001 - unsorted is better than broken
+        pass
     return PositionsResponse(positions=positions, count=len(positions))
 
 
@@ -220,8 +243,21 @@ async def get_positions() -> PositionsResponse:
 
 @router.get("/orders", response_model=OrdersResponse)
 async def get_orders() -> OrdersResponse:
-    """Get all pending orders (read-only)."""
+    """Get all pending orders (read-only), newest-setup first.
+
+    MT5 returns orders in an unspecified order, so we sort explicitly by the
+    setup time (descending).
+    """
     orders = connector.get_orders()
+
+    def _key(o: Any) -> Any:
+        stamp = _field(o, "time_setup") or _field(o, "time")
+        return stamp or datetime.min
+
+    try:
+        orders = sorted(orders, key=_key, reverse=True)
+    except Exception:  # noqa: BLE001 - unsorted is better than broken
+        pass
     return OrdersResponse(orders=orders, count=len(orders))
 
 

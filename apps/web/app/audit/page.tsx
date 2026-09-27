@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import Pagination, { usePagination } from '@/components/ui/pagination';
 import { useApiData, fmtDate, formatDetails } from '@/lib/useApiData';
 import styles from '@/components/ops.module.css';
 
@@ -32,15 +33,21 @@ export default function AuditPage() {
   const all = useMemo(() => (Array.isArray(data?.events) ? data!.events! : []), [data]);
 
   const rows = useMemo(() => {
+    // Show the NEWEST events first (the chain order is preserved on each row's
+    // # index). The API returns them oldest-first.
+    const ordered = [...all].reverse();
     const q = filter.trim().toLowerCase();
-    if (!q) return all;
-    return all.filter(
+    if (!q) return ordered;
+    return ordered.filter(
       (e) =>
         String(e.actor ?? '').toLowerCase().includes(q) ||
         String(e.action ?? '').toLowerCase().includes(q) ||
         String(e.target ?? '').toLowerCase().includes(q)
     );
   }, [all, filter]);
+
+  const { page, pageSize, setPage, setPageSize, slice } = usePagination(rows.length, 25);
+  const pageRows = slice(rows);
 
   return (
     <AppShell activeKey="audit" eyebrow="Xynn / Audit" title="Audit Trail">
@@ -99,7 +106,7 @@ export default function AuditPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((e, i) => (
+                  {pageRows.map((e, i) => (
                     <tr key={String(e.index ?? i)}>
                       <td className={styles.mono}>{e.index ?? '—'}</td>
                       <td className={styles.mono}>{fmtDate(e.timestamp)}</td>
@@ -118,6 +125,15 @@ export default function AuditPage() {
               </table>
             )}
           </div>
+          {rows.length > 0 && (
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              total={rows.length}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
+          )}
         </div>
       </div>
     </AppShell>
