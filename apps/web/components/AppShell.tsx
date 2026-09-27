@@ -41,7 +41,7 @@ const NAV_GROUPS = [
     label: 'Command',
     items: [
       { key: 'overview', label: 'Overview', href: '/', icon: 'gauge' },
-      { key: 'control-plane', label: 'Control Plane', href: '/control-plane', icon: 'grid' },
+      { key: 'control-plane', label: 'Control Panel', href: '/control-plane', icon: 'grid' },
       { key: 'market', label: 'Market', href: '/market', icon: 'candles' },
       { key: 'news', label: 'News', href: '/news', icon: 'news' },
     ],

@@ -503,7 +503,18 @@ export default function MarketPage() {
 
       {/* Chart */}
       {data ? (
-        <PriceChart data={data} showEma={showEma} showBollinger={showBollinger} showRsi={showRsi} showMacd={showMacd} levels={chartLevels} onNeedMoreHistory={loadMoreHistory} loadingMore={loadingMore} />
+        <PriceChart
+          data={data}
+          showEma={showEma}
+          showBollinger={showBollinger}
+          showRsi={showRsi}
+          showMacd={showMacd}
+          levels={chartLevels}
+          onNeedMoreHistory={loadMoreHistory}
+          loadingMore={loadingMore}
+          livePrice={typeof livePrice === 'number' ? livePrice : null}
+          liveOpen={data?.bars && data.bars.length > 0 ? data.bars[data.bars.length - 1].open : null}
+        />
       ) : (
         <div className={styles.loadingBox}>{loading ? 'Memuat chart…' : 'Chart belum tersedia.'}</div>
       )}

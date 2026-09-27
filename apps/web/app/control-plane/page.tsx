@@ -344,8 +344,8 @@ export default function ControlPlanePage() {
   return (
     <AppShell
       activeKey="control-plane"
-      eyebrow="Xynn / Control Plane"
-      title={TAB_LABEL[tab] ?? 'Control Plane'}
+      eyebrow="Xynn / Control Panel"
+      title={TAB_LABEL[tab] ?? 'Control Panel'}
       actions={
         <>
           <span className={styles.envBadge}>{mt5Mode?.live_data ? 'LIVE DATA · READ-ONLY' : 'PAPER'}</span>
@@ -650,19 +650,59 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           <h2>Agents ({aiControl.agents?.length})</h2>
           <div className={s.tableWrapper}>
             <table className={s.table}>
-              <thead><tr><th>Agent</th><th>Type</th><th>Status</th><th>Runs</th><th>Priority</th><th>Last active</th><th>Errors</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Agent</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Runs</th>
+                  <th>Avg conf</th>
+                  <th>Error rate</th>
+                  <th>Priority</th>
+                  <th>Last active</th>
+                  <th>Sinyal</th>
+                  <th>Errors</th>
+                </tr>
+              </thead>
               <tbody>
-                {agentsPage.rows.map((a: any) => (
-                  <tr key={a.name}>
-                    <td><strong>{a.name}</strong></td>
-                    <td>{a.type}</td>
-                    <td><span className={`${s.badge} ${badgeClass(a.status, s)}`}>{a.status}</span></td>
-                    <td>{a.invocations ?? 0}</td>
-                    <td>{priorityLabel(a.priority)}</td>
-                    <td>{formatLastActive(a.lastActive ?? a.last_active)}</td>
-                    <td>{(a.errors ?? a.error_count ?? a.errorCount ?? 0) > 0 ? <span className={`${s.badge} ${s.warning}`}>{a.errors ?? a.error_count ?? a.errorCount}</span> : '0'}</td>
+                {agentsPage.rows.map((a: any) => {
+                  const errors = typeof a.errors === 'number' ? a.errors : 0;
+                  const errorRate = typeof a.errorRate === 'number' ? a.errorRate : null;
+                  const signals = a.signalCounts && typeof a.signalCounts === 'object'
+                    ? Object.entries(a.signalCounts as Record<string, number>)
+                        .map(([k, v]) => `${k}:${v}`)
+                        .join(' ')
+                    : '';
+                  return (
+                    <tr key={a.name}>
+                      <td><strong>{a.name}</strong></td>
+                      <td>{a.type}</td>
+                      <td><span className={`${s.badge} ${badgeClass(a.status, s)}`}>{a.status}</span></td>
+                      <td>{a.invocations ?? 0}</td>
+                      <td className={s.mono}>
+                        {typeof a.avgConfidence === 'number' ? a.avgConfidence.toFixed(2) : '—'}
+                      </td>
+                      <td className={s.mono}>
+                        {errorRate == null ? '—' : `${(errorRate * 100).toFixed(0)}%`}
+                      </td>
+                      <td>{priorityLabel(a.priority)}</td>
+                      <td>{formatLastActive(a.lastActive)}</td>
+                      <td className={s.mono}>{signals || '—'}</td>
+                      <td>
+                        {errors > 0 ? (
+                          <span className={`${s.badge} ${s.warning}`}>{errors}</span>
+                        ) : (
+                          '0'
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {agentsPage.rows.length === 0 && (
+                  <tr>
+                    <td colSpan={10}>Tidak ada agent terdaftar.</td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
@@ -683,6 +723,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           <div className={s.kpi}><span className={s.kpiValue}>{tasks.counts?.completed}</span><span className={s.kpiLabel}>Completed</span></div>
           <div className={s.kpi}><span className={s.kpiValue}>{tasks.counts?.failed}</span><span className={s.kpiLabel}>Failed</span></div>
         </div>
+        <div className={s.tableWrapper}>
         <table className={s.table}>
           <thead><tr><th>ID</th><th>Type</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Duration</th></tr></thead>
           <tbody>
@@ -701,6 +742,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
             )}
           </tbody>
         </table>
+        </div>
         {tasksPage.pager}
       </section>
     );

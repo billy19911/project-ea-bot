@@ -84,6 +84,15 @@ type Props = {
   onNeedMoreHistory?: () => void;
   /** True while an older-history page is being fetched. */
   loadingMore?: boolean;
+  /**
+   * Live last price for the charted symbol. Drawn as a "Price Now" line + tag
+   * INSIDE the plot but as a plain (non-memo-blocking) element: a tick updates
+   * only this line, never the candles/indicators/viewport — so the price keeps
+   * showing without the chart flickering.
+   */
+  livePrice?: number | null;
+  /** Bar open of the latest live candle, to colour the Price Now tag. */
+  liveOpen?: number | null;
 };
 
 // ── Layout (viewBox units; SVG scales to 100% width) ────────────────────────
@@ -142,6 +151,8 @@ function PriceChart({
   showMacd = true,
   onNeedMoreHistory,
   loadingMore = false,
+  livePrice = null,
+  liveOpen = null,
 }: Props) {
   const [hover, setHover] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -688,7 +699,7 @@ function PriceChart({
           </text>
         ))}
 
-        {/* ── Crosshair hover ── */}
+        {/* ── Crosshair hover (vertikal + horizontal putus-putus) ── */}
         {hover !== null ? (
           <line
             x1={geom.x(hover)}
@@ -698,6 +709,63 @@ function PriceChart({
             className="pcCrosshair"
           />
         ) : null}
+        {hover !== null && hoverBar ? (
+          <>
+            <line
+              x1={PAD_L}
+              y1={geom.yMain(hoverBar.close)}
+              x2={PAD_L + INNER_W}
+              y2={geom.yMain(hoverBar.close)}
+              className="pcCrosshairH"
+            />
+            <text
+              x={PAD_L + INNER_W + 6}
+              y={geom.yMain(hoverBar.close) + 3.5}
+              className="pcCrosshairLabel"
+            >
+              {fmtPrice(hoverBar.close)}
+            </text>
+          </>
+        ) : null}
+
+        {/* ── Price Now: live last price (tanpa mengganggu memo chart) ──
+            Only the y of this line/tag changes on a tick; candles, indicators
+            and the viewport are untouched, so nothing flickers. */}
+        {typeof livePrice === 'number' && Number.isFinite(livePrice) && livePrice > 0
+          ? (() => {
+              const yNow = geom.yMain(livePrice);
+              if (yNow < MAIN_TOP - 1 || yNow > MAIN_BOTTOM + 1) return null;
+              const up = liveOpen == null ? null : livePrice >= liveOpen;
+              const cls = up == null ? '' : up ? 'up' : 'down';
+              return (
+                <g className="pcPriceNowGroup">
+                  <line
+                    x1={PAD_L}
+                    y1={yNow}
+                    x2={PAD_L + INNER_W}
+                    y2={yNow}
+                    className="pcPriceNowLine"
+                  />
+                  <rect
+                    x={PAD_L + INNER_W + 2}
+                    y={yNow - 8}
+                    width={PAD_R - 6}
+                    height={16}
+                    rx={3}
+                    className={`pcPriceNowTagBox ${cls}`}
+                  />
+                  <text
+                    x={PAD_L + INNER_W + PAD_R / 2}
+                    y={yNow + 4}
+                    textAnchor="middle"
+                    className="pcPriceNowTagText"
+                  >
+                    {fmtPrice(livePrice)}
+                  </text>
+                </g>
+              );
+            })()
+          : null}
       </svg>
 
       {/* Divider drag handle: resize the price panel height. Positioned as a
@@ -778,6 +846,11 @@ function levelsSignature(levels: ChartLevel[]): string {
 export default memo(PriceChart, (prev, next) => {
   if (chartSignature(prev.data) !== chartSignature(next.data)) return false;
   if (levelsSignature(prev.levels ?? []) !== levelsSignature(next.levels ?? [])) return false;
+  // Live price/open are compared so the "Price Now" line moves on a tick, but
+  // they do NOT reset the viewport or rebuild geometry (both key on the data
+  // signature), so this re-render is a cheap diff, not a flicker.
+  if (prev.livePrice !== next.livePrice) return false;
+  if (prev.liveOpen !== next.liveOpen) return false;
   return (
     prev.showEma === next.showEma &&
     prev.showBollinger === next.showBollinger &&

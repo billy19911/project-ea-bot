@@ -65,6 +65,129 @@ const RISK_LABELS: Record<string, string> = {
   min_rr: 'Min risk/reward',
 };
 
+// Quick presets for fractional knobs — a lot size is easier to pick from a
+// shortlist than to type, and avoids the spinner jumping past valid values.
+const KNOB_PRESETS: Record<string, number[]> = {
+  max_lot_per_trade: [0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0],
+  risk_per_trade_pct: [0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0],
+  scheduler_poll_interval: [0.25, 0.5, 1.0, 2.0, 5.0],
+  trend_sample_interval: [5, 10, 15, 30, 60, 120, 300],
+};
+
+/** Step for a numeric knob — decimal-aware so floats step finely. */
+function knobStep(knob: Knob): number {
+  if (knob.kind === 'int') return 1;
+  const span = Math.abs((knob.maximum ?? 0) - (knob.minimum ?? 0));
+  // Small ranges (0–5) step by 0.01; larger ranges by 0.1.
+  return span <= 10 ? 0.01 : 0.1;
+}
+
+/** Round a float to a sane number of decimals (avoids 0.30000000000004). */
+function roundValue(value: number, step: number): number {
+  const decimals = step < 0.1 ? 2 : step < 1 ? 2 : 0;
+  return Number(value.toFixed(decimals));
+}
+
+/** Parse a draft string into a number, or null when not a finite number. */
+function parseKnobValue(raw: string | undefined): number | null {
+  if (raw === undefined || raw === '') return null;
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return null;
+  return num;
+}
+
+/** True when the draft value is a finite number inside [min, max]. */
+function isKnobValid(raw: string | undefined, knob: Knob): boolean {
+  const num = parseKnobValue(raw);
+  if (num === null) return raw === '' || raw === undefined;
+  return num >= knob.minimum && num <= knob.maximum;
+}
+
+
+function KnobNumberField({
+  knob,
+  value,
+  onChange,
+}: {
+  knob: Knob;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const step = knobStep(knob);
+  const valid = isKnobValid(value, knob);
+  const presets = KNOB_PRESETS[knob.key] ?? [];
+  const current = Number(value);
+
+  // Stepper: clamp to [min, max] and round to a stable decimal count so the
+  // value never drifts (e.g. 0.30000000000004).
+  const apply = (next: number) => {
+    const clamped = Math.min(Math.max(roundValue(next, step), knob.minimum), knob.maximum);
+    onChange(String(clamped));
+  };
+
+  return (
+    <label className={`${styles.field} ${valid ? '' : styles.fieldInvalid}`}>
+      <span>{knob.key}</span>
+      <div className={styles.numberRow}>
+        <button
+          type="button"
+          className={styles.stepBtn}
+          aria-label={`Kurangi ${knob.key}`}
+          onClick={() => apply((Number.isFinite(current) ? current : knob.minimum) - step)}
+        >
+          −
+        </button>
+        <input
+          type="number"
+          inputMode="decimal"
+          min={knob.minimum}
+          max={knob.maximum}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={() => {
+            // Normalize only on blur (never mid-typing, so the caret is stable
+            // and typing "0.5" is not fought by the input).
+            const num = Number(value);
+            if (Number.isFinite(num)) apply(num);
+          }}
+        />
+        <button
+          type="button"
+          className={styles.stepBtn}
+          aria-label={`Tambah ${knob.key}`}
+          onClick={() => apply((Number.isFinite(current) ? current : knob.minimum) + step)}
+        >
+          +
+        </button>
+      </div>
+      {presets.length > 0 && (
+        <div className={styles.presets}>
+          {presets.map((p) => (
+            <button
+              key={p}
+              type="button"
+              className={`${styles.presetBtn} ${Number(value) === p ? styles.presetActive : ''}`}
+              onClick={() => apply(p)}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      )}
+      {!valid && (
+        <small className={styles.invalidHint}>
+          Nilai harus angka antara {knob.minimum} dan {knob.maximum}.
+        </small>
+      )}
+      <small className={styles.fieldHint}>
+        {knob.description} Rentang {knob.minimum}–{knob.maximum} · dipakai oleh{' '}
+        <code>{knob.applied_to}</code>
+      </small>
+    </label>
+  );
+}
+
 export default function SettingsPage() {
   const [tab, setTab] = useState('Runtime');
   const [notice, setNotice] = useState<Notice>(null);
@@ -165,6 +288,14 @@ export default function SettingsPage() {
         const num = Number(raw);
         if (!Number.isFinite(num)) {
           setNotice({ kind: 'error', text: `Nilai ${knob.key} bukan angka.` });
+          setSaving(false);
+          return;
+        }
+        if (num < knob.minimum || num > knob.maximum) {
+          setNotice({
+            kind: 'error',
+            text: `Nilai ${knob.key} harus antara ${knob.minimum} dan ${knob.maximum}.`,
+          });
           setSaving(false);
           return;
         }
@@ -285,24 +416,15 @@ export default function SettingsPage() {
                           </small>
                         </label>
                       ) : (
-                        <label className={styles.field} key={knob.key}>
-                          <span>{knob.key}</span>
-                          <input
-                            type="number"
-                            min={knob.minimum}
-                            max={knob.maximum}
-                            step={knob.key.includes('interval') ? '0.1' : '1'}
-                            value={draft[knob.key] ?? String(knob.value)}
-                            onChange={(e) => {
-                              setDirty(true);
-                              setDraft((d) => ({ ...d, [knob.key]: e.target.value }));
-                            }}
-                          />
-                          <small className={styles.fieldHint}>
-                            {knob.description} Rentang {knob.minimum}–{knob.maximum} · dipakai oleh{' '}
-                            <code>{knob.applied_to}</code>
-                          </small>
-                        </label>
+                        <KnobNumberField
+                          key={knob.key}
+                          knob={knob}
+                          value={draft[knob.key] ?? String(knob.value)}
+                          onChange={(next) => {
+                            setDirty(true);
+                            setDraft((d) => ({ ...d, [knob.key]: next }));
+                          }}
+                        />
                       )
                     )}
                   </div>

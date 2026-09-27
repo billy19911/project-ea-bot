@@ -321,3 +321,82 @@
   border-radius: 4px;
   padding: 1px 4px;
 }
+
+/* Numeric knob control (lot / risk / interval) ---------------------------- */
+/* A stable input row: minus / input / plus + quick presets. Prevents the
+   "ngebug saat ganti angka" behaviour of a bare number input. */
+.numberRow {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.numberRow input {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.stepBtn {
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  width: 38px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  flex: 0 0 auto;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.stepBtn:hover {
+  background: var(--neutral-muted);
+}
+
+.stepBtn:active {
+  transform: translateY(1px);
+}
+
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.presetBtn {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.presetBtn:hover {
+  border-color: var(--primary);
+  color: var(--text);
+}
+
+.presetActive {
+  background: var(--primary-soft, var(--neutral-muted));
+  border-color: var(--primary);
+  color: var(--text);
+}
+
+.fieldInvalid input,
+.fieldInvalid .numberRow input {
+  border-color: var(--danger-border);
+}
+
+.invalidHint {
+  display: block;
+  margin-top: 4px;
+  color: var(--danger);
+  font-size: 12px;
+}
+

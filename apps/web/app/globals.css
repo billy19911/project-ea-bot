@@ -641,6 +641,28 @@ td {
 .pcHistUp { fill: var(--success); opacity: 0.55; }
 .pcHistDown { fill: var(--danger); opacity: 0.55; }
 .pcCrosshair { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.pcCrosshairH { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.85; }
+.pcCrosshairLabel {
+  fill: var(--text);
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Live "Price Now" — an SVG line + tag drawn inside the plot. Only this line
+   moves on a live tick; candles/indicators/viewport are untouched (no flicker). */
+.pcPriceNowGroup { pointer-events: none; }
+.pcPriceNowLine { stroke: var(--text); stroke-width: 1; stroke-dasharray: 4 3; opacity: 0.85; }
+.pcPriceNowTagBox { fill: var(--text); }
+.pcPriceNowTagBox.up { fill: var(--success); }
+.pcPriceNowTagBox.down { fill: var(--danger); }
+.pcPriceNowTagText {
+  fill: var(--surface);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
 
 .pcLevelLine { stroke-width: 1.4; stroke-dasharray: 6 3; }
 .pcLevelLabel { font-size: 10.5px; font-weight: 600; font-family: var(--font-mono); }
