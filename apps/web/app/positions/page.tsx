@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { DataTable } from '@/components/ui/data-table';
 import { Card } from '@/components/ui/card';
 import { apiFetch } from '@/lib/api';
+import { errorMessageFor } from '@/lib/useApiData';
 import { useAutoRefresh } from '@/lib/useAutoRefresh';
 
 type Position = {
@@ -39,33 +40,69 @@ export default function PositionsPage() {
   const [rows, setRows] = useState<Position[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [mode, setMode] = useState<'PAPER' | 'LIVE'>('PAPER');
+
+  const loadInfo = useCallback(async () => {
+    try {
+      const res = await apiFetch('/mt5/mode');
+      if (!res.ok) return;
+      const data = await res.json();
+      setMode(data.live_data === true ? 'LIVE' : 'PAPER');
+    } catch {}
+  }, []);
 
   const load = useCallback(async () => {
     try {
       const res = await apiFetch('/positions');
       if (!res.ok) {
-        setError(res.status === 503 ? 'Python service unavailable.' : `Request failed (${res.status})`);
+        setError(errorMessageFor(res.status));
         return;
       }
       const data = await res.json();
       setRows(Array.isArray(data.positions) ? data.positions : []);
       setError(null);
     } catch {
-      setError('Could not reach the API.');
+      setError(errorMessageFor(0));
     } finally {
       setLoaded(true);
     }
   }, []);
 
-  useAutoRefresh(load);
+  useAutoRefresh(load, 10_000);
+
+  // Load mode once on mount
+  useEffect(() => {
+    loadInfo();
+  }, [loadInfo]);
 
   return (
-    <AppShell activeKey="positions" eyebrow="Xynn / Positions" title="Positions" actions={null}>
+    <AppShell activeKey="positions" eyebrow="Xynn / Positions" title="Open Positions" actions={null}>
       {error && <div style={{ marginBottom: 12, color: 'var(--danger)' }}>{error}</div>}
-      <Card title="Open Positions" description="Current open positions">
-        <DataTable columns={columns} rows={rows} unitLabel="positions" />
+      
+      <Card title="Position Info" description={`MT5 Mode: ${mode} • Live Data Status`} noPadding>
+        <div className="px-4 py-2 text-sm">
+          <div className="flex gap-3 text-[var(--text-muted)]">
+            <span>Status:</span>
+            <span className={mode === 'LIVE' ? 'trendUp' : 'mono'}>
+              {mode === 'LIVE' ? 'Live broker data attached' : 'Paper / simulated session'}
+            </span>
+          </div>
+        </div>
       </Card>
-      {!loaded && <p style={{ marginTop: 12 }}>Loading…</p>}
+
+      <br />
+      
+      <Card title="Open Positions" description={`${rows.length} positions currently open`}>
+        {loaded && rows.length === 0 && !error ? (
+          <p className="text-center text-[var(--text-muted)] py-6">
+            {mode === 'LIVE' 
+              ? 'No open positions right now — check the Broker tab or place a manual order.' 
+              : 'Paper account is in simulation mode; no real positions available.'}
+          </p>
+        ) : (
+          <DataTable columns={columns} rows={rows} unitLabel="position" />
+        )}
+      </Card>
     </AppShell>
   );
 }

@@ -5,6 +5,7 @@ import AppShell from '@/components/AppShell';
 import { DataTable } from '@/components/ui/data-table';
 import { Card } from '@/components/ui/card';
 import { apiFetch } from '@/lib/api';
+import { errorMessageFor } from '@/lib/useApiData';
 import { useAutoRefresh } from '@/lib/useAutoRefresh';
 
 type Order = {
@@ -42,14 +43,14 @@ export default function OrdersPage() {
     try {
       const res = await apiFetch('/orders');
       if (!res.ok) {
-        setError(res.status === 503 ? 'Python service unavailable.' : `Request failed (${res.status})`);
+        setError(errorMessageFor(res.status));
         return;
       }
       const data = await res.json();
       setRows(Array.isArray(data.orders) ? data.orders : []);
       setError(null);
     } catch {
-      setError('Could not reach the API.');
+      setError(errorMessageFor(0));
     } finally {
       setLoaded(true);
     }
@@ -60,10 +61,16 @@ export default function OrdersPage() {
   return (
     <AppShell activeKey="orders" eyebrow="Xynn / Orders" title="Orders" actions={null}>
       {error && <div style={{ marginBottom: 12, color: 'var(--danger)' }}>{error}</div>}
-      <Card title="Orders" description="All recent orders">
-        <DataTable columns={columns} rows={rows} unitLabel="orders" />
+      <Card title="Orders" description="Pending orders at the broker">
+        {loaded && rows.length === 0 && !error ? (
+          <p className="text-center text-[var(--text-muted)] py-6">
+            No pending orders. Market entries execute immediately, so this list is
+            usually empty unless you placed pending (limit/stop) orders.
+          </p>
+        ) : (
+          <DataTable columns={columns} rows={rows} unitLabel="order" />
+        )}
       </Card>
-      {!loaded && <p style={{ marginTop: 12 }}>Loading…</p>}
     </AppShell>
   );
 }

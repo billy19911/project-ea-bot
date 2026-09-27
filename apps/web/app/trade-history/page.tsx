@@ -5,6 +5,7 @@ import { useAutoRefresh } from '@/lib/useAutoRefresh';
 import AppShell from '@/components/AppShell';
 import { DataTable } from '@/components/ui/data-table';
 import { apiFetch } from '@/lib/api';
+import { errorMessageFor } from '@/lib/useApiData';
 
 type Position = {
   ticket: number;
@@ -61,14 +62,14 @@ export default function TradeHistoryPage() {
     try {
       const res = await apiFetch('/positions');
       if (!res.ok) {
-        setError(res.status === 503 ? 'Python service unavailable.' : `Request failed (${res.status})`);
+        setError(errorMessageFor(res.status));
         return;
       }
       const data = await res.json();
       setRows(Array.isArray(data.positions) ? data.positions : []);
       setError(null);
     } catch {
-      setError('Could not reach the API.');
+      setError(errorMessageFor(0));
     } finally {
       setLoaded(true);
     }
@@ -79,13 +80,14 @@ export default function TradeHistoryPage() {
   return (
     <AppShell activeKey="trade-history" eyebrow="Xynn / Trade History" title="Positions & Trades">
       {error && <div style={{ marginBottom: 12, color: 'var(--danger)' }}>{error}</div>}
-      <DataTable
-        columns={columns}
-        rows={rows}
-        pageSize={25}
-        unitLabel="positions"
-      />
-      {!loaded && <p style={{ marginTop: 12 }}>Loading…</p>}
+      {loaded && rows.length === 0 && !error ? (
+        <p className="text-center text-[var(--text-muted)] py-6">
+          No position history yet. Closed trades appear here once the broker
+          reports them; if you have not placed a trade, this stays empty.
+        </p>
+      ) : (
+        <DataTable columns={columns} rows={rows} pageSize={25} unitLabel="position" />
+      )}
     </AppShell>
   );
 }
