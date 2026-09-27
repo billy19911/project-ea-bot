@@ -163,3 +163,28 @@ export function fmtTime(value: unknown, placeholder = '—'): string {
   const p = (n: number) => String(n).padStart(2, '0');
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
+
+/**
+ * formatDetails — render an arbitrary audit/metadata value safely as text.
+ *
+ * API `details` fields are often JSON objects/arrays (e.g. a reconciliation
+ * summary). Rendering those directly as a React child throws
+ * "Objects are not valid as a React child". This collapses objects to compact
+ * JSON and passes primitives through. Arrays of primitives join with ', '.
+ */
+export function formatDetails(value: unknown, placeholder = '—'): string {
+  if (value === null || value === undefined || value === '') return placeholder;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    if (value.length === 0) return placeholder;
+    if (value.every((v) => typeof v === 'string' || typeof v === 'number')) {
+      return value.join(', ');
+    }
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import { useApiData, fmtDate } from '@/lib/useApiData';
+import { useApiData, fmtDate, formatDetails } from '@/lib/useApiData';
 import styles from '@/components/ops.module.css';
 
 /**
@@ -19,7 +19,7 @@ type AuditEvent = {
   actor?: string;
   action?: string;
   target?: string;
-  details?: string;
+  details?: unknown;
   hash?: string;
 };
 
@@ -106,7 +106,9 @@ export default function AuditPage() {
                       <td>{e.actor ?? '—'}</td>
                       <td>{e.action ?? '—'}</td>
                       <td>{e.target ?? '—'}</td>
-                      <td>{e.details ?? '—'}</td>
+                      <td className={styles.mono}>
+                        {formatDetails(e.details)}
+                      </td>
                       <td className={styles.mono} title={e.hash || ''}>
                         {e.hash ? `${String(e.hash).slice(0, 12)}…` : '—'}
                       </td>

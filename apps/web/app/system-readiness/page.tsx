@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import AppShell from '../../components/AppShell';
 import { apiFetch } from '../../lib/api';
-import { fmtDateTime } from '../../lib/useApiData';
+import { fmtDateTime, formatDetails } from '../../lib/useApiData';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import Pagination from '../../components/ui/pagination';
 import styles from './page.module.css';
@@ -13,7 +13,7 @@ type Component = {
   status?: string;
   version?: string;
   verified_at?: string;
-  details?: string[] | string;
+  details?: unknown;
 };
 
 // Status → pill class. Colour follows the same semantic vocabulary used
@@ -73,7 +73,7 @@ export default function SystemReadinessPage() {
                 </td>
                 <td>{c.version || '-'} </td>
                 <td>{fmtDateTime(c.verified_at)}</td>
-                <td>{Array.isArray(c.details) ? c.details.join(', ') : c.details || '—'}</td>
+                <td>{formatDetails(c.details)}</td>
               </tr>
             ))}
             {visible.length === 0 && (
