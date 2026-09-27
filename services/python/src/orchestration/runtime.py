@@ -577,6 +577,19 @@ class OrchestrationRuntime:
             lesson_provider = LessonFeedbackProvider(get_lesson_store())
         except Exception as exc:  # noqa: BLE001 - feedback must never block wiring
             logger.warning("Lesson feedback not wired: %s", exc)
+
+        # FOKUS #4: wire the ACTIVE strategy config into the pipeline so
+        # activating a strategy really affects the decision (min_confidence,
+        # risk/confidence knobs) instead of being display-only. Fail-safe.
+        def _strategy_config_provider() -> Optional[dict[str, Any]]:
+            try:
+                from strategy.endpoints import get_active_strategy_config
+
+                return get_active_strategy_config()
+            except Exception as exc:  # noqa: BLE001 - strategy is optional
+                logger.debug("Active strategy config unavailable: %s", exc)
+                return None
+
         # Multi-timeframe entry filter (opt-in). When enabled, an LTF entry
         # fighting a strong HTF bias is vetoed. Default OFF.
         htf_filter_enabled = False
@@ -607,6 +620,7 @@ class OrchestrationRuntime:
             htf_filter_enabled=htf_filter_enabled,
             htf_min_strength=htf_min_strength,
             signal_registry=get_signal_registry(),
+            strategy_config_provider=_strategy_config_provider,
         )
 
     def run_cycle(

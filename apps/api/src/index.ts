@@ -535,7 +535,13 @@ function mapStrategyRecord(py: any): MappedStrategy {
   // Missing metrics stay `null` (never fabricated `0`). The UI renders `—` and
   // an explicit "belum ada backtest" note when no evidence exists.
   const metrics = py?.metrics_summary;
-  const hasMetrics = metrics != null && Object.keys(metrics).length > 0;
+  // A summary carrying real, finite performance numbers counts as evidence; a
+  // NO_DATA / empty summary (no win_rate) does not, so the UI still shows the
+  // honest "belum ada hasil" note instead of a misleading filled table.
+  const hasMetrics =
+    metrics != null &&
+    typeof metrics.win_rate === 'number' &&
+    Number.isFinite(metrics.win_rate);
   const validation = py?.validation_evidence;
   const hasBacktest = Boolean(hasMetrics || (validation != null && Object.keys(validation).length > 0));
   const metric = (value: unknown): number | null =>

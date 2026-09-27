@@ -248,6 +248,7 @@ class TradingPipeline:
         htf_min_strength: float = 0.0,
         signal_registry: Optional[Any] = None,
         pending_signal_guard: bool = True,
+        strategy_config_provider: Optional[Callable[[], Optional[dict[str, Any]]]] = None,
     ) -> None:
         self.supervisor = supervisor
         self.risk_gate = risk_gate
@@ -293,6 +294,12 @@ class TradingPipeline:
         self._signal_registry = signal_registry
         # Master switch for the pending-signal gate (env override honoured).
         self.pending_signal_guard = bool(pending_signal_guard) and is_pending_guard_enabled()
+        # FOKUS #4: strategy config provider. When supplied it returns the ACTIVE
+        # strategy's parameters (from StrategyRegistry); the pipeline applies the
+        # risk/confidence knobs so activating a strategy really changes what the
+        # engine does (not just a display label). Optional → historic behaviour.
+        self._strategy_config_provider = strategy_config_provider
+        self._strategy_config: dict[str, Any] = {}
         # Last SUCCESSFUL entry per (upper-case) symbol: {"price": float,
         # "ts": float}. Blocked/failed entries are never recorded.
         self._last_entries: dict[str, dict[str, float]] = {}
@@ -811,11 +818,12 @@ class TradingPipeline:
             proposal["take_profit"] = proposal["target_tp"]
         return proposal
 
-    @staticmethod
-    def _is_actionable(proposal: dict[str, Any]) -> bool:
+    def _is_actionable(self, proposal: dict[str, Any]) -> bool:
         """Return True only for proposals with an actionable BUY/SELL direction
         and confidence above the minimum threshold.
 
+        The threshold is the ACTIVE strategy's ``min_confidence`` when one is
+        wired (FOKUS #4), else the global ``settings.min_signal_confidence``.
         Fail-closed: missing confidence is treated as 0.0 (not actionable).
         """
         direction = str(proposal.get("direction", "")).upper()
@@ -823,7 +831,38 @@ class TradingPipeline:
             return False
 
         confidence = float(proposal.get("confidence") or 0.0)
-        return confidence >= settings.min_signal_confidence
+        threshold = self._min_signal_confidence()
+        return confidence >= threshold
+
+    def _min_signal_confidence(self) -> float:
+        """Return the actionable-confidence threshold (strategy-aware)."""
+        config = self._strategy_params()
+        try:
+            value = config.get("min_confidence")
+            if value is not None:
+                return float(value)
+        except (TypeError, ValueError):
+            pass
+        return float(settings.min_signal_confidence)
+
+    def _strategy_params(self) -> dict[str, Any]:
+        """Return the active strategy parameters (cached, fail-safe)."""
+        if self._strategy_config:
+            return self._strategy_config
+        if self._strategy_config_provider is None:
+            return {}
+        try:
+            params = self._strategy_config_provider()
+        except Exception as exc:  # noqa: BLE001 - strategy must never break a cycle
+            logger.debug("Strategy config provider failed: %s", exc)
+            return {}
+        if isinstance(params, dict):
+            self._strategy_config = params
+            # Surface the active strategy version on the cycle for traceability.
+            version = params.get("version")
+            if version:
+                self.strategy_version = str(version)
+        return self._strategy_config
 
     def _htf_bias_veto(
         self,

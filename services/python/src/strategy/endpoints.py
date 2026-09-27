@@ -133,6 +133,20 @@ async def get_active_strategy() -> Any:
     }
 
 
+@router.get("/performance/summary", summary="Recompute strategy performance from real trades")
+async def refresh_performance() -> dict[str, Any]:
+    """Recompute the active strategy's metrics_summary from real closed trades.
+
+    FOKUS #4: lets the Strategy Center pull fresh win rate / profit factor /
+    sharpe / max DD on demand (the metrics are also refreshed at startup). The
+    path is ``/performance/summary`` so it cannot collide with ``/{strategy_id}``.
+    """
+    from .performance import apply_performance_to_registry
+
+    perf = apply_performance_to_registry(get_strategy_registry())
+    return {"performance": perf, "source": "live"}
+
+
 @router.get("/{strategy_id}", summary="Get a strategy by id")
 async def get_strategy(strategy_id: str) -> Any:
     """Return a single strategy version by its ``strategy_id``."""
@@ -154,9 +168,7 @@ async def set_active(strategy_id: str, body: dict[str, Any]) -> Any:
     """
     active = body.get("active") if isinstance(body, dict) else None
     if not isinstance(active, bool):
-        return JSONResponse(
-            status_code=400, content={"error": "active must be boolean"}
-        )
+        return JSONResponse(status_code=400, content={"error": "active must be boolean"})
 
     registry = get_strategy_registry()
     target = next(
@@ -224,9 +236,7 @@ async def create_strategy(body: dict[str, Any]) -> Any:
 
     parameters = body.get("parameters", {})
     if not isinstance(parameters, dict):
-        return JSONResponse(
-            status_code=400, content={"error": "parameters must be an object"}
-        )
+        return JSONResponse(status_code=400, content={"error": "parameters must be an object"})
     description = body.get("description", "")
     if not isinstance(description, str):
         description = ""
@@ -271,33 +281,23 @@ async def edit_strategy(strategy_id: str, body: dict[str, Any]) -> Any:
     # ``parameters`` on an ACTIVE strategy does not leave a partial edit behind.
     description = body.get("description")
     if description is not None and not isinstance(description, str):
-        return JSONResponse(
-            status_code=400, content={"error": "description must be a string"}
-        )
+        return JSONResponse(status_code=400, content={"error": "description must be a string"})
 
     risk_policy = body.get("risk_policy")
     if risk_policy is not None and not isinstance(risk_policy, dict):
-        return JSONResponse(
-            status_code=400, content={"error": "risk_policy must be an object"}
-        )
+        return JSONResponse(status_code=400, content={"error": "risk_policy must be an object"})
 
     compatible_regimes = body.get("compatible_regimes")
     if compatible_regimes is not None and not isinstance(compatible_regimes, list):
-        return JSONResponse(
-            status_code=400, content={"error": "compatible_regimes must be a list"}
-        )
+        return JSONResponse(status_code=400, content={"error": "compatible_regimes must be a list"})
 
     rationale = body.get("rationale")
     if rationale is not None and not isinstance(rationale, str):
-        return JSONResponse(
-            status_code=400, content={"error": "rationale must be a string"}
-        )
+        return JSONResponse(status_code=400, content={"error": "rationale must be a string"})
 
     parameters = body.get("parameters")
     if parameters is not None and not isinstance(parameters, dict):
-        return JSONResponse(
-            status_code=400, content={"error": "parameters must be an object"}
-        )
+        return JSONResponse(status_code=400, content={"error": "parameters must be an object"})
     if parameters is not None and is_active:
         return JSONResponse(
             status_code=409,

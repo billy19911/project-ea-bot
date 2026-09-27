@@ -302,6 +302,17 @@ async def lifespan(app: FastAPI):
     # (EPIC 13) — idempotent, so a warm reload does not duplicate it.
     register_live_strategy()
 
+    # FOKUS #4: populate the active strategy's metrics_summary from REAL closed
+    # trades so the Strategy Center shows win rate / profit factor / sharpe /
+    # max DD instead of "—". Fail-safe: never blocks startup.
+    try:
+        from .strategy.endpoints import get_strategy_registry
+        from .strategy.performance import apply_performance_to_registry
+
+        apply_performance_to_registry(get_strategy_registry())
+    except Exception as exc:  # noqa: BLE001 - metrics are advisory
+        logger.warning("Strategy performance backfill skipped: %s", exc)
+
     # Runtime settings (UI/UX ide #7): stored operator values win over the
     # environment default and are pushed into the live objects now. Runs even
     # when the scheduler is disabled — the supervisor knob still applies.
