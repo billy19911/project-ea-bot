@@ -107,13 +107,16 @@ class MoneyManager:
         ``atr_value`` is given, otherwise from ``pips * point_value``.
         For longs the SL is below and TP above the entry; for shorts the reverse.
 
-        The ``spread`` is applied to the effective entry for longs only: a BUY
-        fills at the ask (``entry_price + spread``), so both the stop-loss and
-        the take-profit shift up with the spread. A SELL fills at the bid
-        (``entry_price``), so the levels are unchanged.
+        The ``spread`` is applied to the *effective fill price*, which is the
+        side the order actually executes on — this matters on wide-spread
+        symbols (BTC): a BUY fills at the ask (``entry_price + spread``) and a
+        SELL fills at the bid (``entry_price - spread``). In both cases the
+        SL/TP are anchored to the fill, not the mid, so the levels never sit
+        inside the spread. Both shifts move *against* the trader, which is the
+        honest, conservative behaviour: you pay the spread on entry either way.
 
         Args:
-            entry_price: Entry price.
+            entry_price: Entry price (mid/last).
             direction: 'long' or 'short'.
             atr_value: ATR value used as the base distance.
             sl_multiplier: ATR multiplier for the stop-loss distance.
@@ -146,13 +149,17 @@ class MoneyManager:
             risk_distance = pips * point_value
             reward_distance = pips * tp_multiplier * point_value
 
+        spread = max(spread, 0.0)
         if direction == "long":
-            effective_entry = entry_price + max(spread, 0.0)
+            # BUY fills at the ask → both SL and TP shift up by the spread.
+            effective_entry = entry_price + spread
             sl_price = effective_entry - risk_distance
             tp_price = effective_entry + reward_distance
         else:
-            sl_price = entry_price + risk_distance
-            tp_price = entry_price - reward_distance
+            # SELL fills at the bid → both SL and TP shift down by the spread.
+            effective_entry = entry_price - spread
+            sl_price = effective_entry + risk_distance
+            tp_price = effective_entry - reward_distance
 
         return sl_price, tp_price
 

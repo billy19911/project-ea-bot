@@ -27,8 +27,13 @@ class TestSpreadAwareSLTP:
         assert sl == pytest.approx(expected_sl, rel=1e-9)
         assert tp == pytest.approx(expected_tp, rel=1e-9)
 
-    def test_short_unaffected_by_spread(self):
-        """SELL: SL/TP dihitung dari bid-side (tidak ada geser)."""
+    def test_short_shifted_down_by_spread(self):
+        """SELL: SL/TP dihitung dari bid-side (entry - spread).
+
+        Previously shorts ignored the spread, so on wide-spread symbols (BTC)
+        the SL/TP could sit inside the spread. The fix anchors a SELL to its
+        real bid fill (entry - spread), symmetric to the BUY ask shift.
+        """
         entry, atr, spread = 100.0, 10.0, 2.0
         sl, tp = self.mm.calculate_sl_tp(
             entry_price=entry,
@@ -36,11 +41,22 @@ class TestSpreadAwareSLTP:
             atr_value=atr,
             spread=spread,
         )
-        # Short: effective_entry = entry (tanpa geser)
-        expected_sl = entry + atr * 1.5  # 100 + 15 = 115
-        expected_tp = entry - atr * 3.0  # 100 - 30 = 70
+        # Short: effective_entry = entry - spread = 98
+        expected_sl = entry - spread + atr * 1.5  # 98 + 15 = 113
+        expected_tp = entry - spread - atr * 3.0  # 98 - 30 = 68
         assert sl == pytest.approx(expected_sl, rel=1e-9)
         assert tp == pytest.approx(expected_tp, rel=1e-9)
+
+    def test_short_unaffected_by_zero_spread(self):
+        """SELL dengan spread=0 tetap seperti perilaku lama."""
+        sl, tp = self.mm.calculate_sl_tp(
+            entry_price=100.0,
+            direction="short",
+            atr_value=10.0,
+            spread=0.0,
+        )
+        assert sl == pytest.approx(115.0, rel=1e-9)  # 100 + 15
+        assert tp == pytest.approx(70.0, rel=1e-9)  # 100 - 30
 
     def test_backward_compatible_zero_spread(self):
         """spread=0 mengembalikan perilaku lama tanpa perubahan."""
