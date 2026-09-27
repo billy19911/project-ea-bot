@@ -106,7 +106,7 @@ export default function LearningPage() {
                 </thead>
                 <tbody>
                   {lessons.map((l, i) => (
-                    <tr key={String(l.id ?? i)}>
+                    <tr key={`${String(l.id ?? 'lesson')}-${i}`}>
                       <td className={styles.mono}>{l.id ?? '—'}</td>
                       <td>{l.category || '—'}</td>
                       <td>

@@ -541,7 +541,12 @@ async def learning_analytics() -> dict[str, Any]:
         "supervisor_kpis": None,
         "lessons": [
             {
-                "id": str(lesson.get("trade_id") or lesson.get("id") or f"lesson_{index}"),
+                # Guarantee a unique id: trade_id (from the lesson) can repeat
+                # across lessons (e.g. several lessons for the same trade, or a
+                # shared "T-1" placeholder), so suffix the position to keep the
+                # key stable-and-unique for list rendering.
+                "id": f"{lesson.get('trade_id') or lesson.get('id') or 'lesson'}#{index}",
+                "trade_id": str(lesson.get("trade_id") or ""),
                 "category": str(lesson.get("category") or ""),
                 "outcome": str(lesson.get("outcome") or ""),
                 "symbol": str(lesson.get("symbol") or ""),

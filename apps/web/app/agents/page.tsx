@@ -486,7 +486,7 @@ export default function AgentsPage() {
                   return (
                     <button
                       type="button"
-                      key={d.decision_id || d.event_id || i}
+                      key={`${d.decision_id || d.event_id || 'cycle'}-${i}`}
                       className={`${styles.historyRow} ${isActive ? styles.historyActive : ''}`}
                       onClick={() => setSelected(d)}
                     >
@@ -541,7 +541,7 @@ export default function AgentsPage() {
                   {lessons.length} terbaru dari {totalLessons} pelajaran
                 </p>
                 {lessons.map((lesson, i) => (
-                  <div key={lesson.id || i} className={styles.lesson}>
+                  <div key={`${lesson.id ?? 'lesson'}-${i}`} className={styles.lesson}>
                     <div className={styles.lessonHead}>
                       <span className={outcomeBadgeClass(lesson.outcome)}>
                         {lesson.outcome || '—'}

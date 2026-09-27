@@ -259,3 +259,24 @@ def test_learning_analytics_empty_store_is_honest() -> None:
     assert data["lessons"] == []
     assert data["by_hour"] == []
     assert data["supervisor_kpis"] is None
+
+
+def test_learning_analytics_lesson_ids_are_unique() -> None:
+    """Duplicate trade_ids must still yield unique lesson ids (React keys)."""
+    from agents.analysts.review_agent import InMemoryLessonStore, get_lesson_store, set_lesson_store
+
+    original = get_lesson_store()
+    store = InMemoryLessonStore()
+    # Two lessons sharing the same trade_id (a real duplicate-key hazard).
+    store.add_lesson({"trade_id": "T-1", "outcome": "win", "symbol": "XAUUSD", "lesson": "a"})
+    store.add_lesson({"trade_id": "T-1", "outcome": "loss", "symbol": "XAUUSD", "lesson": "b"})
+    set_lesson_store(store)
+    try:
+        resp = client.get("/learning/analytics")
+    finally:
+        set_lesson_store(original)
+
+    assert resp.status_code == 200
+    ids = [item["id"] for item in resp.json()["lessons"]]
+    assert len(ids) == 2
+    assert len(set(ids)) == len(ids), "lesson ids must be unique"
