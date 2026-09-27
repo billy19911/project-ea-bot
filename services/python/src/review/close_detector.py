@@ -83,7 +83,7 @@ class PositionCloseDetector:
         side = str(position.get("side", "") or "").upper()
         # Map to the position's direction (side) for review normalisation.
         direction = side if side in ("BUY", "SELL") else "BUY"
-        return {
+        record = {
             "trade_id": position.get("ticket"),
             "ticket": position.get("ticket"),
             "symbol": position.get("symbol", ""),
@@ -98,8 +98,30 @@ class PositionCloseDetector:
             "close_price": float(
                 position.get("price_current", position.get("price_open", 0.0)) or 0.0
             ),
-            "pnl": float(position.get("profit", position.get("unrealized_pnl", 0.0)) or 0.0),
+            "pnl": float(
+                position.get("profit", position.get("unrealized_pnl", 0.0)) or 0.0
+            ),
         }
+        # T3b: attach the entry-time decision context (agent outputs / news
+        # events / regime) registered when the entry was executed, so the
+        # learning loops in the review callback have the raw material they
+        # need. Fail-safe: a missing entry simply leaves the record as-is.
+        try:
+            from .entry_context import get_entry_context
+
+            ctx = get_entry_context(position.get("ticket"))
+        except Exception:  # noqa: BLE001 - the bridge is best-effort
+            ctx = {}
+        if ctx:
+            if not record.get("symbol") and ctx.get("symbol"):
+                record["symbol"] = ctx["symbol"]
+            if ctx.get("agent_outputs"):
+                record["agent_outputs"] = ctx["agent_outputs"]
+            if ctx.get("news_events"):
+                record["news_events"] = ctx["news_events"]
+            if ctx.get("regime"):
+                record["regime"] = ctx["regime"]
+        return record
 
     def _fire(self, record: dict[str, Any]) -> None:
         if self._on_close is None:
@@ -107,4 +129,6 @@ class PositionCloseDetector:
         try:
             self._on_close(record)
         except Exception as exc:  # noqa: BLE001 - never break the caller's loop
-            logger.warning("Position-close hook failed for %s: %s", record.get("trade_id"), exc)
+            logger.warning(
+                "Position-close hook failed for %s: %s", record.get("trade_id"), exc
+            )

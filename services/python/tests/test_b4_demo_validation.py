@@ -115,13 +115,26 @@ class FakeMT5:
     ORDER_TYPE_BUY = 0
     ORDER_TYPE_SELL = 1
     ORDER_TIME_GTC = 0
+    TIMEFRAME_H1 = 16385
 
-    def __init__(self, *, account=None, tick=None, symbol_info=None, init_ok=True):
+    _DEFAULT_RATES = [
+        {
+            "high": 60500.0 + i * 100,
+            "low": 59500.0 + i * 100,
+            "close": 60000.0 + i * 100,
+        }
+        for i in range(15)
+    ]
+
+    def __init__(
+        self, *, account=None, tick=None, symbol_info=None, init_ok=True, rates=None
+    ):
         self._account = account if account is not None else FakeAccount()
         self._tick = tick if tick is not None else FakeTick()
         self._symbol_info = symbol_info if symbol_info is not None else FakeSymbolInfo()
         self._init_ok = init_ok
         self._positions = []
+        self._rates = rates if rates is not None else self._DEFAULT_RATES
         self.initialized = False
         self.shutdown_called = False
         self.order_check_calls = 0
@@ -143,6 +156,9 @@ class FakeMT5:
     def symbol_info(self, symbol):
         return self._symbol_info
 
+    def copy_rates_from_pos(self, symbol, timeframe, start, count):
+        return self._rates
+
     def positions_get(self, ticket=None):
         if ticket is None:
             return list(self._positions)
@@ -157,6 +173,9 @@ class FakeMT5:
         self.order_send_calls += 1
         self.last_send_payload = payload
         pos = FakePosition()
+        # A real fill carries the requested SL/TP onto the position.
+        pos.sl = payload.get("sl", 0.0)
+        pos.tp = payload.get("tp", 0.0)
         self._positions.append(pos)
         return FakeSendResult(order=pos.ticket)
 
@@ -1127,3 +1146,129 @@ def test_recovery_unknown_stage_raises(evidence_paths):
     h = _make_recovery_harness(FakeProviders(), FakeArmStateTerminals())
     with pytest.raises(harness_mod.ValidationAbort, match="unknown recovery stage"):
         h.run_recovery_check("bogus")
+
+
+# ---------------------------------------------------------------------------
+# SL/TP integration (B-4 plan: SL = ATR*1.5, TP = ATR*3.0)
+# ---------------------------------------------------------------------------
+
+
+def _expected_sl_tp(rates, ask, digits):
+    """Compute expected SL/TP from fake rates using the SAME helpers."""
+    from src.risk.money_management import MoneyManager
+    from src.trading.indicators import atr as _atr
+
+    highs = [float(r["high"]) for r in rates]
+    lows = [float(r["low"]) for r in rates]
+    closes = [float(r["close"]) for r in rates]
+    atr_val = _atr(highs, lows, closes, 14)
+    sl, tp = MoneyManager().calculate_sl_tp(
+        entry_price=ask,
+        direction="long",
+        atr_value=atr_val,
+    )
+    return round(sl, digits), round(tp, digits), atr_val
+
+
+def test_build_request_has_nonzero_sl_tp(evidence_paths):
+    """OrderRequest carries sl != 0.0 and tp != 0.0 from the MoneyManager formula."""
+    mt5 = FakeMT5()
+    h = _make_harness(mt5, dry_run=True)
+    code = h.run()
+    assert code == 0
+    expected_sl, expected_tp, _ = _expected_sl_tp(
+        FakeMT5._DEFAULT_RATES,
+        FakeTick().ask,
+        FakeSymbolInfo().digits,
+    )
+    assert h.evidence["request"]["sl"] == expected_sl
+    assert h.evidence["request"]["tp"] == expected_tp
+    assert expected_sl != 0.0
+    assert expected_tp != 0.0
+
+
+def test_order_check_payload_carries_sl_tp(evidence_paths):
+    """The order_check payload sent to MT5 must carry sl/tp from the request."""
+    mt5 = FakeMT5()
+    h = _make_harness(mt5, dry_run=True)
+    assert h.run() == 0
+    expected_sl, expected_tp, _ = _expected_sl_tp(
+        FakeMT5._DEFAULT_RATES,
+        FakeTick().ask,
+        FakeSymbolInfo().digits,
+    )
+    assert mt5.last_check_payload["sl"] == expected_sl
+    assert mt5.last_check_payload["tp"] == expected_tp
+
+
+def test_evidence_request_contains_sl_tp(evidence_paths):
+    """evidence["request"] must include sl, tp, and atr keys."""
+    mt5 = FakeMT5()
+    h = _make_harness(mt5, dry_run=True)
+    assert h.run() == 0
+    assert "sl" in h.evidence["request"]
+    assert "tp" in h.evidence["request"]
+    assert "atr" in h.evidence["request"]
+    assert h.evidence["request"]["sl"] != 0.0
+    assert h.evidence["request"]["tp"] != 0.0
+
+
+def test_atr_unresolvable_aborts_fail_closed(evidence_paths):
+    """Missing/empty rates → abort with fail-closed message, no order_check."""
+    mt5 = FakeMT5(rates=[])
+    h = _make_harness(mt5, dry_run=True)
+    code = h.run()
+    assert code == 2
+    assert "cannot resolve ATR for SL/TP (fail-closed)" in h.evidence["abort_reason"]
+    assert mt5.order_check_calls == 0
+
+
+def test_atr_none_rates_aborts_fail_closed(evidence_paths):
+    """copy_rates_from_pos returns None → abort with fail-closed message."""
+    mt5 = FakeMT5(rates=None)
+    mt5.copy_rates_from_pos = lambda *a: None
+    h = _make_harness(mt5, dry_run=True)
+    code = h.run()
+    assert code == 2
+    assert "cannot resolve ATR for SL/TP (fail-closed)" in h.evidence["abort_reason"]
+    assert mt5.order_check_calls == 0
+
+
+def test_verify_fill_sl_tp_match(evidence_paths, monkeypatch):
+    """_verify_fill records sl_tp_attach.matched=True when position SL/TP match."""
+    mt5 = FakeMT5()
+    terms = FakeTerminals()
+    _patch_native_engine(monkeypatch, mt5, terms)
+    h = _make_harness(mt5, terminals=terms)
+    code = h.run()
+    assert code == 0
+    assert "sl_tp_attach" in h.evidence
+    assert h.evidence["sl_tp_attach"]["matched"] is True
+    assert h.evidence["sl_tp_attach"]["requested"]["sl"] != 0.0
+    assert h.evidence["sl_tp_attach"]["requested"]["tp"] != 0.0
+
+
+def test_verify_fill_sl_tp_mismatch_warns_no_abort(evidence_paths, monkeypatch):
+    """SL/TP mismatch logs warning and records matched=False but does NOT abort."""
+    mt5 = FakeMT5()
+
+    _orig_send = mt5.order_send
+
+    def _send_with_wrong_sltp(payload):
+        result = _orig_send(payload)
+        mt5._positions[-1].sl = 0.0
+        mt5._positions[-1].tp = 0.0
+        return result
+
+    mt5.order_send = _send_with_wrong_sltp
+
+    terms = FakeTerminals()
+    _patch_native_engine(monkeypatch, mt5, terms)
+    h = _make_harness(mt5, terminals=terms)
+    code = h.run()
+    assert code == 0
+    assert h.evidence["sl_tp_attach"]["matched"] is False
+    assert h.evidence["result"] == "filled"
+    fill_step = [s for s in h.steps if s.name == "fill_verify_sl_tp"]
+    assert fill_step
+    assert fill_step[0].ok is False

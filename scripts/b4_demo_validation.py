@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import platform
 import sys
@@ -386,25 +387,76 @@ class DemoValidationHarness:
             )
         return float(vol)
 
+    def _resolve_atr(self) -> float:
+        """Resolve the H1 ATR used for SL/TP, fail-closed.
+
+        Uses the SAME indicator as production (``src.trading.indicators.atr``)
+        over H1 bars fetched from the terminal — no separate formula and no
+        guessing. Missing/empty rates or a non-positive ATR aborts the run:
+        we never submit an order without a stop-loss/take-profit.
+
+        Returns:
+            The latest ATR value (strictly > 0).
+
+        Raises:
+            ValidationAbort: When bars or a usable ATR cannot be resolved.
+        """
+        mt5 = self.mt5
+        rates = mt5.copy_rates_from_pos(self.symbol, mt5.TIMEFRAME_H1, 0, 15)
+        if rates is None or len(rates) == 0:
+            raise ValidationAbort("cannot resolve ATR for SL/TP (fail-closed)")
+        highs = [float(r["high"]) for r in rates]
+        lows = [float(r["low"]) for r in rates]
+        closes = [float(r["close"]) for r in rates]
+
+        from src.trading.indicators import atr
+
+        atr_value = atr(highs, lows, closes, 14)
+        if atr_value is None or atr_value <= 0:
+            raise ValidationAbort("cannot resolve ATR for SL/TP (fail-closed)")
+        return float(atr_value)
+
     def _build_request(self, symbol_info: Any) -> Any:
         from src.execution.engine import OrderRequest
+        from src.risk.money_management import MoneyManager
 
         volume = self._resolve_volume(symbol_info)
+        digits = int(getattr(symbol_info, "digits", 2) or 2)
+        self._digits = digits
+        entry_price = float(self._tick.ask)
+
+        atr_value = self._resolve_atr()
+        sl, tp = MoneyManager().calculate_sl_tp(
+            entry_price=entry_price,
+            direction="long",
+            atr_value=atr_value,
+        )
+        sl = round(float(sl), digits)
+        tp = round(float(tp), digits)
+
         request = OrderRequest(
             symbol=self.symbol,
             order_type="BUY",
             volume=volume,
             price=0.0,
+            sl=sl,
+            tp=tp,
             magic=B4_MAGIC,
             comment=B4_COMMENT,
         )
         # Stamp the gate-issued approval token exactly like the pipeline does
         # (``pipeline.py``: ``request.approval_token = f"gate:{decision_id}"``).
         request.approval_token = f"gate:b4-t1-{int(time.time())}"
+        # Expose the built request to the pre-submit order_check so both carry
+        # the SAME SL/TP (the payload must never silently fall back to 0.0).
+        self._request = request
         self.evidence["request"] = {
             "symbol": self.symbol,
             "order_type": "BUY",
             "volume": volume,
+            "sl": sl,
+            "tp": tp,
+            "atr": atr_value,
             "magic": B4_MAGIC,
             "comment": B4_COMMENT,
             "idempotency_key": request.idempotency_key,
@@ -417,14 +469,17 @@ class DemoValidationHarness:
         mt5 = self.mt5
         tick = self._tick
         volume = self._resolve_volume(symbol_info)
+        request = getattr(self, "_request", None)
+        sl = float(getattr(request, "sl", 0.0)) if request is not None else 0.0
+        tp = float(getattr(request, "tp", 0.0)) if request is not None else 0.0
         payload = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": self.symbol,
             "volume": volume,
             "type": mt5.ORDER_TYPE_BUY,
             "price": tick.ask,
-            "sl": 0.0,
-            "tp": 0.0,
+            "sl": sl,
+            "tp": tp,
             "magic": B4_MAGIC,
             "comment": B4_COMMENT,
             "type_time": mt5.ORDER_TIME_GTC,
@@ -558,6 +613,33 @@ class DemoValidationHarness:
                     self._record(
                         "fill_verify", True, f"position ticket={ticket} confirmed OPEN"
                     )
+                    req = getattr(self, "_request", None)
+                    if req is not None:
+                        digits = int(getattr(self, "_digits", 2))
+                        observed_sl = round(float(getattr(pos, "sl", 0.0)), digits)
+                        observed_tp = round(float(getattr(pos, "tp", 0.0)), digits)
+                        req_sl = round(float(req.sl), digits)
+                        req_tp = round(float(req.tp), digits)
+                        matched = observed_sl == req_sl and observed_tp == req_tp
+                        self.evidence["sl_tp_attach"] = {
+                            "requested": {"sl": req_sl, "tp": req_tp},
+                            "observed": {"sl": observed_sl, "tp": observed_tp},
+                            "matched": matched,
+                        }
+                        if not matched:
+                            logging.getLogger(__name__).warning(
+                                "SL/TP mismatch: requested sl=%s tp=%s, observed sl=%s tp=%s",
+                                req_sl,
+                                req_tp,
+                                observed_sl,
+                                observed_tp,
+                            )
+                        self._record(
+                            "fill_verify_sl_tp",
+                            matched,
+                            f"requested sl={req_sl} tp={req_tp} "
+                            f"observed sl={observed_sl} tp={observed_tp}",
+                        )
                     return pos
             if self.dry_run:
                 break
@@ -1427,6 +1509,7 @@ class DemoValidationHarness:
                 return 0
 
             if self.dry_run:
+                self._build_request(symbol_info)
                 self._order_check(symbol_info)
                 self.evidence["result"] = "dry_run_ok"
                 self._write_evidence()

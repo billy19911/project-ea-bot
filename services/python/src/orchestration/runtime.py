@@ -467,15 +467,23 @@ class OrchestrationRuntime:
         # orders so we never count a foreign EA's positions.
         one_entry_policy = True
         entry_magic = 70000
+        entry_cooldown_s = 900.0
+        entry_min_distance_atr = 1.0
         try:
             import os
 
             raw_policy = (os.getenv("ONE_ENTRY_POLICY") or "true").strip().lower()
             one_entry_policy = raw_policy not in {"0", "false", "no", "off"}
             entry_magic = int(os.getenv("ENTRY_MAGIC", "") or 70000)
+            entry_cooldown_s = float(os.getenv("ENTRY_COOLDOWN_S", "") or 900.0)
+            entry_min_distance_atr = float(
+                os.getenv("ENTRY_MIN_DISTANCE_ATR", "") or 1.0
+            )
         except (TypeError, ValueError):
             one_entry_policy = True
             entry_magic = 70000
+            entry_cooldown_s = 900.0
+            entry_min_distance_atr = 1.0
         # Fase 7: prior lessons are summarised into the analysis context
         # (advisory only). Fail-safe — a missing/broken store simply disables
         # feedback without affecting the pipeline.
@@ -498,6 +506,8 @@ class OrchestrationRuntime:
             dependency_guard=execution_guard,
             single_entry_policy=one_entry_policy,
             entry_magic=entry_magic,
+            entry_cooldown_s=entry_cooldown_s,
+            entry_min_distance_atr=entry_min_distance_atr,
         )
 
     def run_cycle(

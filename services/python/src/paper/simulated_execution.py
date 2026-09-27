@@ -65,7 +65,9 @@ class SlippageModel:
     volatility_factor: float = 0.5  # How much volatility affects slippage
     max_slippage: float = 0.001  # Max 10 pips
 
-    def calculate_slippage(self, price: float, volatility: float, is_buy: bool) -> float:
+    def calculate_slippage(
+        self, price: float, volatility: float, is_buy: bool
+    ) -> float:
         """Calculate slippage amount based on volatility.
 
         Slippage is always adverse to the trader:
@@ -166,7 +168,9 @@ class SimulatedExecutionEngine:
         else:
             return base_price - half_spread
 
-    def apply_slippage(self, price: float, volatility: float, is_buy: bool = True) -> float:
+    def apply_slippage(
+        self, price: float, volatility: float, is_buy: bool = True
+    ) -> float:
         """Apply random slippage to price based on volatility.
 
         Args:
@@ -450,19 +454,30 @@ class SimulatedExecutionEngine:
         """Invoke the review auto-trigger for a just-closed position (fail-safe)."""
         try:
             from review.auto_trigger import on_position_closed
+            from review.entry_context import pop_entry_context
 
-            on_position_closed(
-                {
-                    "trade_id": trade_id,
-                    "symbol": symbol,
-                    "direction": position.side,
-                    "entry_price": position.entry_price,
-                    "close_price": close_price,
-                    "pnl": pnl,
-                    "slippage": close_trade.slippage_applied,
-                    "status": "CLOSED",
-                }
-            )
+            trade_result: dict[str, Any] = {
+                "trade_id": trade_id,
+                "symbol": symbol,
+                "direction": position.side,
+                "entry_price": position.entry_price,
+                "close_price": close_price,
+                "pnl": pnl,
+                "slippage": close_trade.slippage_applied,
+                "status": "CLOSED",
+            }
+            # T3b bridge: enrich the close record with the entry-time decision
+            # context (agent outputs / news events / regime) so the learning
+            # loops receive real material. Missing context is a no-op.
+            ticket = getattr(position, "ticket", None)
+            entry_ctx = pop_entry_context(ticket)
+            for key in ("agent_outputs", "news_events", "regime"):
+                if key in entry_ctx and key not in trade_result:
+                    trade_result[key] = entry_ctx[key]
+            if "ticket" not in trade_result and ticket is not None:
+                trade_result["ticket"] = ticket
+
+            on_position_closed(trade_result)
         except Exception as exc:  # pragma: no cover - defensive, never break close
             logger.warning("Auto-review trigger failed for %s: %s", symbol, exc)
 

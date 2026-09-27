@@ -131,7 +131,8 @@ async def lifespan(app: FastAPI):
 
         def _on_review(record) -> None:
             # 1) Persist the lesson (existing behaviour), then
-            # 2) append the review to the edit-in-place signal message.
+            # 2) append the review to the edit-in-place signal message, then
+            # 3) feed the two AI learning loops (agent skill + news patterns).
             try:
                 record_review_lesson(get_lesson_store(), record)
             except Exception:  # noqa: BLE001 - persistence must never break review
@@ -148,6 +149,80 @@ async def lifespan(app: FastAPI):
                 get_signal_lifecycle().on_review(payload)
             except Exception:  # noqa: BLE001 - reporting must never break review
                 logger.warning("Signal review update failed (review continues)")
+
+            # Learning loop 1 — agent pattern memory: record, per agent, whether
+            # its call in that regime/direction was correct. Read defensively:
+            # the review record may be a dict or an object, and the raw close
+            # context (trade_result/agent_outputs) may be absent.
+            try:
+                from agents.agent_memory import get_agent_memory
+
+                trade_result = (
+                    record.get("trade_result") or record.get("result") or {}
+                    if isinstance(record, dict)
+                    else (getattr(record, "trade_result", None) or {})
+                )
+                agent_outputs = (
+                    record.get("agent_outputs", {})
+                    if isinstance(record, dict)
+                    else getattr(record, "agent_outputs", {})
+                )
+                if trade_result and agent_outputs:
+                    direction = str(trade_result.get("direction", "NEUTRAL")).upper()
+                    pnl = float(trade_result.get("pnl", 0.0))
+                    correct = pnl > 0
+                    symbol = str(trade_result.get("symbol", ""))
+                    regime = str(trade_result.get("regime", "unknown"))
+                    mem = get_agent_memory()
+                    for agent_name, agent_data in agent_outputs.items():
+                        conf = (
+                            float(agent_data.get("confidence", 0.0))
+                            if isinstance(agent_data, dict)
+                            else 0.0
+                        )
+                        mem.record_outcome(
+                            agent=agent_name,
+                            direction=direction,
+                            correct=correct,
+                            regime=regime,
+                            confidence=conf,
+                            symbol=symbol,
+                        )
+            except Exception:  # noqa: BLE001 - learning must never break review
+                logger.warning("Agent memory recording failed (review continues)")
+
+            # Learning loop 2 — news pattern memory: record the realised return
+            # for each news/event that framed the trade.
+            try:
+                from market.news_patterns import get_news_pattern_memory
+
+                trade_result = (
+                    record.get("trade_result") or record.get("result") or {}
+                    if isinstance(record, dict)
+                    else (getattr(record, "trade_result", None) or {})
+                )
+                news_events = (
+                    record.get("news_events", [])
+                    if isinstance(record, dict)
+                    else getattr(record, "news_events", [])
+                )
+                if trade_result and news_events:
+                    symbol = str(trade_result.get("symbol", ""))
+                    pnl = float(trade_result.get("pnl", 0.0))
+                    nps = get_news_pattern_memory()
+                    for evt in news_events:
+                        if isinstance(evt, dict) and evt.get("title"):
+                            nps.record_outcome(
+                                title=str(evt.get("title", "")),
+                                country=str(evt.get("country", "XX")),
+                                impact=str(evt.get("impact", "low")),
+                                symbol=symbol,
+                                realised_return=pnl,
+                                forecast=str(evt.get("forecast", "")),
+                                actual=str(evt.get("actual", "")),
+                            )
+            except Exception:  # noqa: BLE001 - learning must never break review
+                logger.warning("News pattern recording failed (review continues)")
 
         set_lesson_store(JsonlLessonStore())
         set_auto_trigger(ReviewAutoTrigger(on_review=_on_review))

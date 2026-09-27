@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from .advanced_review import RootCauseClassification, classify_root_cause
@@ -69,7 +69,9 @@ def _to_review_record(trade_result: Any) -> dict[str, Any]:
     close_price = _get(trade_result, "close_price", None)
     if close_price is None:
         close_price = _get(trade_result, "exit_price", None)
-    entry_price = _get(trade_result, "entry_price", _get(trade_result, "open_price", 0.0))
+    entry_price = _get(
+        trade_result, "entry_price", _get(trade_result, "open_price", 0.0)
+    )
 
     direction = _get(trade_result, "direction", None)
     if direction is None:
@@ -81,9 +83,12 @@ def _to_review_record(trade_result: Any) -> dict[str, Any]:
             order_type = str(_get(trade_result, "order_type", "") or "").upper()
             direction = "SELL" if "SELL" in order_type else "BUY"
 
-    trade_id = _get(trade_result, "trade_id", None) or _get(trade_result, "ticket", None)
+    trade_id = _get(trade_result, "trade_id", None) or _get(
+        trade_result, "ticket", None
+    )
     return {
         "trade_id": str(trade_id) if trade_id is not None else "UNKNOWN",
+        "symbol": str(_get(trade_result, "symbol", "") or ""),
         "entry_price": float(entry_price or 0.0),
         "exit_price": float(close_price or 0.0),
         "direction": str(direction or "BUY"),
@@ -91,10 +96,12 @@ def _to_review_record(trade_result: Any) -> dict[str, Any]:
         "agent_outputs": _get(trade_result, "agent_outputs", {}) or {},
         "retries": int(_get(trade_result, "retries", 0) or 0),
         "slippage": float(
-            _get(trade_result, "slippage", _get(trade_result, "slippage_applied", 0.0)) or 0.0
+            _get(trade_result, "slippage", _get(trade_result, "slippage_applied", 0.0))
+            or 0.0
         ),
         "price_history": list(_get(trade_result, "price_history", []) or []),
-        "regime_at_entry": _get(trade_result, "regime_at_entry", None),
+        "regime_at_entry": _get(trade_result, "regime_at_entry", None)
+        or _get(trade_result, "regime", None),
         "regime_at_exit": _get(trade_result, "regime_at_exit", None),
         "news_events": _get(trade_result, "news_events", None),
     }
@@ -107,6 +114,12 @@ class ReviewRecord:
     trade_id: str
     review: TradeReviewResult
     root_cause: RootCauseClassification
+    # Raw close context carried through for the downstream learning loops
+    # (``_on_review`` feeds agent_memory / news_patterns from these). Optional
+    # so existing constructors keep working; empty containers by default.
+    trade_result: dict[str, Any] = field(default_factory=dict)
+    agent_outputs: dict[str, Any] = field(default_factory=dict)
+    news_events: list[Any] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the record to a plain dict."""
@@ -145,7 +158,12 @@ class ReviewAutoTrigger:
         self._max_history = max(1, int(max_history))
         self._history: deque[ReviewRecord] = deque(maxlen=self._max_history)
         self._lock = threading.Lock()
-        self._stats: dict[str, int] = {"triggered": 0, "reviewed": 0, "failed": 0, "skipped": 0}
+        self._stats: dict[str, int] = {
+            "triggered": 0,
+            "reviewed": 0,
+            "failed": 0,
+            "skipped": 0,
+        }
 
     # ------------------------------------------------------------------
     # Public API
@@ -196,7 +214,28 @@ class ReviewAutoTrigger:
             return None
 
         review_record = ReviewRecord(
-            trade_id=record["trade_id"], review=review, root_cause=root_cause
+            trade_id=record["trade_id"],
+            review=review,
+            root_cause=root_cause,
+            trade_result={
+                "trade_id": record["trade_id"],
+                "symbol": record.get("symbol", ""),
+                "direction": record.get("direction", ""),
+                "entry_price": record.get("entry_price", 0.0),
+                "exit_price": record.get("exit_price", 0.0),
+                "pnl": record.get("pnl", 0.0),
+                "regime": record.get("regime_at_entry") or "unknown",
+            },
+            agent_outputs=(
+                dict(record.get("agent_outputs"))
+                if isinstance(record.get("agent_outputs"), dict)
+                else {}
+            ),
+            news_events=(
+                list(record.get("news_events"))
+                if isinstance(record.get("news_events"), (list, tuple))
+                else []
+            ),
         )
         with self._lock:
             self._stats["reviewed"] += 1
@@ -206,7 +245,9 @@ class ReviewAutoTrigger:
             try:
                 self._on_review(review_record)
             except Exception as exc:  # fail-safe
-                logger.warning("on_review callback failed for %s: %s", record["trade_id"], exc)
+                logger.warning(
+                    "on_review callback failed for %s: %s", record["trade_id"], exc
+                )
 
         logger.info(
             "Auto-review complete for trade %s: %s (%s)",

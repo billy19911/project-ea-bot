@@ -364,6 +364,29 @@ class StructureAnalystAgent(BaseAgent):
 
         return order_blocks
 
+    @staticmethod
+    def _classify_zone(
+        current_price: float,
+        swing_high: float,
+        swing_low: float,
+    ) -> dict[str, Any]:
+        """Classify current price as premium, discount, or equilibrium zone."""
+        if swing_high <= swing_low or swing_high <= 0:
+            return {"zone": "unknown", "equilibrium": 0.0, "distance_pct": 0.0}
+        eq = (swing_high + swing_low) / 2.0
+        dist_pct = ((current_price - eq) / (swing_high - swing_low)) * 100.0
+        if current_price > eq:
+            zone = "premium"
+        elif current_price < eq:
+            zone = "discount"
+        else:
+            zone = "equilibrium"
+        return {
+            "zone": zone,
+            "equilibrium": round(eq, 5),
+            "distance_pct": round(dist_pct, 2),
+        }
+
     def _apply_self_improvement(
         self, signal: str, confidence: float, context: dict[str, Any]
     ) -> tuple[float, str]:
@@ -465,6 +488,15 @@ class StructureAnalystAgent(BaseAgent):
                 else "NEUTRAL"
             )
             order_blocks = self._detect_order_blocks(prices, highs, lows)
+
+            # 4b. Zone Classification (premium / discount / equilibrium)
+            zone_sh = pattern_info.get("prior_swing_high") or swing_high
+            zone_sl = pattern_info.get("prior_swing_low") or swing_low
+            zone_classification = self._classify_zone(
+                prices[-1],
+                zone_sh if zone_sh is not None else 0.0,
+                zone_sl if zone_sl is not None else 0.0,
+            )
 
             # 5. Build Key Levels Output
             key_levels: list[dict[str, Any]] = []
@@ -594,6 +626,7 @@ class StructureAnalystAgent(BaseAgent):
                 "swing_high": swing_high,
                 "swing_low": swing_low,
                 "trend_direction": trend,
+                "zone_classification": zone_classification,
                 "metadata": {
                     "ema_20": ema_fast,
                     "ema_50": ema_slow,

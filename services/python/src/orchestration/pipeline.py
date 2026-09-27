@@ -21,6 +21,7 @@ Design guarantees:
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
@@ -238,6 +239,8 @@ class TradingPipeline:
         force_risk_sizing: bool = False,
         single_entry_policy: bool = False,
         entry_magic: int = 70000,
+        entry_cooldown_s: float = 0.0,
+        entry_min_distance_atr: float = 0.0,
     ) -> None:
         self.supervisor = supervisor
         self.risk_gate = risk_gate
@@ -261,6 +264,18 @@ class TradingPipeline:
         # open, new entries for the same account are blocked.
         self.single_entry_policy = bool(single_entry_policy)
         self.entry_magic = int(entry_magic)
+        # Entry cooldown (0.0 = disabled): after a SUCCESSFUL entry for a
+        # symbol, the next entry for that symbol is blocked for this many
+        # seconds. Addresses the "new entry every 2 minutes at almost the same
+        # price" complaint.
+        self.entry_cooldown_s = float(entry_cooldown_s)
+        # Price-distance guard (0.0 = disabled): a new entry must be at least
+        # ``entry_min_distance_atr * ATR`` away from the last entry price for
+        # the same symbol. Needs a positive ATR to apply.
+        self.entry_min_distance_atr = float(entry_min_distance_atr)
+        # Last SUCCESSFUL entry per (upper-case) symbol: {"price": float,
+        # "ts": float}. Blocked/failed entries are never recorded.
+        self._last_entries: dict[str, dict[str, float]] = {}
         # Money manager used to COMPLETE a proposal whose SL/TP/size the synthesis
         # left empty (so an entry command can reach execution). Deterministic;
         # never overrides values the proposal already provides. Default instance
@@ -476,6 +491,27 @@ class TradingPipeline:
             self._finalise(result)
             return result
 
+        # ── Step B5: Entry cooldown + price-distance guard ──────────────
+        # A new entry for the same symbol is blocked when either (a) the last
+        # SUCCESSFUL entry was less than ``entry_cooldown_s`` ago or (b) the
+        # price is closer than ``entry_min_distance_atr * ATR`` to the last
+        # entry price. Fail-open: any error inside the guard is swallowed and
+        # never blocks the cycle.
+        block_reason = None
+        try:
+            block_reason = self._entry_guard_reason(
+                result.symbol, validation, analysis_context
+            )
+        except Exception as exc:  # noqa: BLE001 - fail-open, never block blind
+            logger.debug("Entry cooldown guard skipped: %s", exc)
+        if block_reason:
+            result.status = STATUS_BLOCKED
+            result.risk_reason = block_reason
+            result.add_stage("entry_cooldown", STAGE_BLOCKED, block_reason)
+            result.add_stage("execution", STAGE_SKIPPED, "entry cooldown guard")
+            self._finalise(result)
+            return result
+
         # ── Step C: Execution (only when explicitly approved) ───────────
         if self.execution_engine is None:
             result.status = STATUS_ERROR
@@ -528,6 +564,17 @@ class TradingPipeline:
             STAGE_OK if success else STAGE_ERROR,
             result.execution_result.get("error_message", "") or "executed",
         )
+        if success:
+            # Record the successful entry so the cooldown / price-distance
+            # guard can apply to the NEXT entry for this symbol. Blocked or
+            # failed entries are never recorded (fail-open on a bad price).
+            self._record_entry(result.symbol, proposal, validation)
+            # T3b: remember the entry-time decision context (agent outputs /
+            # news events / regime) keyed by ticket so the close path can
+            # bridge it into the review learning loops. Fail-safe.
+            self._remember_entry_context(
+                exec_result, result, proposal, validation, analysis_context
+            )
         self._finalise(result)
         return result
 
@@ -992,6 +1039,214 @@ class TradingPipeline:
     def _has_own_position(self, positions: Any) -> bool:
         """True when ``positions`` contains a position with our own magic."""
         return self._own_position_ticket(positions) is not None
+
+    def _entry_guard_reason(
+        self,
+        symbol: str,
+        validation: dict[str, Any],
+        analysis_context: dict[str, Any],
+    ) -> Optional[str]:
+        """Return a block reason when the entry guards apply, else ``None``.
+
+        Two independent guards, both keyed by upper-case symbol:
+
+        * **Entry cooldown** (``entry_cooldown_s > 0``): blocked while less
+          than ``entry_cooldown_s`` has elapsed since the last SUCCESSFUL entry.
+        * **Price-distance** (``entry_min_distance_atr > 0``): blocked while
+          the new entry price is closer than ``entry_min_distance_atr * ATR``
+          to the last entry price. Requires a positive ATR — when ATR is
+          unavailable only the distance check is skipped; the time cooldown
+          still applies.
+
+        Only positive evidence blocks; a missing last entry never blocks.
+        """
+        key = str(symbol or "").upper()
+        if not key:
+            return None
+        last = self._last_entries.get(key)
+        if not isinstance(last, dict):
+            return None
+
+        # --- Time cooldown ---------------------------------------------
+        if self.entry_cooldown_s > 0:
+            try:
+                last_ts = float(last.get("ts") or 0.0)
+            except (TypeError, ValueError):
+                last_ts = 0.0
+            remaining = self.entry_cooldown_s - (time.time() - last_ts)
+            if remaining > 0:
+                return f"entry cooldown: {remaining:.0f}s left for {key}"
+
+        # --- Price-distance guard --------------------------------------
+        if self.entry_min_distance_atr > 0:
+            _, atr = extract_price_atr(analysis_context)
+            if atr > 0:
+                try:
+                    last_price = float(last.get("price") or 0.0)
+                except (TypeError, ValueError):
+                    last_price = 0.0
+                new_price = self._entry_price(validation)
+                if last_price > 0 and new_price > 0:
+                    distance = abs(new_price - last_price)
+                    min_dist = self.entry_min_distance_atr * atr
+                    if distance < min_dist:
+                        return (
+                            f"jarak entry terlalu dekat: {distance:.5f} < "
+                            f"{min_dist:.5f} ({self.entry_min_distance_atr}xATR)"
+                        )
+        return None
+
+    @staticmethod
+    def _entry_price(validation: dict[str, Any]) -> float:
+        """Resolve the entry price used in the order (fail-safe → 0.0).
+
+        Prefers the (completed) proposal's ``entry_price``; falls back to the
+        market ask/bid when it is missing or non-positive.
+        """
+        proposal = validation.get("proposal") or {}
+        try:
+            price = float(proposal.get("entry_price") or 0.0)
+        except (TypeError, ValueError):
+            price = 0.0
+        if price > 0:
+            return price
+        market_info = validation.get("market_info") or {}
+        for candidate in (market_info.get("ask"), market_info.get("bid")):
+            try:
+                if candidate and float(candidate) > 0:
+                    return float(candidate)
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+
+    def _record_entry(
+        self,
+        symbol: str,
+        proposal: dict[str, Any],
+        validation: dict[str, Any],
+    ) -> None:
+        """Record a SUCCESSFUL entry so the guards apply to the next cycle.
+
+        Fail-open: a symbol-less or price-less entry is skipped (never records
+        a bogus price); any parse error is swallowed.
+        """
+        try:
+            key = str(symbol or "").upper()
+            if not key:
+                return
+            price = self._entry_price(validation)
+            if price <= 0:
+                price = float(proposal.get("entry_price") or 0.0)
+            if price <= 0:
+                return
+            self._last_entries[key] = {"price": float(price), "ts": time.time()}
+        except Exception as exc:  # noqa: BLE001 - recording is best-effort
+            logger.debug("Entry record skipped: %s", exc)
+
+    def _remember_entry_context(
+        self,
+        exec_result: Any,
+        result: Any,
+        proposal: dict[str, Any],
+        validation: dict[str, Any],
+        analysis_context: dict[str, Any],
+    ) -> None:
+        """T3b: remember entry-time decision context keyed by broker ticket.
+
+        The close path only sees the broker position, so the raw material the
+        learning loops need (agent outputs / news events / regime) is captured
+        HERE — when the entry executes — and bridged into the review record by
+        ``review.close_detector`` when the position later disappears.
+
+        Fail-safe: any error is logged at debug level and swallowed; a failed
+        capture only means the learning loops skip this trade.
+        """
+        try:
+            ticket = getattr(exec_result, "ticket", None)
+            if ticket is None and isinstance(result.execution_result, dict):
+                ticket = result.execution_result.get("ticket")
+            if ticket is None:
+                return
+
+            agent_outputs = (
+                dict(result.agent_results)
+                if isinstance(result.agent_results, dict)
+                else {}
+            )
+
+            # News events: prefer the news context's economic events (mapped to
+            # the shape the news-pattern memory consumes); fall back to an
+            # explicit ``news_events`` list on the analysis context.
+            news_events: list[dict[str, Any]] = []
+            sentiment = analysis_context.get("sentiment")
+            if isinstance(sentiment, dict):
+                raw_events = sentiment.get("economic_events")
+                if isinstance(raw_events, list):
+                    for ev in raw_events:
+                        if not isinstance(ev, dict):
+                            continue
+                        title = ev.get("title") or ev.get("headline")
+                        if not title:
+                            continue
+                        news_events.append(
+                            {
+                                "title": str(title),
+                                "country": str(
+                                    ev.get("country") or ev.get("currency") or "XX"
+                                ),
+                                "impact": str(ev.get("impact") or "low"),
+                                "forecast": str(ev.get("forecast") or ""),
+                                "actual": str(ev.get("actual") or ""),
+                            }
+                        )
+            if not news_events:
+                raw = analysis_context.get("news_events")
+                if isinstance(raw, list):
+                    news_events = [
+                        dict(ev)
+                        for ev in raw
+                        if isinstance(ev, dict) and ev.get("title")
+                    ]
+
+            # Regime: explicit key, else the market snapshot's state fields.
+            regime = str(analysis_context.get("regime") or "").strip()
+            if not regime:
+                market_state = analysis_context.get("market_state")
+                if isinstance(market_state, dict):
+                    regime = str(
+                        market_state.get("regime")
+                        or market_state.get("trend")
+                        or market_state.get("state")
+                        or ""
+                    ).strip()
+            if not regime:
+                regime = "unknown"
+
+            price = self._entry_price(validation)
+            if price <= 0:
+                try:
+                    price = float(proposal.get("entry_price") or 0.0)
+                except (TypeError, ValueError):
+                    price = 0.0
+
+            from review.entry_context import remember_entry_context
+
+            remember_entry_context(
+                ticket,
+                {
+                    "symbol": str(result.symbol or proposal.get("symbol") or ""),
+                    "direction": str(
+                        result.decision or proposal.get("direction") or ""
+                    ),
+                    "agent_outputs": agent_outputs,
+                    "news_events": news_events,
+                    "regime": regime,
+                    "entry_price": float(price),
+                    "ts": time.time(),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - capture is best-effort
+            logger.debug("Entry context capture skipped: %s", exc)
 
     def _risk_fraction(self) -> float:
         """Resolve ``default_risk_pct`` to a FRACTION of equity (0.01 = 1%).
