@@ -507,6 +507,27 @@ def test_simulation_mode_is_explicit_and_labelled(monkeypatch):
     assert result.ticket is not None
 
 
+def test_simulated_tickets_are_unique_within_same_millisecond(monkeypatch):
+    """Audit B8: two simulated fills must never collide on the same ticket.
+
+    The previous generator (``int(time.time()*1000) % 1_000_000``) could return
+    the same ticket for two simulated fills issued in the same millisecond.
+    """
+    import sys
+
+    engine = ExecutionEngine(mt5_connector=None, simulation_mode=True)
+    monkeypatch.setitem(sys.modules, "MetaTrader5", None)
+
+    tickets = set()
+    for i in range(50):
+        req = OrderRequest(symbol="EURUSD", order_type="BUY", volume=1.0, idempotency_key=f"k{i}")
+        result = engine.execute_order(req)
+        assert result.success is True
+        tickets.add(result.ticket)
+
+    assert len(tickets) == 50, "simulated tickets collided"
+
+
 def test_native_send_error_is_reported_not_simulated():
     """A failing native connector must surface the real error, never fake success."""
 

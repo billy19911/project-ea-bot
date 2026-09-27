@@ -177,6 +177,20 @@ class ExecutionEngine:
         # In-memory tracking for pending and completed orders
         self._pending_orders: dict[str, float] = {}
         self._completed_orders: dict[str, ExecutionResult] = {}
+        # Monotonic counter for simulated ticket generation (audit B8): two
+        # simulated fills within the same millisecond must not collide on the
+        # same ticket number.
+        self._sim_ticket_seq = 0
+
+    def _next_simulated_ticket(self) -> int:
+        """Return a unique, monotonically-increasing simulated ticket id.
+
+        Uses a per-instance counter combined with the millisecond clock so that
+        two simulated fills generated in the same millisecond (or in a tight
+        loop) never share a ticket number.
+        """
+        self._sim_ticket_seq = (self._sim_ticket_seq + 1) % 1000
+        return int(time.time() * 1000) % 1_000_000 * 1000 + self._sim_ticket_seq
 
     # ---------------------------------------------------------------------------
     # Execution-quality analytics (PRD §47) — best-effort observability
@@ -837,7 +851,7 @@ class ExecutionEngine:
             )
             return {
                 "success": True,
-                "ticket": int(time.time() * 1000) % 1_000_000,
+                "ticket": self._next_simulated_ticket(),
                 "error_code": 0,
                 "message": "Simulated order execution successful",
                 "price": request.price,
@@ -937,7 +951,7 @@ class ExecutionEngine:
             )
             return {
                 "success": True,
-                "ticket": int(time.time() * 1000) % 1_000_000,
+                "ticket": self._next_simulated_ticket(),
                 "error_code": 0,
                 "message": "Simulated order execution successful",
                 "price": request.price or 1.0850,
