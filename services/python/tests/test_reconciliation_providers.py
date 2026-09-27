@@ -81,6 +81,54 @@ def test_default_providers_noop_when_not_live() -> None:
     assert isinstance(runtime.reconciliation.providers, ReconciliationProviders)
 
 
+def test_executed_order_ledger_carries_identity_for_reconciliation() -> None:
+    """Audit B-4 follow-up: a confirmed order must persist symbol/volume.
+
+    Previously ``set_order(..., POSITION_CONFIRMED)`` recorded only the state,
+    so the reconciliation providers could not match a phantom internal position
+    against the broker book (symbol/volume were missing). The engine now stamps
+    the identity fields so ``internal_positions_from_store`` returns them.
+    """
+    import sys
+
+    from execution import state_machine
+    from execution.engine import ExecutionEngine, OrderRequest
+
+    class _ConfirmingConnector:
+        """Simulated connector that always confirms any ticket it is asked about."""
+
+        def get_symbol_info(self, symbol):  # noqa: D401 - test double
+            return {"symbol": symbol, "volume_min": 0.01, "volume_max": 100.0}
+
+        def get_positions(self):
+            return []
+
+        def positions_get(self, ticket=None):
+            # Confirm the order's own ticket (any positive ticket).
+            return [{"ticket": ticket}] if ticket else []
+
+    state_machine.reset_store()
+    engine = ExecutionEngine(mt5_connector=_ConfirmingConnector(), simulation_mode=True)
+    # Force native MT5 import to fail → deterministic simulated fill.
+    saved = sys.modules.get("MetaTrader5", "missing")
+    sys.modules["MetaTrader5"] = None
+    try:
+        req = OrderRequest(symbol="EURUSD", order_type="BUY", volume=0.25, magic=7)
+        result = engine.execute_order(req)
+    finally:
+        if saved == "missing":
+            sys.modules.pop("MetaTrader5", None)
+        else:
+            sys.modules["MetaTrader5"] = saved
+
+    assert result.success is True
+    positions = internal_positions_from_store(state_machine._order_store)
+    assert len(positions) == 1
+    assert positions[0]["symbol"] == "EURUSD"
+    assert positions[0]["volume"] == 0.25
+    state_machine.reset_store()
+
+
 if __name__ == "__main__":  # pragma: no cover
     import pytest
 

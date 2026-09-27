@@ -3,6 +3,15 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Reconciliation Ledger Identity + Learning Engine 2.0 Wiring + Realistic Backtest
+- **`execution/engine.py` — ledger identity fields**: saat order dikonfirmasi sebagai posisi (`POSITION_CONFIRMED`), engine kini menyimpan `symbol`/`volume`/`magic` (sebelumnya hanya state+ticket). Reconciliation provider (`internal_positions_from_store`) jadi bisa mencocokkan posisi internal vs book broker (menutup gap B-4 follow-up). Jalur `adopted` (retry/lost-response) juga diperbaiki. +1 test end-to-end.
+- **Learning Engine 2.0 (PRD §43) — `learning/engine_v2_store.py` (BARU)**: store JSONL persist untuk `LearningEngineV2` (fail-safe: baris korup di-skip, file tak-bisa-ditulis → cache-only). `learning/feedback.py::record_review_lesson_v2()` menjembatani review → `Lesson` (selalu OBSERVATION; promosi hanya lewat agregasi pola). Di-wire di `main.py` lifespan dan di-rehydrate saat restart. Endpoint `/learning/analytics` kini mengembalikan section `learning_engine_v2` (pattern ter-agregasi + evidence level). **Advisory only** — tidak pernah mengubah parameter strategi live. +6 test.
+- **Research — realistic-cost backtester (PRD §39)**: endpoint `POST /research/experiments/{id}/backtest` menerima flag opsional `realistic: true` yang menjalankan `RealisticBacktester` (spread/slippage/komisi/swap/sizing) dengan sinyal EMA(3/8) yang sama seperti baseline. **Additive**: default (tanpa flag) tetap memakai simulasi price-difference lama. Node proxy meneruskan body apa adanya. +1 test.
+- **`mt5/connection_manager.py`**: `health_check()` async kini meng-offload panggilan blocking ke `asyncio.to_thread` (sebelumnya memblokir event loop sehingga timeout `wait_for` tak berfungsi).
+
+### Verifikasi (batch 2)
+- Python **2424 passed** (dari 2416, +8 test); `black`/`isort`/`flake8` bersih pada file yang diubah. Node API 61 passed; Web `tsc` + lint bersih.
+
 ### Fixed — Audit Komprehensif: Bug, Fail-Closed Hardening, Dead Code & UX
 - **`risk/monitor.py` — leak state MT5**: `_get_account_info()` tidak lagi memanggil `mt5.initialize()` tiap poll (yang tanpa `shutdown()` bisa meng-clobber binding terminal milik konektor utama). Kini membaca via konektor bersama `mt5.connector.get_account_info()` — satu sesi MT5 yang konsisten (fail-safe bila MT5 absen).
 - **`execution/engine.py` — tabrakan ticket simulasi**: generator ticket `int(time.time()*1000) % 1_000_000` diganti `_next_simulated_ticket()` (monotonic counter + ms) sehingga dua fill simulasi dalam milidetik sama tidak pernah bertabrakan. +1 test regresi.

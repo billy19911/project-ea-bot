@@ -492,7 +492,19 @@ class ExecutionEngine:
                         confirmed = self.confirm_execution(ticket)
                         if confirmed:
                             set_order(request.idempotency_key, OrderState.FILLED)
-                            set_order(request.idempotency_key, OrderState.POSITION_CONFIRMED)
+                            # Persist the identity fields the reconciliation
+                            # providers need to match an internal position
+                            # against the broker book (audit B-4 follow-up).
+                            set_order(
+                                request.idempotency_key,
+                                OrderState.POSITION_CONFIRMED,
+                                {
+                                    "ticket": ticket,
+                                    "symbol": request.symbol,
+                                    "volume": request.volume,
+                                    "magic": request.magic,
+                                },
+                            )
 
                         # Sync position state after execution
                         pos_summary = self.sync_position(request.symbol)
@@ -556,7 +568,13 @@ class ExecutionEngine:
                     set_order(
                         request.idempotency_key,
                         OrderState.POSITION_CONFIRMED,
-                        {"ticket": adopted.ticket, "adopted": True},
+                        {
+                            "ticket": adopted.ticket,
+                            "adopted": True,
+                            "symbol": request.symbol,
+                            "volume": request.volume,
+                            "magic": request.magic,
+                        },
                     )
                     self._completed_orders[request.idempotency_key] = adopted
                     logger.warning(

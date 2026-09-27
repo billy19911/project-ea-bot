@@ -7,6 +7,9 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from agents.analysts import (
     FundamentalAnalystAgent,
     MomentumAnalystAgent,
@@ -16,8 +19,6 @@ from agents.analysts import (
 )
 from agents.base import TechnicalAnalystAgent
 from agents.registry import agent_registry
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 from .charting.endpoints import router as charting_router
 from .config import settings
@@ -125,9 +126,31 @@ async def lifespan(app: FastAPI):
     # persistent store. Fail-safe: a wiring error must never block startup.
     try:
         from agents.analysts.review_agent import get_lesson_store, set_lesson_store
-        from learning.feedback import record_review_lesson
+        from learning.engine_v2 import LearningEngineV2
+        from learning.engine_v2_store import JsonlEngineV2Store, set_engine_v2_store
+        from learning.feedback import record_review_lesson, record_review_lesson_v2
         from learning.lesson_store import JsonlLessonStore
         from review.auto_trigger import ReviewAutoTrigger, set_auto_trigger
+
+        # Learning Engine 2.0 (PRD §43): evidence-gated pipeline that turns
+        # reviews into OBSERVATION→…→VALIDATED_FINDING artefacts. Persisted so
+        # the evidence survives restarts; advisory only (never mutates live
+        # strategy parameters). Set up here so `_on_review` can feed it.
+        _learning_engine_v2 = LearningEngineV2()
+        try:
+            _engine_v2_store = JsonlEngineV2Store()
+            set_engine_v2_store(_engine_v2_store)
+            # Rehydrate the engine from the persisted lessons.
+            for _lesson_dict in _engine_v2_store.all_lessons():
+                try:
+                    from learning.engine_v2 import Lesson as _Lesson
+
+                    _learning_engine_v2.record_lesson(_Lesson(**_lesson_dict))
+                except Exception:  # noqa: BLE001 - a bad record must not block startup
+                    continue
+        except Exception:  # noqa: BLE001 - store is optional
+            _engine_v2_store = None
+            logger.warning("Learning Engine v2 store unavailable (in-memory only)")
 
         def _on_review(record) -> None:
             # 1) Persist the lesson (existing behaviour), then
@@ -141,9 +164,7 @@ async def lifespan(app: FastAPI):
                 try:
                     from telegram.signal_lifecycle import get_signal_lifecycle
                 except ImportError:
-                    from .telegram.signal_lifecycle import (
-                        get_signal_lifecycle,  # type: ignore
-                    )
+                    from .telegram.signal_lifecycle import get_signal_lifecycle  # type: ignore
 
                 payload = record.to_dict() if hasattr(record, "to_dict") else record
                 get_signal_lifecycle().on_review(payload)
@@ -223,6 +244,14 @@ async def lifespan(app: FastAPI):
                             )
             except Exception:  # noqa: BLE001 - learning must never break review
                 logger.warning("News pattern recording failed (review continues)")
+
+            # Learning Engine 2.0 (PRD §43) — evidence-gated lesson ingestion.
+            # Each review becomes an OBSERVATION; promotion only happens via
+            # pattern aggregation. Advisory only: never changes live strategy.
+            try:
+                record_review_lesson_v2(_learning_engine_v2, _engine_v2_store, record)
+            except Exception:  # noqa: BLE001 - learning must never break review
+                logger.warning("Learning Engine v2 recording failed (review continues)")
 
         set_lesson_store(JsonlLessonStore())
         set_auto_trigger(ReviewAutoTrigger(on_review=_on_review))
@@ -316,9 +345,7 @@ async def lifespan(app: FastAPI):
         runtime = get_runtime()
         feed = MarketFeedLoop(
             queue=runtime.queue,
-            symbols=[
-                s.strip() for s in settings.market_feed_symbols.split(",") if s.strip()
-            ],
+            symbols=[s.strip() for s in settings.market_feed_symbols.split(",") if s.strip()],
             timeframe=settings.market_feed_timeframe,
             interval_s=settings.market_feed_interval_s,
             event_cooldown_s=settings.market_feed_event_cooldown_s,
@@ -522,9 +549,7 @@ app = FastAPI(
 # site. We therefore always declare explicit origins from CORS_ALLOWED_ORIGINS
 # (comma-separated) and keep credentials enabled only against those origins.
 _cors_origins = [
-    origin.strip()
-    for origin in settings.cors_allowed_origins.split(",")
-    if origin.strip()
+    origin.strip() for origin in settings.cors_allowed_origins.split(",") if origin.strip()
 ]
 app.add_middleware(
     CORSMiddleware,

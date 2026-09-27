@@ -35,6 +35,37 @@ class _Bar:
         self.close = close
 
 
+class _FullBar:
+    """Full OHLC stand-in (needed by the realistic backtester path)."""
+
+    def __init__(self, time, open_, high, low, close) -> None:
+        self.time = time
+        self.open = open_
+        self.high = high
+        self.low = low
+        self.close = close
+
+
+def _full_bars(count: int):
+    from datetime import datetime, timedelta
+
+    bars = []
+    t0 = datetime(2024, 1, 1)
+    price = 2000.0
+    for i in range(count):
+        price += 1.0 if (i % 20) < 10 else -1.0
+        bars.append(
+            _FullBar(
+                time=t0 + timedelta(hours=i),
+                open_=price - 0.5,
+                high=price + 1.0,
+                low=price - 1.0,
+                close=price,
+            )
+        )
+    return bars
+
+
 @pytest.fixture(autouse=True)
 def _reset_engine_state(tmp_path: Path):
     """Give every test a fresh engine + run registry (module-level singletons).
@@ -96,9 +127,7 @@ def test_backtest_provenance_records_requested_vs_actual_bars(monkeypatch):
     class _TimedBar:
         def __init__(self, close: float, idx: int) -> None:
             self.close = close
-            self.time = (
-                datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp() + idx * 3600
-            )
+            self.time = datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp() + idx * 3600
 
     closes = [100.0 + (i % 10) for i in range(120)]
     bars = [_TimedBar(c, i) for i, c in enumerate(closes)]
@@ -119,9 +148,7 @@ def test_backtest_provenance_records_requested_vs_actual_bars(monkeypatch):
 
 
 def test_create_experiment_rejects_inverted_emas():
-    res = client.post(
-        "/research/experiments", json={"fast_ema_period": 10, "slow_ema_period": 5}
-    )
+    res = client.post("/research/experiments", json={"fast_ema_period": 10, "slow_ema_period": 5})
     assert res.status_code == 400
     assert "slow_ema_period" in res.json()["detail"]
 
@@ -170,9 +197,7 @@ def test_backtest_runs_on_real_bars_and_is_json_safe(monkeypatch):
     # Deterministic wave: EMA crossover trades must be produced.
     closes = [100.0 + (i % 10) for i in range(200)]
     monkeypatch.setattr(connector, "is_live_mode", lambda: True)
-    monkeypatch.setattr(
-        connector, "get_ohlc", lambda *a, **k: [_Bar(c) for c in closes]
-    )
+    monkeypatch.setattr(connector, "get_ohlc", lambda *a, **k: [_Bar(c) for c in closes])
     exp_id = _create_experiment()
     res = client.post(
         f"/research/experiments/{exp_id}/backtest",
@@ -207,7 +232,7 @@ def test_backtest_rejects_bad_symbol_and_timeframe(monkeypatch):
     assert bad_symbol.status_code == 400
     bad_tf = client.post(
         f"/research/experiments/{exp_id}/backtest",
-        json={"symbol": "XAUUSD", "timeframe": "H9", "bars": 500},
+        json={"symbol": "XAUUSD", "timeframe": "ZZ", "bars": 500},
     )
     assert bad_tf.status_code == 400
 
@@ -220,12 +245,30 @@ def test_backtest_unknown_experiment_is_404():
     assert res.status_code == 404
 
 
+def test_realistic_backtest_mode_runs_and_is_json_safe(monkeypatch):
+    """PRD §39 realistic-cost engine is reachable via ``realistic: true``."""
+    bars = _full_bars(200)
+    monkeypatch.setattr(connector, "is_live_mode", lambda: True)
+    monkeypatch.setattr(connector, "get_ohlc", lambda *a, **k: bars)
+    exp_id = _create_experiment()
+    res = client.post(
+        f"/research/experiments/{exp_id}/backtest",
+        json={"symbol": "XAUUSD", "timeframe": "H1", "bars": 200, "realistic": True},
+    )
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["ok"] is True
+    assert data["engine"] == "realistic_v2"
+    # Realistic metrics include the PRD §39 set (e.g. profit_factor, sharpe).
+    assert "profit_factor" in data["metrics"]
+    assert "sharpe" in data["metrics"]
+    assert data["provenance"]["engine"] == "realistic_v2"
+
+
 def test_compare_requires_results_and_is_json_safe(monkeypatch):
     closes = [100.0 + (i % 7) for i in range(150)]
     monkeypatch.setattr(connector, "is_live_mode", lambda: True)
-    monkeypatch.setattr(
-        connector, "get_ohlc", lambda *a, **k: [_Bar(c) for c in closes]
-    )
+    monkeypatch.setattr(connector, "get_ohlc", lambda *a, **k: [_Bar(c) for c in closes])
     exp_a = _create_experiment(2, 6)
     exp_b = _create_experiment(5, 15)
 
@@ -260,9 +303,7 @@ def test_ranking_orders_and_splits_insufficient_sample():
 
     engine = get_research_engine()
     hypothesis_id = _ensure_baseline(engine)
-    engine.create_strategy_version(
-        "strong", {"fast_ema_period": 2, "slow_ema_period": 4}
-    )
+    engine.create_strategy_version("strong", {"fast_ema_period": 2, "slow_ema_period": 4})
     engine.create_strategy_version("weak", {"fast_ema_period": 2, "slow_ema_period": 4})
     strong = engine.create_experiment(hypothesis_id, "strong")
     weak = engine.create_experiment(hypothesis_id, "weak")
@@ -337,9 +378,7 @@ def test_backtest_date_range_mode_calls_get_ohlc_range(monkeypatch):
             self.close = close
             self.high = close
             self.low = close
-            self.time = (
-                datetime(2023, 1, 1, tzinfo=timezone.utc).timestamp() + idx * 3600
-            )
+            self.time = datetime(2023, 1, 1, tzinfo=timezone.utc).timestamp() + idx * 3600
 
     closes = [100.0 + (i % 8) for i in range(180)]
     bars = [_TimedBar(c, i) for i, c in enumerate(closes)]

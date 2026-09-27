@@ -551,7 +551,45 @@ async def learning_analytics() -> dict[str, Any]:
         ],
         "by_outcome": by_outcome,
         "total": len(lessons),
+        "learning_engine_v2": _learning_engine_v2_snapshot(),
     }
+
+
+def _learning_engine_v2_snapshot() -> dict[str, Any]:
+    """Evidence-graded Learning Engine 2.0 snapshot (PRD §43).
+
+    Reads the persistent v2 lesson store and aggregates patterns. Fail-safe:
+    any error degrades to an honest ``available: false`` — never raises.
+    """
+    try:
+        from learning.engine_v2 import LearningEngineV2
+        from learning.engine_v2_store import get_engine_v2_store
+
+        store = get_engine_v2_store()
+        if store is None:
+            return {"available": False, "source": "not_wired", "lessons": 0, "patterns": []}
+        records = store.all_lessons()
+        if not records:
+            return {"available": False, "source": "engine_v2_store", "lessons": 0, "patterns": []}
+
+        engine = LearningEngineV2()
+        for record in records:
+            try:
+                from learning.engine_v2 import Lesson
+
+                engine.record_lesson(Lesson(**record))
+            except Exception:  # noqa: BLE001 - skip malformed record
+                continue
+        patterns = [agg.to_dict() for agg in engine.aggregate_patterns()]
+        return {
+            "available": True,
+            "source": "engine_v2_store",
+            "lessons": len(records),
+            "patterns": patterns,
+        }
+    except Exception as exc:  # noqa: BLE001 - a status endpoint must never raise
+        logger.warning("Learning Engine v2 snapshot failed: %s", exc)
+        return {"available": False, "source": "unavailable", "lessons": 0, "patterns": []}
 
 
 # ---------------------------------------------------------------------------

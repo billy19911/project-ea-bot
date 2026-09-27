@@ -19,6 +19,7 @@ real ``trading.indicators.ema``, default 3/8) — it fabricates no results.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import re
@@ -33,6 +34,8 @@ from .engine import BacktestResult, Experiment, ResearchEngine
 from .store import ResearchStore
 
 router = APIRouter(prefix="/research", tags=["research"])
+
+logger = logging.getLogger(__name__)
 
 # Minimum bars for a statistically meaningful backtest + walk-forward split.
 MIN_BARS_FOR_BACKTEST = 60
@@ -85,6 +88,15 @@ class BacktestRequest(BaseModel):
     end_date: str | None = Field(
         default=None,
         description="ISO datetime (UTC): '2024-12-31T23:59:59Z'. Requires start_date.",
+    )
+    realistic: bool = Field(
+        default=False,
+        description=(
+            "When true, run the PRD §39 realistic-cost backtester "
+            "(spread/slippage/commission/swap/position-sizing) instead of the "
+            "built-in price-difference simulation. Additive: default keeps the "
+            "existing behaviour."
+        ),
     )
 
 
@@ -139,9 +151,7 @@ def get_research_engine() -> ResearchEngine:
     global _engine
     with _engine_lock:
         if _engine is None:
-            engine = ResearchEngine(
-                store=ResearchStore(os.environ.get("RESEARCH_STATE_PATH"))
-            )
+            engine = ResearchEngine(store=ResearchStore(os.environ.get("RESEARCH_STATE_PATH")))
             _ensure_baseline(engine)
             _engine = engine
         return _engine
@@ -189,6 +199,67 @@ def _metrics_dict(result: BacktestResult | None) -> dict[str, Any] | None:
     }
 
 
+def _run_realistic_backtest(bars: Any) -> Any:
+    """Run the PRD §39 realistic-cost backtester over real bars.
+
+    Uses the same EMA(3/8) crossover signal as the baseline strategy, so the
+    two engines are comparable. Returns a ``BacktestV2Result`` (with ``.metrics``
+    and ``.trades``) or ``None`` when the bars cannot be converted.
+
+    Additive: this never mutates the built-in simulation path.
+    """
+    try:
+        from trading.indicators import ema_series
+
+        from .backtest_v2 import Bar, RealisticBacktester
+
+        sim_bars: list[Any] = []
+        for bar in bars or []:
+            t = getattr(bar, "time", None)
+            o = getattr(bar, "open", None)
+            h = getattr(bar, "high", None)
+            low = getattr(bar, "low", None)
+            c = getattr(bar, "close", None)
+            if None in (t, o, h, low, c):
+                continue
+            sim_bars.append(
+                Bar(
+                    time=t,
+                    open=float(o),
+                    high=float(h),
+                    low=float(low),
+                    close=float(c),
+                )
+            )
+        if len(sim_bars) < MIN_BARS_FOR_BACKTEST:
+            return None
+
+        closes = [b.close for b in sim_bars]
+        fast = ema_series(closes, 3)
+        slow = ema_series(closes, 8)
+
+        def signal_fn(_bars: Any, i: int) -> int:
+            if i < 2 or i >= len(fast) or i >= len(slow):
+                return 0
+            # ema_series seeds early entries with 0.0 — skip the warm-up so we
+            # never emit a spurious crossover off placeholder values.
+            if min(fast[i], slow[i], fast[i - 1], slow[i - 1]) <= 0.0:
+                return 0
+            crossed_up = fast[i - 1] <= slow[i - 1] and fast[i] > slow[i]
+            crossed_down = fast[i - 1] >= slow[i - 1] and fast[i] < slow[i]
+            if crossed_up:
+                return 1
+            if crossed_down:
+                return -1
+            return 0
+
+        backtester = RealisticBacktester()
+        return backtester.run(sim_bars, signal_fn)
+    except Exception as exc:  # noqa: BLE001 - realistic path is best-effort
+        logger.warning("Realistic backtest failed: %s", exc)
+        return None
+
+
 def _experiment_row(engine: ResearchEngine, experiment: Experiment) -> dict[str, Any]:
     """One experiment as a UI row (with result summary when it exists).
 
@@ -203,9 +274,7 @@ def _experiment_row(engine: ResearchEngine, experiment: Experiment) -> dict[str,
         effective.update(version.parameters)
     effective.update(experiment.parameters)
     parameters = {
-        key: value
-        for key, value in effective.items()
-        if isinstance(value, (int, float, str, bool))
+        key: value for key, value in effective.items() if isinstance(value, (int, float, str, bool))
     }
     return {
         "id": experiment.id,
@@ -293,9 +362,7 @@ def get_overview() -> dict[str, Any]:
     """Real counts + the honest notes the UI must show."""
     engine = get_research_engine()
     experiments = engine.list_experiments()
-    completed = sum(
-        1 for exp in experiments if engine.get_backtest_result(exp.id) is not None
-    )
+    completed = sum(1 for exp in experiments if engine.get_backtest_result(exp.id) is not None)
     hypotheses = engine.list_hypotheses()
     baseline = hypotheses[0] if hypotheses else None
     return {
@@ -374,9 +441,7 @@ def get_experiment_detail(experiment_id: str) -> dict[str, Any]:
     engine = get_research_engine()
     experiment = engine.get_experiment(experiment_id)
     if experiment is None:
-        raise HTTPException(
-            status_code=404, detail=f"Eksperimen tidak ditemukan: {experiment_id}"
-        )
+        raise HTTPException(status_code=404, detail=f"Eksperimen tidak ditemukan: {experiment_id}")
     result = engine.get_backtest_result(experiment_id)
     return {
         "ok": True,
@@ -385,15 +450,12 @@ def get_experiment_detail(experiment_id: str) -> dict[str, Any]:
         "walk_forward": _sanitize(result.walk_forward) if result else None,
         "trades_total": len(result.trades) if result else 0,
         "trades_preview": _sanitize(result.trades[-TRADES_PREVIEW:]) if result else [],
-        "provenance": _RUNS.get(experiment_id)
-        or engine.get_run_provenance(experiment_id),
+        "provenance": _RUNS.get(experiment_id) or engine.get_run_provenance(experiment_id),
     }
 
 
 @router.post("/experiments/{experiment_id}/backtest")
-def run_experiment_backtest(
-    experiment_id: str, payload: BacktestRequest
-) -> dict[str, Any]:
+def run_experiment_backtest(experiment_id: str, payload: BacktestRequest) -> dict[str, Any]:
     """Run a deterministic backtest over REAL bars from the attached terminal.
 
     Sync endpoint on purpose: MT5 reads and the EMA simulation are blocking,
@@ -402,18 +464,14 @@ def run_experiment_backtest(
     engine = get_research_engine()
     experiment = engine.get_experiment(experiment_id)
     if experiment is None:
-        raise HTTPException(
-            status_code=404, detail=f"Eksperimen tidak ditemukan: {experiment_id}"
-        )
+        raise HTTPException(status_code=404, detail=f"Eksperimen tidak ditemukan: {experiment_id}")
 
     symbol = payload.symbol.strip().upper()
     timeframe = payload.timeframe.strip().upper()
     if not _SYMBOL_RE.match(symbol):
         raise HTTPException(status_code=400, detail="Simbol tidak valid.")
     if timeframe not in _TIMEFRAMES:
-        raise HTTPException(
-            status_code=400, detail=f"Timeframe tidak dikenal: {timeframe}"
-        )
+        raise HTTPException(status_code=400, detail=f"Timeframe tidak dikenal: {timeframe}")
 
     from ..mt5 import connector
 
@@ -430,16 +488,14 @@ def run_experiment_backtest(
     use_date_range = payload.start_date is not None and payload.end_date is not None
     if use_date_range:
         try:
-            start_dt = datetime.fromisoformat(
-                payload.start_date.replace("Z", "+00:00")
-            ).replace(tzinfo=None)
-            end_dt = datetime.fromisoformat(
-                payload.end_date.replace("Z", "+00:00")
-            ).replace(tzinfo=None)
-        except (ValueError, AttributeError) as e:
-            raise HTTPException(
-                status_code=400, detail=f"Format tanggal tidak valid: {e}"
+            start_dt = datetime.fromisoformat(payload.start_date.replace("Z", "+00:00")).replace(
+                tzinfo=None
             )
+            end_dt = datetime.fromisoformat(payload.end_date.replace("Z", "+00:00")).replace(
+                tzinfo=None
+            )
+        except (ValueError, AttributeError) as e:
+            raise HTTPException(status_code=400, detail=f"Format tanggal tidak valid: {e}")
         if start_dt >= end_dt:
             raise HTTPException(
                 status_code=400, detail="start_date harus lebih awal dari end_date."
@@ -448,9 +504,7 @@ def run_experiment_backtest(
     else:
         bars = connector.get_ohlc(symbol, timeframe, payload.bars)
 
-    closes = [
-        float(bar.close) for bar in bars if getattr(bar, "close", None) is not None
-    ]
+    closes = [float(bar.close) for bar in bars if getattr(bar, "close", None) is not None]
     highs = [float(bar.high) for bar in bars if getattr(bar, "high", None) is not None]
     lows = [float(bar.low) for bar in bars if getattr(bar, "low", None) is not None]
     if len(closes) < MIN_BARS_FOR_BACKTEST:
@@ -463,6 +517,41 @@ def run_experiment_backtest(
             ),
         }
 
+    # PRD §39 realistic-cost backtester (additive, opt-in). Default path keeps
+    # the built-in price-difference simulation unchanged.
+    if payload.realistic:
+        realistic_result = _run_realistic_backtest(bars)
+        if realistic_result is not None:
+            provenance = {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "bars": len(closes),
+                "requested_bars": payload.bars if not use_date_range else None,
+                "mode": "date_range" if use_date_range else "bar_count",
+                "start_date": payload.start_date if use_date_range else None,
+                "end_date": payload.end_date if use_date_range else None,
+                "ran_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "source": "live",
+                "engine": "realistic_v2",
+                "account": _account_snapshot(),
+                "first_bar_time": getattr(bars[0], "time", None) if bars else None,
+                "last_bar_time": getattr(bars[-1], "time", None) if bars else None,
+            }
+            provenance = _sanitize(provenance)
+            _RUNS[experiment_id] = provenance
+            engine.record_run_provenance(experiment_id, provenance)
+            return {
+                "ok": True,
+                "engine": "realistic_v2",
+                "experiment": _experiment_row(engine, experiment),
+                "provenance": provenance,
+                "metrics": _sanitize(realistic_result.metrics),
+                "trades_total": len(realistic_result.trades),
+                "trades_preview": _sanitize(
+                    [t.to_dict() for t in realistic_result.trades[-TRADES_PREVIEW:]]
+                ),
+            }
+
     result = engine.run_backtest(
         experiment,
         closes,
@@ -473,9 +562,7 @@ def run_experiment_backtest(
 
     provenance = {
         "symbol": symbol,
-        "symbol_resolved": getattr(connector, "resolve_symbol", lambda value: None)(
-            symbol
-        ),
+        "symbol_resolved": getattr(connector, "resolve_symbol", lambda value: None)(symbol),
         "timeframe": timeframe,
         "bars": len(closes),
         "requested_bars": payload.bars if not use_date_range else None,
@@ -560,9 +647,7 @@ def get_data_info(symbol: str = "XAUUSD", timeframe: str = "H1") -> dict[str, An
     if not _SYMBOL_RE.match(symbol):
         raise HTTPException(status_code=400, detail="Simbol tidak valid.")
     if timeframe not in _TIMEFRAMES:
-        raise HTTPException(
-            status_code=400, detail=f"Timeframe tidak dikenal: {timeframe}"
-        )
+        raise HTTPException(status_code=400, detail=f"Timeframe tidak dikenal: {timeframe}")
 
     info = connector.get_data_info(symbol, timeframe)
     return {
@@ -578,15 +663,11 @@ def compare_experiments(payload: CompareRequest) -> dict[str, Any]:
     """Compare two experiments that both have real backtest results."""
     engine = get_research_engine()
     if payload.id_a == payload.id_b:
-        raise HTTPException(
-            status_code=400, detail="Pilih dua eksperimen yang berbeda."
-        )
+        raise HTTPException(status_code=400, detail="Pilih dua eksperimen yang berbeda.")
     first = engine.get_experiment(payload.id_a)
     second = engine.get_experiment(payload.id_b)
     if first is None or second is None:
-        raise HTTPException(
-            status_code=404, detail="Salah satu eksperimen tidak ditemukan."
-        )
+        raise HTTPException(status_code=404, detail="Salah satu eksperimen tidak ditemukan.")
     try:
         comparison = engine.compare_experiments(first, second)
     except ValueError as exc:

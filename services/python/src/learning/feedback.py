@@ -23,7 +23,12 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["LessonFeedbackProvider", "format_lessons_reason", "record_review_lesson"]
+__all__ = [
+    "LessonFeedbackProvider",
+    "format_lessons_reason",
+    "record_review_lesson",
+    "record_review_lesson_v2",
+]
 
 # Outcome values counted as wins/losses in the summary.
 _WIN_OUTCOMES = {"win", "won", "profit"}
@@ -131,3 +136,80 @@ def record_review_lesson(store: Any, record: Any) -> None:
         store.add_lesson(lesson)
     except Exception as exc:  # noqa: BLE001 - the close path must never break
         logger.warning("Failed to record review lesson (close path continues): %s", exc)
+
+
+def _review_field(record: Any, name: str, default: Any = "") -> Any:
+    """Read ``name`` from a review record (dict or object), fail-safe."""
+    if isinstance(record, dict):
+        return record.get(name, default)
+    return getattr(record, name, default)
+
+
+def record_review_lesson_v2(engine: Any, store: Any, record: Any) -> Any:
+    """Feed a review record into the Learning Engine 2.0 (PRD §43).
+
+    Converts the review into an evidence-graded :class:`Lesson` (always an
+    OBSERVATION on ingestion — one trade never promotes a pattern), records it
+    in ``engine``, and (when a persistent ``store`` is provided) appends the
+    lesson dict to the store so it survives restarts.
+
+    Fail-safe: any error is swallowed — the review/close path must never break.
+    Returns the recorded lesson (or ``None`` on failure).
+    """
+    try:
+        from .engine_v2 import Lesson
+
+        trade_result = _review_field(record, "trade_result", {}) or {}
+        if not isinstance(trade_result, dict):
+            trade_result = {}
+        review = _review_field(record, "review", None)
+        root_cause = _review_field(record, "root_cause", None)
+
+        trade_id = str(_review_field(record, "trade_id", "") or "")
+        symbol = str(trade_result.get("symbol") or _review_field(review, "symbol", "") or "")
+        outcome = str(
+            trade_result.get("outcome") or _review_field(review, "outcome", "") or ""
+        ).lower()
+        regime = str(trade_result.get("regime", "unknown"))
+        direction = str(trade_result.get("direction", "NEUTRAL")).upper()
+        root_cause_name = str(_review_field(root_cause, "primary_cause", "") or "")
+
+        lesson = Lesson(
+            lesson_id=f"v2:{trade_id}" if trade_id else f"v2:{symbol}:{outcome}",
+            trade_id=trade_id,
+            symbol=symbol,
+            strategy_version=str(trade_result.get("strategy_version", "") or "live"),
+            category=_category_for(root_cause_name, direction),
+            outcome=outcome,
+            context={
+                "regime": regime,
+                "direction": direction,
+                "root_cause": root_cause_name,
+            },
+            lesson=str(_review_field(review, "summary", "") or ""),
+        )
+        recorded = engine.record_lesson(lesson)
+        if store is not None:
+            store.add_lesson(recorded.to_dict())
+        return recorded
+    except Exception as exc:  # noqa: BLE001 - learning must never break review
+        logger.warning("Learning Engine v2 recording failed (review continues): %s", exc)
+        return None
+
+
+def _category_for(root_cause: str, direction: str) -> str:
+    """Map a free-text root cause to a LessonCategory value (best-effort)."""
+    text = (root_cause or "").lower()
+    if "timing" in text or "entry" in text:
+        return "ENTRY_TIMING"
+    if "exit" in text or "close" in text:
+        return "EXIT_TIMING"
+    if "size" in text or "sizing" in text:
+        return "POSITION_SIZING"
+    if "risk" in text or "stop" in text:
+        return "RISK_MANAGEMENT"
+    if "regime" in text or "trend" in text or "range" in text:
+        return "REGIME_FIT"
+    if "slip" in text or "execution" in text or "spread" in text:
+        return "EXECUTION_QUALITY"
+    return "OTHER"
