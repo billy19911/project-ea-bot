@@ -170,22 +170,26 @@ class RiskMonitor:
                     self._stats["margin_events"] += 1
 
     def _get_account_info(self) -> dict[str, Any]:
-        """Read account info from MT5 (fail-safe, read-only)."""
-        try:
-            import MetaTrader5 as mt5
+        """Read account info via the shared MT5 connector (fail-safe, read-only).
 
-            if not mt5.initialize():
-                return {}
-            info = mt5.account_info()
-            if info is None:
-                return {}
+        Uses ``mt5.connector.get_account_info`` instead of calling
+        ``MetaTrader5.initialize()`` directly. The MetaTrader5 binding is
+        process-wide, so initialising here on every poll (previously done via a
+        raw ``mt5.initialize()`` with no matching ``shutdown()``) could clobber
+        the main connector's live binding and leak terminal references. Routing
+        through the shared connector keeps a single, consistent MT5 session.
+        """
+        try:
+            from ..mt5 import connector
+
+            info = connector.get_account_info()
             return {
                 "equity": info.equity,
                 "balance": info.balance,
                 "margin": info.margin,
-                "margin_free": info.margin_free,
+                "margin_free": info.free_margin,
             }
-        except Exception as exc:  # noqa: BLE001 - MT5 import/init may fail
+        except Exception as exc:  # noqa: BLE001 - MT5 import/init/read may fail
             logger.debug("MT5 account_info failed: %s", exc)
             return {}
 
