@@ -257,6 +257,16 @@ class TestTokenBudget:
         sup.reset_token_budget()
         assert sup.token_used == 0
 
+    def test_refund_token_budget(self):
+        sup = SupervisorAgent(token_budget=500)
+        assert sup.check_token_budget("x", 300) is True
+        assert sup.token_used == 300
+        sup.refund_token_budget(240)
+        assert sup.token_used == 60
+        # Never goes negative, even when refunding more than used.
+        sup.refund_token_budget(999)
+        assert sup.token_used == 0
+
 
 # ===================================================================
 # 5. Routing policies

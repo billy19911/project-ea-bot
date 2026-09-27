@@ -672,8 +672,11 @@ class NewsFeedProvider:
         formatted_events = [
             {
                 "headline": f"{ev.country} {ev.title}",
+                "title": ev.title,
+                "currency": ev.country,
+                "actual": str(getattr(ev, "actual", "") or ""),
                 "impact": ev.impact.upper(),
-                "sentiment": 0.0,
+                "sentiment": score_headline_sentiment(f"{ev.country} {ev.title}")[0],
                 "date": ev.date,
                 "forecast": ev.forecast,
                 "previous": ev.previous,

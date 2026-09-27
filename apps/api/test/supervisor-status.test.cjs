@@ -58,12 +58,37 @@ test('max_concurrency is null when the scheduler source is absent', () => {
   );
 });
 
-test('token_budget and token_used are always null (no runtime source, never invent 0)', () => {
+test('token_budget and token_used are null without a supervisor source (never invent 0)', () => {
   const out = buildSupervisorStatus({
     health: { uptime_seconds: 1 },
     scheduler: { running: true, stats: { max_concurrency: 2 } },
     models: [{ id: 'gpt-4o', provider: 'openai', is_free: false }],
   });
+  assert.equal(out.token_budget, null);
+  assert.equal(out.token_used, null);
+});
+
+test('token_budget/token_used/max_concurrency come from the real supervisor source', () => {
+  const out = buildSupervisorStatus({
+    supervisor: { max_concurrency: 3, token_budget: 8000, token_used: 3800 },
+  });
+  assert.equal(out.token_budget, 8000);
+  assert.equal(out.token_used, 3800);
+  assert.equal(out.max_concurrency, 3);
+});
+
+test('max_concurrency falls back to scheduler.stats when supervisor is absent', () => {
+  assert.equal(
+    buildSupervisorStatus({ scheduler: { stats: { max_concurrency: 3 } } }).max_concurrency,
+    3,
+  );
+});
+
+test('non-finite supervisor values resolve to null (no fabricated data)', () => {
+  const out = buildSupervisorStatus({
+    supervisor: { max_concurrency: 'x', token_budget: NaN, token_used: Infinity },
+  });
+  assert.equal(out.max_concurrency, null);
   assert.equal(out.token_budget, null);
   assert.equal(out.token_used, null);
 });

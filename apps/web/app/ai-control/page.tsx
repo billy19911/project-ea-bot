@@ -35,7 +35,7 @@ type AgentError = {
   timestamp: string; 
   agent: string; 
   message: string; 
-  severity: 'low' | 'medium' | 'high';
+  severity: 'low' | 'medium' | 'high' | 'critical';
 };
 type ModelUsage = { 
   model: string; 
@@ -355,7 +355,7 @@ export default function AIControlPage() {
                       <p>{err.message}</p>
                     </div>
                     <span className={`${styles.badge} ${
-                      err.severity === 'high' ? styles.danger : 
+                      err.severity === 'high' || err.severity === 'critical' ? styles.danger : 
                       err.severity === 'medium' ? styles.warning : styles.muted
                     }`}>
                       {err.severity}
@@ -420,13 +420,13 @@ export default function AIControlPage() {
                     // pasar sungguhan; bila tidak ada, guardrail data menolak.
                     let market: Record<string, unknown> = { symbol: advisorSymbol.trim().toUpperCase() };
                     try {
-                      const symRes = await apiFetch(`/market/overview`);
-                      if (symRes.ok) {
-                        const data = await symRes.json();
-                        const row = Array.isArray(data.symbols)
-                          ? data.symbols.find((s: { symbol?: string }) => s.symbol === advisorSymbol.trim().toUpperCase())
-                          : null;
-                        if (row) market = { ...market, bid: row.bid, ask: row.ask, spread_pips: row.spread, trend: row.trend, timeframe: 'H1' };
+                      const tickRes = await apiFetch(`/mt5/market/tick?symbol=${encodeURIComponent(advisorSymbol.trim().toUpperCase())}`);
+                      if (tickRes.ok) {
+                        const data = await tickRes.json();
+                        const d = data?.data;
+                        if (d && typeof d.bid === 'number' && typeof d.ask === 'number') {
+                          market = { symbol: advisorSymbol.trim().toUpperCase(), bid: d.bid, ask: d.ask, timeframe: 'H1' };
+                        }
                       }
                     } catch {
                       // tetap lanjut — guardrail data akan menolak bila kosong

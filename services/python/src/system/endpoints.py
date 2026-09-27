@@ -105,9 +105,7 @@ def _telegram_configuration() -> dict[str, Any]:
     present and at least one chat id is allowlisted.
     """
     token = os.getenv("TELEGRAM_BOT_TOKEN") or ""
-    raw_allowlist = (
-        os.getenv("TELEGRAM_ALLOWED_CHAT_IDS") or os.getenv("TELEGRAM_CHAT_IDS") or ""
-    )
+    raw_allowlist = os.getenv("TELEGRAM_ALLOWED_CHAT_IDS") or os.getenv("TELEGRAM_CHAT_IDS") or ""
     allowlist = [cid.strip() for cid in raw_allowlist.split(",") if cid.strip()]
 
     gateway = get_gateway()
@@ -285,14 +283,73 @@ async def decisions(limit: int = 50) -> dict[str, Any]:
 
 @router.get("/tasks", summary="Recent supervisor tasks")
 async def tasks() -> dict[str, Any]:
-    """Return recent supervisor tasks.
+    """Return recent agent activity as task rows (real, in-process state).
 
-    No in-process task registry exists yet, so an empty list is returned with
-    ``source="live"`` (an honest empty result rather than demo data).
+    Rows are built from the process-wide :class:`AgentActivityTracker` — the
+    same singleton the pipeline records every agent run into. An empty list is
+    returned honestly (``source="live"``) when no agent has run yet. The
+    tracker is accessed fail-safe: observability must never break the endpoint.
     """
+    try:
+        from ..agents.activity import get_activity_tracker
+
+        snapshot = get_activity_tracker().snapshot()
+    except Exception as exc:  # noqa: BLE001 - a status endpoint must never raise
+        logger.warning("Activity tracker unavailable for /tasks: %s", exc)
+        snapshot = {}
+
+    rows: list[dict[str, Any]] = []
+    for name, entry in snapshot.items():
+        for idx, rec in enumerate(entry.get("recent", [])):
+            at = rec.get("at", "")
+            rows.append(
+                {
+                    "id": f"{name}-{idx}-{at}",
+                    "timestamp": at,
+                    "agent": name,
+                    "action": f"analisis {rec.get('signal')} ({rec.get('confidence')})",
+                    "status": "success",
+                }
+            )
+    # Newest first; cap the payload for the control plane.
+    rows.sort(key=lambda r: r["timestamp"], reverse=True)
+    rows = rows[:50]
     return {
-        "tasks": [],
-        "counts": {"running": 0, "queued": 0, "completed": 0, "failed": 0},
+        "tasks": rows,
+        "counts": {
+            "running": 0,
+            "queued": 0,
+            "completed": len(rows),
+            "failed": 0,
+        },
+        "source": "live",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Supervisor
+# ---------------------------------------------------------------------------
+
+
+@router.get("/supervisor/status", summary="Live supervisor runtime status")
+async def supervisor_status() -> dict[str, Any]:
+    """Expose the REAL in-memory supervisor state (concurrency + budget).
+
+    Reads the same supervisor instance the pipeline dispatches through, so the
+    control plane sees live ``max_concurrency``/``token_budget``/``token_used``
+    rather than a fabricated placeholder.
+    """
+    runtime = get_runtime()
+    supervisor = getattr(getattr(runtime, "pipeline", None), "supervisor", None)
+    if supervisor is None:
+        return {"supervisor": None, "source": "unavailable"}
+    return {
+        "supervisor": {
+            "max_concurrency": int(getattr(supervisor, "max_concurrency", 0) or 0),
+            "token_budget": int(getattr(supervisor, "token_budget", 0) or 0),
+            "token_used": int(getattr(supervisor, "token_used", 0) or 0),
+            "routing_policy": str(getattr(supervisor, "routing_policy", "") or ""),
+        },
         "source": "live",
     }
 
@@ -335,9 +392,7 @@ def _apply_to_runtime(values: dict[str, float]) -> dict[str, Any]:
     if "scheduler_poll_interval" in values:
         scheduler = getattr(runtime, "scheduler", None)
         if scheduler is not None and hasattr(scheduler, "poll_interval"):
-            scheduler.poll_interval = max(
-                0.001, float(values["scheduler_poll_interval"])
-            )
+            scheduler.poll_interval = max(0.001, float(values["scheduler_poll_interval"]))
             applied["scheduler_poll_interval"] = scheduler.poll_interval
     if "trend_sample_interval" in values:
         sampler = get_trend_sampler()
@@ -394,9 +449,7 @@ def _risk_limits_snapshot() -> dict[str, Any]:
     return {"available": True, "limits": limits}
 
 
-@router.get(
-    "/settings", summary="Runtime settings (writable allowlist + read-only risk limits)"
-)
+@router.get("/settings", summary="Runtime settings (writable allowlist + read-only risk limits)")
 async def get_settings() -> dict[str, Any]:
     """Return writable knobs plus the real, read-only risk limits.
 
@@ -488,9 +541,7 @@ async def learning_analytics() -> dict[str, Any]:
         "supervisor_kpis": None,
         "lessons": [
             {
-                "id": str(
-                    lesson.get("trade_id") or lesson.get("id") or f"lesson_{index}"
-                ),
+                "id": str(lesson.get("trade_id") or lesson.get("id") or f"lesson_{index}"),
                 "category": str(lesson.get("category") or ""),
                 "outcome": str(lesson.get("outcome") or ""),
                 "symbol": str(lesson.get("symbol") or ""),

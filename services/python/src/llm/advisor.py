@@ -325,6 +325,19 @@ class LLMAdvisor:
         cost_usd = float(getattr(usage, "cost_usd", 0.0) or 0.0)
         model_name = str(getattr(response, "model", "") or "unknown")
 
+        # Reconcile the budget: the estimate (DEFAULT_ESTIMATE_TOKENS) was
+        # committed BEFORE the call, but the real call used far fewer tokens.
+        # Return the unused remainder so ``token_used`` reflects REAL usage.
+        if total_tokens > 0:
+            unused = DEFAULT_ESTIMATE_TOKENS - total_tokens
+            if unused > 0:
+                supervisor = self._ensure_supervisor()
+                if supervisor is not None:
+                    try:
+                        supervisor.refund_token_budget(unused)
+                    except Exception as exc:  # noqa: BLE001 - observability must not break advise
+                        logger.debug("advisor: refund budget gagal: %s", exc)
+
         with self._lock:
             self._calls += 1
             bucket = self._model_usage.setdefault(

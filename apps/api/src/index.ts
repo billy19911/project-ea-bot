@@ -381,15 +381,23 @@ app.get('/ai-control/status', async (req, res) => {
   const log = (req as any).log;
   log.info('ai-control.status');
 
-  const [health, scheduler, tasksResult, modelsResult, advisorResult] = await Promise.all([
+  const [health, scheduler, tasksResult, modelsResult, advisorResult, supervisorResult] = await Promise.all([
     getJson<any>('/health'),
     getJson<any>('/scheduler/status'),
     getJson<any>('/tasks'),
     getJson<any>('/ai/models'),
     getJson<any>('/ai/advisor/status'),
+    getJson<any>('/supervisor/status'),
   ]);
 
-  const relevant = { health, scheduler, tasks: tasksResult, models: modelsResult, advisor: advisorResult };
+  const relevant = {
+    health,
+    scheduler,
+    tasks: tasksResult,
+    models: modelsResult,
+    advisor: advisorResult,
+    supervisor: supervisorResult,
+  };
   const available = Object.entries(relevant).filter(([, result]) => result.ok);
   if (available.length === 0) {
     res.status(503).json({ error: 'python_service_unavailable', source: 'unavailable' });
@@ -443,6 +451,7 @@ app.get('/ai-control/status', async (req, res) => {
     health: healthData,
     scheduler: schedulerData,
     models: modelsResult.ok ? modelsResult.data.models : [],
+    supervisor: supervisorResult.ok ? supervisorResult.data.supervisor : undefined,
   });
 
   // Only active agent count has a real source here. Token and execution metrics
@@ -463,7 +472,13 @@ app.get('/ai-control/status', async (req, res) => {
     models,
     tasks: Array.isArray(tasksData.tasks) ? tasksData.tasks : [],
     activity: buildActivityRows(Array.isArray(tasksData.tasks) ? tasksData.tasks : []),
-    errors: getRecentErrors(10),
+    errors: getRecentErrors(10).map((e) => ({
+      id: e.id,
+      timestamp: e.timestamp,
+      agent: e.source,
+      message: e.message,
+      severity: e.severity,
+    })),
     source: 'live',
     degraded: Object.keys(degraded).length > 0 ? degraded : undefined,
   });
@@ -1065,6 +1080,10 @@ app.post('/research/compare', authenticate, async (req, res) => {
 });
 
 // ── Chart (Fase 1 "Pasar"): candles + indicator series ─────────────────────
+// Chart pagination can be slow upstream (e.g. BTCUSD D1 ~5s); the default 5s
+// proxy timeout would turn it into a spurious 503, so chart routes get longer.
+const CHART_PROXY_TIMEOUT_MS = 15000;
+
 app.get('/chart/candles', async (req, res) => {
   const log = (req as any).log;
   log.info('chart.candles');
@@ -1073,7 +1092,7 @@ app.get('/chart/candles', async (req, res) => {
     const v = (req.query as any)[key];
     if (v !== undefined) qs.set(key, String(v));
   }
-  await sendProxy(res, `/chart/candles?${qs.toString()}`, undefined, req);
+  await sendProxy(res, `/chart/candles?${qs.toString()}`, undefined, req, CHART_PROXY_TIMEOUT_MS);
 });
 
 // Fase 2 — real engine analysis (entry/SL/TP) + open position levels.
@@ -1085,7 +1104,7 @@ app.get('/chart/analysis', async (req, res) => {
     const v = (req.query as any)[key];
     if (v !== undefined) qs.set(key, String(v));
   }
-  await sendProxy(res, `/chart/analysis?${qs.toString()}`, undefined, req);
+  await sendProxy(res, `/chart/analysis?${qs.toString()}`, undefined, req, CHART_PROXY_TIMEOUT_MS);
 });
 
 app.get('/market/overview', async (req, res) => {

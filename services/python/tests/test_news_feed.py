@@ -344,6 +344,56 @@ class TestGetNewsContext:
         assert context["sentiment"]["news_items"] == []
         assert context["sentiment"]["economic_events"] == []
 
+    def test_formatted_events_expose_consumer_keys(self) -> None:
+        """Events must expose title/currency/actual keys for fundamental_analyst.
+
+        The fundamental analyst reads ``title``/``currency``/``actual``; the
+        producer previously only emitted ``headline``. Missing keys made every
+        event parse as blank → always NEUTRAL.
+        """
+        client = FakeClient(
+            {
+                "http://cal": FakeResponse(
+                    json_data=[
+                        {
+                            "title": "Gold rallies on record demand",
+                            "country": "USD",
+                            "date": "2026-09-18T12:30:00-04:00",
+                            "impact": "High",
+                            "forecast": "5.25%",
+                            "previous": "5.00%",
+                        }
+                    ]
+                ),
+                "http://rss": FakeResponse(content=_rss_xml([])),
+            }
+        )
+        provider = NewsFeedProvider(
+            calendar_url="http://cal", rss_urls=["http://rss"], client=client
+        )
+        context = provider.get_news_context(symbol="XAUUSD", currency="USD")
+        events = context["sentiment"]["economic_events"]
+
+        assert len(events) == 1
+        event = events[0]
+        # Consumer-readable keys present.
+        assert "title" in event
+        assert "currency" in event
+        assert "actual" in event
+        # Country prefix stripped for title, currency carries the country.
+        assert event["title"] == "Gold rallies on record demand"
+        assert event["currency"] == "USD"
+        # ``actual`` must be a string (empty when the feed has none).
+        assert isinstance(event["actual"], str)
+        assert event["actual"] == ""
+        # Legacy keys preserved for other consumers.
+        assert event["headline"] == "USD Gold rallies on record demand"
+        assert event["impact"] == "HIGH"
+        # Sentiment must be computed deterministically (not hardcoded 0.0).
+        # "rallies"/"record" are positive lexicon terms → > 0.
+        assert isinstance(event["sentiment"], float)
+        assert event["sentiment"] > 0
+
 
 # ---------------------------------------------------------------------------
 # Singleton

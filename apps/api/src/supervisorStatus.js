@@ -6,10 +6,11 @@
  *   - `token_budget: 0`, `token_used: 0`,
  *     `max_concurrency: scheduler.stats?.max_concurrency ?? 0` — hard-coded zeros.
  *
- * There is no runtime source for token accounting (the SupervisorAgent class is
- * never instantiated in the API service), so 0 is fabricated data. This module
- * assembles the supervisor block from real sources only and reports `null` when
- * a value is genuinely unknown, never a made-up 0.
+ * Token accounting now has a REAL runtime source: the Python service exposes the
+ * live supervisor state via `GET /supervisor/status` (max_concurrency,
+ * token_budget, token_used), which `index.ts` passes through as `supervisor`.
+ * This module assembles the supervisor block from real sources only and reports
+ * `null` when a value is genuinely unknown, never a made-up 0.
  *
  * Kept as plain JS (like `middleware/rateLimitPolicy.js`) so it is unit-testable
  * directly and can be imported by `index.ts`.
@@ -54,30 +55,33 @@ function mapModels(models) {
  * Build the supervisor block for `/ai-control/status` (and the `uptime` field
  * for `/system/overview`).
  *
- * @param {{ health?: any, scheduler?: any, models?: any }} [input]
+ * @param {{ health?: any, scheduler?: any, models?: any, supervisor?: any }} [input]
  * @returns {{
  *   status: string,
  *   routing_policy: string,
  *   max_concurrency: number | null,
- *   token_budget: null,
- *   token_used: null,
+ *   token_budget: number | null,
+ *   token_used: number | null,
  *   uptime: number | null,
  *   models: ReturnType<typeof mapModels>,
  * }}
  */
 function buildSupervisorStatus(input) {
-  const { health, scheduler, models } = input || {};
+  const { health, scheduler, models, supervisor } = input || {};
 
   return {
     status: scheduler?.running ? 'active' : 'idle',
     routing_policy: health?.trading_engine ? 'priority_based' : 'unknown',
-    // Real source or null — never a fabricated 0.
-    max_concurrency: isFiniteNumber(scheduler?.stats?.max_concurrency)
-      ? scheduler.stats.max_concurrency
-      : null,
-    // No runtime source exists → honest null, not 0.
-    token_budget: null,
-    token_used: null,
+    // Real source (Python `/supervisor/status`) or the legacy scheduler fallback;
+    // null — never a fabricated 0 — when neither is a finite number.
+    max_concurrency: isFiniteNumber(supervisor?.max_concurrency)
+      ? supervisor.max_concurrency
+      : isFiniteNumber(scheduler?.stats?.max_concurrency)
+        ? scheduler.stats.max_concurrency
+        : null,
+    // Live supervisor token accounting; honest null when absent, never 0.
+    token_budget: isFiniteNumber(supervisor?.token_budget) ? supervisor.token_budget : null,
+    token_used: isFiniteNumber(supervisor?.token_used) ? supervisor.token_used : null,
     uptime: isFiniteNumber(health?.uptime_seconds) ? health.uptime_seconds : null,
     models: mapModels(models),
   };

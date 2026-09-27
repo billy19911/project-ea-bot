@@ -15,7 +15,8 @@
  * - Rentang sumbu Y dihitung dari harga nyata (low/high), bukan skala tetap.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { nextViewport } from '../lib/viewport';
 
 export type ChartBar = {
   time: string;
@@ -131,7 +132,7 @@ function fmtTime(iso: string, timeframe?: string): string {
   return `${day} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export default function PriceChart({
+function PriceChart({
   data,
   levels = [],
   showEma = true,
@@ -162,34 +163,38 @@ export default function PriceChart({
   const [viewEnd, setViewEnd] = useState<number>(n); // exclusive index
   const dragRef = useRef<{ x: number; startEnd: number } | null>(null);
 
-  // Identity of the *newest* bar — a fresh symbol/timeframe/refresh changes it
-  // and resets the viewport, whereas prepending older history keeps the same
-  // newest bar so the view must simply shift to stay anchored on the same data.
-  const newestTime = n > 0 ? bars[n - 1].time : '';
-  const prevRef = useRef<{ newestTime: string; n: number }>({ newestTime, n });
+  // Clamp helper so the window always stays inside [0, n].
+  const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+
+  // Identity of the *dataset* (symbol/timeframe) — resets the viewport ONLY when
+  // the instrument changes. A refresh/tick keeps the same identity, so the
+  // viewport and hover are never yanked back (the flicker this fixes).
+  const dataKey = `${data.symbol ?? ''}/${data.timeframe ?? ''}`;
+  const oldestTime = n > 0 ? bars[0].time : '';
+  const prevRef = useRef<{ key: string; n: number; oldestTime: string }>({
+    key: dataKey,
+    n,
+    oldestTime,
+  });
 
   useEffect(() => {
     const prev = prevRef.current;
-    if (prev.newestTime !== newestTime) {
-      // New dataset (symbol/timeframe/refresh): show the latest bars.
-      setVisibleCount(n || 1);
-      setViewEnd(n);
-      setHover(null);
-    } else if (n > prev.n) {
-      // Older bars were prepended: keep the same bars on screen by shifting
-      // the window forward by the number of prepended bars (no visual jump).
-      const prepended = n - prev.n;
-      setViewEnd((end) => clamp(end + prepended, 1, n));
-    } else if (n < prev.n) {
-      setVisibleCount(n || 1);
-      setViewEnd(n);
-      setHover(null);
-    }
-    prevRef.current = { newestTime, n };
-  }, [newestTime, n]);
-
-  // Clamp helpers so the window always stays inside [0, n].
-  const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+    // How many bars were appended at the end: the total grew and the oldest bar
+    // is unchanged. Anything else that adds bars is a history prepend.
+    const appended = n > prev.n && prev.oldestTime === oldestTime ? n - prev.n : 0;
+    const next = nextViewport(
+      { key: prev.key, n: prev.n, visibleCount, viewEnd },
+      { key: dataKey, n, appendCount: appended },
+    );
+    setVisibleCount((c) => (c === next.visibleCount ? c : next.visibleCount));
+    setViewEnd((e) => (e === next.viewEnd ? e : next.viewEnd));
+    // Only clear the hover when the dataset identity actually changed (or the
+    // data shrank); a mere append/refresh must not drop the crosshair.
+    if (prev.key !== dataKey || n < prev.n) setHover(null);
+    prevRef.current = { key: dataKey, n, oldestTime };
+    // `visibleCount`/`viewEnd` are intentionally read but not deps: this effect
+    // reacts to incoming data, not to the user's pan/zoom (which update them).
+  }, [dataKey, n, oldestTime]);
 
   const zoom = (nextCount: number) => {
     if (n === 0) return;
@@ -202,7 +207,9 @@ export default function PriceChart({
   const end = clamp(viewEnd, 0, n);
   const start = clamp(end - visibleCount, 0, Math.max(0, n - visibleCount));
   const vEnd = start + Math.min(visibleCount, n - start);
-  const visibleBars = bars.slice(start, vEnd);
+  // Memoised so the geometry memo below gets a stable reference (a fresh array
+  // each render would invalidate it and force a full SVG re-render every tick).
+  const visibleBars = useMemo(() => bars.slice(start, vEnd), [bars, start, vEnd]);
   const vn = visibleBars.length;
 
   // Lazily pull older history when the user reaches the oldest bar.
@@ -296,7 +303,7 @@ export default function PriceChart({
     }
 
     return { lo, hi, slot, bodyW, x, yMain, yRsi, yMacd, mLo, mHi, priceLines, timeTicks };
-  }, [bars, n, start, vEnd, vn, visibleBars, data.overlays, data.panels, data.timeframe, showBollinger, showMacd, levels, mainH]);
+  }, [bars, n, start, vEnd, vn, data.overlays, data.panels, data.timeframe, showBollinger, showMacd, levels, mainH]);
 
   // ── Wheel zoom (non-passive so we can preventDefault page scroll) ───────
   useEffect(() => {
@@ -753,3 +760,8 @@ export default function PriceChart({
     </div>
   );
 }
+
+// Memoised: the parent re-renders on every live tick (~2.5s) and auto-refresh
+// (~10s), but the chart's props rarely change → skip the whole SVG re-render.
+// The parent must therefore pass referentially stable props (memoised `levels`).
+export default memo(PriceChart);

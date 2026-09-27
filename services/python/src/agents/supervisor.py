@@ -354,6 +354,10 @@ class SupervisorAgent(BaseAgent):
         """Reset the token counter to zero (e.g. per analysis cycle)."""
         self.token_used = 0
 
+    def refund_token_budget(self, amount: int) -> None:
+        """Return unused estimate tokens after a real call used fewer tokens."""
+        self.token_used = max(0, self.token_used - max(0, int(amount)))
+
     # ------------------------------------------------------------------
     # Phase 7: routing policies
     # ------------------------------------------------------------------

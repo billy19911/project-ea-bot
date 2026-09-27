@@ -196,9 +196,46 @@ def test_tasks_empty_is_honest() -> None:
     resp = client.get("/tasks")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["tasks"] == []
     assert data["source"] == "live"
+    assert isinstance(data["tasks"], list)
+    # The activity tracker is a process singleton and other tests may have
+    # populated it, so never assert `== []` unconditionally. An empty list,
+    # however, must report zero completed tasks (honest counts).
+    if data["tasks"] == []:
+        assert data["counts"]["completed"] == 0
     assert data["counts"]["running"] == 0
+
+
+def test_tasks_reflect_real_activity() -> None:
+    """Real agent activity recorded in the tracker surfaces in /tasks."""
+    from src.agents.activity import get_activity_tracker
+
+    tracker = get_activity_tracker()
+    try:
+        tracker.record("technical_analyst", "BEARISH", 0.8)
+        resp = client.get("/tasks")
+        assert resp.status_code == 200
+        data = resp.json()
+        rows = [t for t in data["tasks"] if t["agent"] == "technical_analyst"]
+        assert rows, "recorded activity must appear as a task row"
+        assert any(row["timestamp"] for row in rows)
+        assert data["counts"]["completed"] == len(data["tasks"])
+    finally:
+        tracker.reset()
+
+
+# ---------------------------------------------------------------------------
+# /supervisor/status
+# ---------------------------------------------------------------------------
+def test_supervisor_status_reports_live_state() -> None:
+    resp = client.get("/supervisor/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source"] == "live"
+    supervisor = data["supervisor"]
+    assert supervisor is not None
+    assert supervisor["max_concurrency"] >= 1
+    assert supervisor["token_budget"] >= 1
 
 
 # ---------------------------------------------------------------------------

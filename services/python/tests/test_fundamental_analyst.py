@@ -403,3 +403,62 @@ class TestEconomicEventParsing:
         assert FundamentalAnalystAgent._parse_numeric("120K") == 120.0
         assert FundamentalAnalystAgent._parse_numeric("N/A") is None
         assert FundamentalAnalystAgent._parse_numeric("") is None
+
+
+# ---------------------------------------------------------------------------
+# Tests — production news_feed payload wiring (FIX WIRING)
+# ---------------------------------------------------------------------------
+
+
+class TestProductionPayloadWiring:
+    """The news_feed producer payload must not parse as blank/neutral."""
+
+    def setup_method(self) -> None:
+        self.agent = FundamentalAnalystAgent()
+
+    def test_parse_events_accepts_production_payload(self) -> None:
+        """Production shape (headline/impact/sentiment/date/forecast/previous)."""
+        raw = [
+            {
+                "headline": "USD Fed hikes rates",
+                "impact": "HIGH",
+                "sentiment": 0.5,
+                "date": "2026-09-18",
+                "forecast": "5.25%",
+                "previous": "5.00%",
+            }
+        ]
+        events = FundamentalAnalystAgent._parse_events(raw)
+        assert len(events) == 1
+        event = events[0]
+        # title derived from headline, currency recovered from title prefix.
+        assert event.title == "USD Fed hikes rates"
+        assert event.currency == "USD"
+        assert event.impact == "HIGH"
+
+    def test_parse_events_currency_from_prefix(self) -> None:
+        """A title starting with a 3-letter currency token recovers currency."""
+        raw = [{"title": "USD CPI m/m", "impact": "HIGH"}]
+        events = FundamentalAnalystAgent._parse_events(raw)
+        assert events[0].currency == "USD"
+
+    def test_analyze_production_payload_not_blind_neutral(self) -> None:
+        """High-impact hawkish production payload must no longer be blind."""
+        payload = {
+            "sentiment": {
+                "economic_events": [
+                    {
+                        "headline": "USD Fed rate hike signals tightening",
+                        "impact": "HIGH",
+                        "sentiment": 0.5,
+                        "date": "2026-09-18",
+                        "forecast": "5.25%",
+                        "previous": "5.00%",
+                    }
+                ]
+            }
+        }
+        result = self.agent.analyze(payload)
+        assert (
+            result["signal"] != "NEUTRAL" or result["metrics"]["hawkish_score"] > 0
+        ), "production payload parsed as blind neutral"

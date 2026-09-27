@@ -61,6 +61,9 @@ class FakeSupervisor:
         self.token_used += estimate
         return True
 
+    def refund_token_budget(self, amount: int) -> None:
+        self.token_used = max(0, self.token_used - max(0, int(amount)))
+
 
 class FakeStore:
     """Minimal settings store: only the opt-in knob matters here."""
@@ -194,8 +197,22 @@ def test_status_reports_real_usage_and_budget(monkeypatch):
     assert status["calls"] == 1
     assert status["usage"]["request_count"] == 1
     assert status["budget"]["token_budget"] == 8000
-    assert status["budget"]["token_used"] == 1200  # the real committed estimate
+    assert status["budget"]["token_used"] == 60  # real usage (40+20), not the estimate
     assert status["limits"]["max_tokens"] == MAX_TOKENS
+
+
+def test_budget_reconciled_after_successful_call(monkeypatch):
+    """The 1200-token estimate is refunded down to the real 60-token usage."""
+    client = FakeClient()
+    supervisor = FakeSupervisor()
+    advisor = _advisor(monkeypatch, enabled=True, client=client, supervisor=supervisor)
+
+    result = advisor.advise("market", MARKET)
+
+    assert result.ok is True
+    # The estimate was committed first, then the unused portion refunded.
+    assert supervisor.commits[0] == ("llm_advisor", 1200)
+    assert supervisor.token_used == 60  # 1200 - (1200 - 60)
 
 
 def test_supervisor_unavailable_is_fail_closed(monkeypatch):

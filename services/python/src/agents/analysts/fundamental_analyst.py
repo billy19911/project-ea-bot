@@ -243,22 +243,41 @@ class FundamentalAnalystAgent(BaseAgent):
 
     @staticmethod
     def _parse_events(source: Any) -> list[EconomicEvent]:
-        """Parse economic events from context (list of dicts)."""
+        """Parse economic events from context (list of dicts).
+
+        Tolerant of both the legacy schema (``title``/``currency``/``actual``)
+        and the news_feed producer schema (``headline``/``title`` and an
+        optional ``actual``). When ``currency`` is absent it is recovered from
+        a leading 3-letter currency token in the title (e.g. ``"USD CPI m/m"``).
+        """
+        import re
+
         if not source or not isinstance(source, list):
             return []
         events: list[EconomicEvent] = []
         for item in source:
             if not isinstance(item, dict):
                 continue
+            title = str(item.get("title") or item.get("event") or item.get("headline") or "")
+            currency = str(item.get("currency") or "")
+            if not currency:
+                match = re.match(r"^([A-Za-z]{3})\s", title)
+                if match:
+                    currency = match.group(1).upper()
+            actual = str(item.get("actual") or "")
+            try:
+                sentiment = float(item.get("sentiment", 0))
+            except (TypeError, ValueError):
+                sentiment = 0.0
             events.append(
                 EconomicEvent(
-                    title=str(item.get("title", item.get("event", ""))),
-                    currency=str(item.get("currency", "")),
+                    title=title,
+                    currency=currency,
                     impact=str(item.get("impact", "LOW")).upper(),
-                    actual=str(item.get("actual", "")),
+                    actual=actual,
                     forecast=str(item.get("forecast", "")),
                     previous=str(item.get("previous", "")),
-                    sentiment=float(item.get("sentiment", 0)),
+                    sentiment=sentiment,
                     category=str(item.get("category", "GENERAL")),
                 )
             )

@@ -552,7 +552,7 @@ td {
   margin-right: 6px;
   vertical-align: middle;
 }
-.liveDot.liveOn { background: var(--success); animation: livePulse 1.6s infinite; }
+.liveDot.liveOn { background: var(--success); animation: livePulse 1.6s; }
 .liveDot.liveOff { background: var(--danger); }
 @keyframes livePulse {
   0%, 100% { opacity: 1; }

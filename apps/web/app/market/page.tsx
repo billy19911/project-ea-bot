@@ -4,11 +4,12 @@
 // Data sumber: /chart/candles (candles) & /chart/analysis (engine analysis).
 // Semua data read‑only; tidak ada nilai palsu, nilai null → garis putus.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import { useLiveQuotes, type LivePosition } from '../../lib/useLiveQuotes';
+import { shouldFlash } from '../../lib/liveFlash';
 import AppShell from '../../components/AppShell';
 import Pagination from '../../components/ui/pagination';
 import PriceChart, { ChartData, ChartLevel } from '../../components/PriceChart';
@@ -66,18 +67,23 @@ type AnalysisData = {
   };
 };
 
-// Renders a numeric value that briefly flashes when it changes — gives the
-// "angka bergerak" feel without re-rendering the whole table.
+// Renders a numeric value that briefly flashes when it changes *meaningfully*
+// — gives the "angka bergerak" feel without strobing on sub-cent noise. The
+// WebSocket ticks ~every 2.5s; flashing on every delta made the page flicker.
 function LiveNumber({ value, format, className }: { value: number; format: (v: number) => string; className?: string }) {
   const [flash, setFlash] = useState(false);
   const prev = useRef<number>(value);
   useEffect(() => {
-    if (prev.current !== value) {
+    // Only flash when the relative change clears the threshold (0.05%).
+    if (shouldFlash(prev.current, value)) {
       prev.current = value;
       setFlash(true);
       const t = setTimeout(() => setFlash(false), 900);
       return () => clearTimeout(t);
     }
+    // Keep the baseline up to date even when we skip the flash, so a series of
+    // tiny moves still accumulates and eventually triggers one.
+    prev.current = value;
   }, [value]);
   return <span className={`${flash ? 'liveFlash ' : ''}${className ?? ''}`.trim()}>{format(value)}</span>;
 }
@@ -239,24 +245,31 @@ export default function MarketPage() {
   const liveQuote = liveQuotes[symbol] ?? null;
   const livePrice = liveQuote?.last ?? liveQuote?.bid ?? null;
 
-  // Build chart level overlays: analysis + open positions
-  const chartLevels: ChartLevel[] = [];
-  if (analysis?.ok && analysis.analysis) {
-    const a = analysis.analysis;
-    if (a.signal !== 'HOLD') chartLevels.push({ label: 'Entry', value: a.entry, kind: 'entry' });
-    if (typeof a.stop_loss === 'number') chartLevels.push({ label: 'SL', value: a.stop_loss, kind: 'stop' });
-    if (typeof a.take_profit === 'number') chartLevels.push({ label: 'TP', value: a.take_profit, kind: 'target' });
-  }
-  if (analysis?.positions) {
-    for (const p of analysis.positions) {
-      if (typeof p.sl === 'number') chartLevels.push({ label: `SL #${p.ticket}`, value: p.sl, kind: 'stop' });
-      if (typeof p.tp === 'number') chartLevels.push({ label: `TP #${p.ticket}`, value: p.tp, kind: 'target' });
+  // Build chart level overlays: analysis + open positions. Memoised so the
+  // array reference is stable across live ticks — an unstable `levels` prop
+  // would bust PriceChart's React.memo and re-render the whole SVG. Note the
+  // live last price is intentionally NOT included here: it changes every tick
+  // and the chart already shows live prices via the stream, so drawing it as a
+  // level line would defeat the memo (and add no information).
+  const chartLevels: ChartLevel[] = useMemo(() => {
+    const out: ChartLevel[] = [];
+    if (analysis?.ok && analysis.analysis) {
+      const a = analysis.analysis;
+      if (a.signal !== 'HOLD') out.push({ label: 'Entry', value: a.entry, kind: 'entry' });
+      if (typeof a.stop_loss === 'number') out.push({ label: 'SL', value: a.stop_loss, kind: 'stop' });
+      if (typeof a.take_profit === 'number') out.push({ label: 'TP', value: a.take_profit, kind: 'target' });
     }
-  }
-  // Live last price drawn as an entry-style line so it moves with the stream.
-  if (typeof livePrice === 'number' && Number.isFinite(livePrice)) {
-    chartLevels.push({ label: 'Harga kini', value: livePrice, kind: 'entry' });
-  }
+    if (analysis?.positions) {
+      for (const p of analysis.positions) {
+        if (typeof p.sl === 'number') out.push({ label: `SL #${p.ticket}`, value: p.sl, kind: 'stop' });
+        if (typeof p.tp === 'number') out.push({ label: `TP #${p.ticket}`, value: p.tp, kind: 'target' });
+      }
+    }
+    return out;
+    // `livePrice` deliberately excluded from deps: it ticks every 2.5s and the
+    // chart's axes already rescale to live bars. Including it would make the
+    // memo (and React.memo on PriceChart) ineffective.
+  }, [analysis]);
 
   const barCount = data?.bars?.length ?? 0;
   const prov = data?.provenance;
