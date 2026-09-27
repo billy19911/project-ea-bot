@@ -114,17 +114,13 @@ class StructureAnalystAgent(BaseAgent):
             priority=AgentPriority.HIGH,
         )
         self.capabilities = [
-            AgentCapability(
-                "support_resistance", "Identifies key support/resistance levels"
-            ),
+            AgentCapability("support_resistance", "Identifies key support/resistance levels"),
             AgentCapability("swing_detection", "Detects swing highs and lows"),
             AgentCapability(
                 "trend_identification",
                 "Identifies trend direction from price-MA relationship",
             ),
-            AgentCapability(
-                "order_block_analysis", "Finds order blocks and liquidity zones"
-            ),
+            AgentCapability("order_block_analysis", "Finds order blocks and liquidity zones"),
             AgentCapability(
                 "market_structure_patterns",
                 "Detects BOS, CHoCH, FVG, and liquidity sweeps",
@@ -180,12 +176,8 @@ class StructureAnalystAgent(BaseAgent):
         hh_hl = False
         lh_ll = False
         if len(recent_highs) >= 2 and len(recent_lows) >= 2:
-            hh_hl = (
-                recent_highs[0] > recent_highs[1] and recent_lows[0] > recent_lows[1]
-            )
-            lh_ll = (
-                recent_highs[0] < recent_highs[1] and recent_lows[0] < recent_lows[1]
-            )
+            hh_hl = recent_highs[0] > recent_highs[1] and recent_lows[0] > recent_lows[1]
+            lh_ll = recent_highs[0] < recent_highs[1] and recent_lows[0] < recent_lows[1]
 
         # Break of Structure (BOS) / Change of Character (CHoCH)
         prior_swing_high = max(highs[-15:-5]) if len(highs) >= 15 else highs[0]
@@ -210,9 +202,7 @@ class StructureAnalystAgent(BaseAgent):
         elif lows[-1] < prior_swing_low and current_price > prior_swing_low:
             sweep = "BULLISH_SWEEP"
 
-        structure_type = (
-            "TRENDING_UP" if hh_hl else ("TRENDING_DOWN" if lh_ll else "RANGING")
-        )
+        structure_type = "TRENDING_UP" if hh_hl else ("TRENDING_DOWN" if lh_ll else "RANGING")
 
         return {
             "structure_type": structure_type,
@@ -409,8 +399,7 @@ class StructureAnalystAgent(BaseAgent):
             false_breakouts = [
                 lesson
                 for lesson in lessons
-                if "breakout" in str(lesson).lower()
-                or "structure" in str(lesson).lower()
+                if "breakout" in str(lesson).lower() or "structure" in str(lesson).lower()
             ]
             if len(false_breakouts) >= 2:
                 calibrated_conf = max(0.1, calibrated_conf - 0.1)
@@ -424,11 +413,7 @@ class StructureAnalystAgent(BaseAgent):
         if agent_memory and hasattr(agent_memory, "adjust_confidence"):
             regime = context.get(
                 "regime",
-                (
-                    "TRENDING"
-                    if ("BULLISH" in signal or "BEARISH" in signal)
-                    else "RANGING"
-                ),
+                ("TRENDING" if ("BULLISH" in signal or "BEARISH" in signal) else "RANGING"),
             )
             calibrated_conf, mem_note = agent_memory.adjust_confidence(
                 self.name, regime, calibrated_conf
@@ -479,9 +464,7 @@ class StructureAnalystAgent(BaseAgent):
             fvgs = self._detect_fvg(highs, lows, prices)
 
             # 4. S/R Levels
-            supports, resistances = self._calculate_support_resistance(
-                lows, highs, prices
-            )
+            supports, resistances = self._calculate_support_resistance(lows, highs, prices)
             trend = (
                 self._determine_trend(prices, ema_fast, ema_slow)
                 if ema_fast and ema_slow
@@ -569,15 +552,11 @@ class StructureAnalystAgent(BaseAgent):
                 elif is_ranging:
                     base_conf -= 0.15
                 confidence = min(0.95, base_conf)
-                adx_desc = (
-                    "Trending"
-                    if is_trending
-                    else ("Ranging" if is_ranging else "Neutral")
-                )
+                adx_desc = "Trending" if is_trending else ("Ranging" if is_ranging else "Neutral")
                 adx_str = f"{adx_val:.1f}" if adx_val is not None else "N/A"
                 sw_str = f"{swing_low:.4f}" if swing_low is not None else "N/A"
                 reasoning = (
-                    f"Bullish structure confirmed ({', '.join(bullish_factors)}). "
+                    f"Struktur bullish terkonfirmasi ({', '.join(bullish_factors)}). "
                     f"ADX: {adx_str} ({adx_desc}). "
                     f"Swing low: {sw_str}"
                 )
@@ -589,15 +568,11 @@ class StructureAnalystAgent(BaseAgent):
                 elif is_ranging:
                     base_conf -= 0.15
                 confidence = min(0.95, base_conf)
-                adx_desc = (
-                    "Trending"
-                    if is_trending
-                    else ("Ranging" if is_ranging else "Neutral")
-                )
+                adx_desc = "Trending" if is_trending else ("Ranging" if is_ranging else "Neutral")
                 adx_str = f"{adx_val:.1f}" if adx_val is not None else "N/A"
                 sw_str = f"{swing_high:.4f}" if swing_high is not None else "N/A"
                 reasoning = (
-                    f"Bearish structure confirmed ({', '.join(bearish_factors)}). "
+                    f"Struktur bearish terkonfirmasi ({', '.join(bearish_factors)}). "
                     f"ADX: {adx_str} ({adx_desc}). "
                     f"Swing high: {sw_str}"
                 )
@@ -606,9 +581,9 @@ class StructureAnalystAgent(BaseAgent):
                 confidence = 0.4
                 adx_str = f"{adx_val:.1f}" if adx_val is not None else "N/A"
                 reasoning = (
-                    f"Market structure balanced/ranging. "
+                    f"Struktur pasar seimbang/ranging. "
                     f"ADX: {adx_str}. "
-                    f"Key levels tracked: {len(key_levels)}"
+                    f"Level kunci terlacak: {len(key_levels)}"
                 )
 
             # 7. Apply Self-Improvement Calibration
@@ -643,9 +618,7 @@ class StructureAnalystAgent(BaseAgent):
         except Exception as e:
             return self._create_fallback_result(context.get("prices", []), str(e))
 
-    def _create_fallback_result(
-        self, prices: list[float], reason: str
-    ) -> dict[str, Any]:
+    def _create_fallback_result(self, prices: list[float], reason: str) -> dict[str, Any]:
         """Create a fallback result on error or insufficient data."""
         return {
             "agent": self.name,

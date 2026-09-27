@@ -168,7 +168,7 @@ def test_market_lead_reasons_include_historical_lessons() -> None:
 
     result = lead.analyze({"event_type": "TREND_BULLISH", "symbol": "EURUSD", "lessons": _LESSONS})
 
-    assert any("Historical lessons" in reason for reason in result["reasons"])
+    assert any("Pelajaran historis" in reason for reason in result["reasons"])
 
 
 def test_market_lead_signal_unchanged_by_lessons() -> None:
@@ -196,7 +196,7 @@ def test_risk_lead_reasons_include_historical_lessons() -> None:
 
     result = lead.analyze(context)
 
-    assert any("Historical lessons" in reason for reason in result["reasons"])
+    assert any("Pelajaran historis" in reason for reason in result["reasons"])
 
 
 def test_risk_lead_signal_unchanged_by_lessons() -> None:

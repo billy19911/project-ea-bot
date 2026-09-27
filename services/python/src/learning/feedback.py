@@ -66,9 +66,7 @@ class LessonFeedbackProvider:
             ]
 
         wins = sum(1 for lesson in lessons if self._outcome_of(lesson) in _WIN_OUTCOMES)
-        losses = sum(
-            1 for lesson in lessons if self._outcome_of(lesson) in _LOSS_OUTCOMES
-        )
+        losses = sum(1 for lesson in lessons if self._outcome_of(lesson) in _LOSS_OUTCOMES)
 
         recent = []
         for lesson in reversed(lessons[-max(0, int(max_lessons)) :]):
@@ -91,7 +89,7 @@ class LessonFeedbackProvider:
 def format_lessons_reason(lessons: Any) -> Optional[str]:
     """Format a compact advisory reason from a lesson summary, or ``None``.
 
-    Returns e.g. ``"Historical lessons: 3 (W 2/L 1) — last: EURUSD win: keep it"``.
+    Returns e.g. ``"Pelajaran historis: 3 (M 2/K 1) — terakhir: EURUSD win: keep it"``.
     Only reads the summary dict produced by
     :meth:`LessonFeedbackProvider.summarize_for_symbol`; malformed input
     yields ``None`` so callers can simply skip the reason.
@@ -107,12 +105,12 @@ def format_lessons_reason(lessons: Any) -> Optional[str]:
     if count <= 0:
         return None
 
-    reason = f"Historical lessons: {count} (W {wins}/L {losses})"
+    reason = f"Pelajaran historis: {count} (M {wins}/K {losses})"
     recent = lessons.get("recent") or []
     if recent and isinstance(recent[0], dict):
         last = str(recent[0].get("lesson") or recent[0].get("category") or "").strip()
         if last:
-            reason += f" — last: {last}"
+            reason += f" — terakhir: {last}"
     return reason
 
 
@@ -178,9 +176,7 @@ def record_review_lesson_v2(engine: Any, store: Any, record: Any) -> Any:
         root_cause = _review_field(record, "root_cause", None)
 
         trade_id = str(_review_field(record, "trade_id", "") or "")
-        symbol = str(
-            trade_result.get("symbol") or _review_field(review, "symbol", "") or ""
-        )
+        symbol = str(trade_result.get("symbol") or _review_field(review, "symbol", "") or "")
         outcome = str(
             trade_result.get("outcome") or _review_field(review, "outcome", "") or ""
         ).lower()
@@ -207,9 +203,7 @@ def record_review_lesson_v2(engine: Any, store: Any, record: Any) -> Any:
             store.add_lesson(recorded.to_dict())
         return recorded
     except Exception as exc:  # noqa: BLE001 - learning must never break review
-        logger.warning(
-            "Learning Engine v2 recording failed (review continues): %s", exc
-        )
+        logger.warning("Learning Engine v2 recording failed (review continues): %s", exc)
         return None
 
 

@@ -109,7 +109,7 @@ class TestVolatilityAnalysis:
         data = {"atr": 0.0, "price": 100.0, "bollinger_width": 0.0, "returns": []}
         result = agent.analyze({"volatility": data})
         assert result["signal"] == "UNKNOWN"
-        assert "Historical returns unavailable" in result["reasoning"]
+        assert "Data return historis tidak tersedia" in result["reasoning"]
 
     def test_atr_percent_high(self, agent):
         data = {

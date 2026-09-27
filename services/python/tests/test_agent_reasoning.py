@@ -54,7 +54,7 @@ def test_memory_confidence_adjust_up() -> None:
         mem.record_outcome("technical_analyst", "BULLISH", True, regime="trend_up")
     adjusted, note = mem.adjust_confidence("technical_analyst", "trend_up", 0.6)
     assert adjusted > 0.6
-    assert "correct in trend_up" in note
+    assert "benar di trend_up" in note
 
 
 def test_memory_confidence_adjust_down() -> None:
@@ -77,7 +77,7 @@ def test_memory_unknown_agent() -> None:
     mem = AgentPatternMemory(min_samples=2)
     adjusted, note = mem.adjust_confidence("nobody", "range", 0.5)
     assert adjusted == 0.5
-    assert "no prior record" in note
+    assert "belum ada catatan" in note
 
 
 def test_memory_bounded() -> None:
@@ -153,4 +153,4 @@ def test_analyst_uses_memory(monkeypatch) -> None:
         }
     )
     joined = " ".join(out["reasons"])
-    assert "correct in trend_up" in joined
+    assert "benar di trend_up" in joined

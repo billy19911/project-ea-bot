@@ -758,10 +758,10 @@ class MarketLead(BaseAgent):
                 for name in names
             ]
             reasons = [
-                f"Market regime detected: {regime}",
+                f"Regime pasar terdeteksi: {regime}",
                 (
-                    f"{winner} selected by adaptive evidence weight "
-                    f"({votes[winner]:.3f} of {total_weight:.3f})"
+                    f"{winner} dipilih berdasarkan bobot bukti adaptif "
+                    f"({votes[winner]:.3f} dari {total_weight:.3f})"
                 ),
             ]
         else:
@@ -769,13 +769,14 @@ class MarketLead(BaseAgent):
             confidence = 0.0
             dissent = []
             reasons = [
-                f"Market regime detected: {regime}",
-                "No directional evidence; consensus is NEUTRAL",
+                f"Regime pasar terdeteksi: {regime}",
+                "Tidak ada bukti arah; konsensus NEUTRAL",
             ]
 
         for name in dissent:
             reasons.append(
-                f"dissent: {name} reported " f"{specialist_results[name].get('signal', 'NEUTRAL')}"
+                f"perbedaan pendapat: {name} melaporkan "
+                f"{specialist_results[name].get('signal', 'NEUTRAL')}"
             )
 
         # Phase 7 (advisory only): cite prior lessons without touching the

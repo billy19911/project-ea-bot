@@ -184,18 +184,18 @@ class AgentPatternMemory:
         """
         skill = self.skill_for(agent, regime)
         if skill is None:
-            return base, "no prior record for this regime"
+            return base, "belum ada catatan untuk regime ini"
         if not skill.reliable:
             return base, (
-                f"{skill.total} prior sample(s) in {regime} "
-                f"(need >= {self.min_samples}) — insufficient"
+                f"{skill.total} sampel sebelumnya di {regime} "
+                f"(butuh >= {self.min_samples}) — belum cukup"
             )
         # Map accuracy 0..1 to a -0.15..+0.15 nudge around 0.5.
         nudge = (skill.accuracy - 0.5) * 0.3
         adjusted = max(0.0, min(1.0, base + nudge))
         note = (
-            f"{skill.agent} historically {skill.accuracy:.0%} correct in "
-            f"{regime} ({skill.total} cases) — confidence {nudge:+.2f}"
+            f"{skill.agent} historis {skill.accuracy:.0%} benar di "
+            f"{regime} ({skill.total} kasus) — keyakinan {nudge:+.2f}"
         )
         return adjusted, note
 

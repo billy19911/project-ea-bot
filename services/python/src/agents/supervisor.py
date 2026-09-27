@@ -571,7 +571,7 @@ class SupervisorAgent(BaseAgent):
                             "agent": agent_name,
                             "signal": "NEUTRAL",
                             "confidence": 0.0,
-                            "reasons": [f"Error running agent: {exc}"],
+                            "reasons": [f"Error menjalankan agent: {exc}"],
                         }
                         summary_reasons.append(f"{agent_name}: NEUTRAL (conf=0.00)")
                         continue

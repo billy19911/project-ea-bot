@@ -304,7 +304,7 @@ class AgentSynthesizer:
             return SynthesisResult(
                 proposal=None,
                 agreement_score=0.0,
-                conflicts_found=["No agent outputs to synthesise"],
+                conflicts_found=["Tidak ada output agent untuk disintesis"],
                 agent_count=0,
             )
 
@@ -333,12 +333,12 @@ class AgentSynthesizer:
 
         # Build reasoning summary
         reasoning_parts = [
-            f"Consensus: {direction.value} ({bullish}B/{bearish}S/{neutral}N)",
-            f"Agreement: {agreement_score:.0%}",
-            f"Avg confidence: {agg['avg_confidence']:.2f}",
+            f"Konsensus: {direction.value} ({bullish}B/{bearish}S/{neutral}N)",
+            f"Kesepakatan: {agreement_score:.0%}",
+            f"Keyakinan rata-rata: {agg['avg_confidence']:.2f}",
         ]
         if conflicts:
-            reasoning_parts.append(f"Conflicts: {len(conflicts)}")
+            reasoning_parts.append(f"Konflik: {len(conflicts)}")
 
         reasoning = " | ".join(reasoning_parts)
 

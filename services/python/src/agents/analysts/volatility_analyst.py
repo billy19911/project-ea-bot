@@ -109,13 +109,13 @@ class VolatilityAnalystAgent(BaseAgent):
                 signal, confidence = "NORMAL", 0.62
             else:
                 signal, confidence = "UNKNOWN", 0.0
-            reasoning = [f"Volatility regime: {signal.lower()}"]
+            reasoning = [f"Regime volatilitas: {signal.lower()}"]
             if squeeze:
-                reasoning.append("Bollinger bands indicate a squeeze")
+                reasoning.append("Bollinger bands menunjukkan squeeze (penyempitan)")
             if wide:
-                reasoning.append("Bollinger bands are wide")
+                reasoning.append("Bollinger bands melebar")
             if not data.returns and annualized == 0:
-                reasoning.append("Historical returns unavailable")
+                reasoning.append("Data return historis tidak tersedia")
             metrics = {
                 "atr": round(data.atr, 10),
                 "atr_percent": round(atr_percent, 10),
@@ -132,7 +132,7 @@ class VolatilityAnalystAgent(BaseAgent):
                 "agent": self.name,
                 "signal": "UNKNOWN",
                 "confidence": 0.0,
-                "reasoning": [f"Invalid volatility input: {exc}"],
+                "reasoning": [f"Input volatilitas tidak valid: {exc}"],
                 "metrics": {},
             }
 

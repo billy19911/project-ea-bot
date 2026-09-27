@@ -92,18 +92,10 @@ and detailed deterministic reasoning."""
             priority=AgentPriority.HIGH,
         )
         self.capabilities = [
-            AgentCapability(
-                "rsi_analysis", "Analyzes RSI levels and centerline crosses"
-            ),
-            AgentCapability(
-                "macd_analysis", "Assesses MACD line, signal line, and histogram"
-            ),
-            AgentCapability(
-                "stochastic_analysis", "Evaluates Stochastic %K/%D positioning"
-            ),
-            AgentCapability(
-                "velocity_calculation", "Measures price velocity and rate of change"
-            ),
+            AgentCapability("rsi_analysis", "Analyzes RSI levels and centerline crosses"),
+            AgentCapability("macd_analysis", "Assesses MACD line, signal line, and histogram"),
+            AgentCapability("stochastic_analysis", "Evaluates Stochastic %K/%D positioning"),
+            AgentCapability("velocity_calculation", "Measures price velocity and rate of change"),
             AgentCapability(
                 "divergence_detection",
                 "Identifies regular and hidden bullish/bearish divergences",
@@ -162,26 +154,14 @@ and detailed deterministic reasoning."""
     ) -> Optional[str]:
         """Classify regular or hidden divergence for two confirmed pivots."""
         if pivot_kind == "low":
-            if (
-                latest_price < previous_price
-                and latest_oscillator > previous_oscillator
-            ):
+            if latest_price < previous_price and latest_oscillator > previous_oscillator:
                 return "regular_bullish"
-            if (
-                latest_price > previous_price
-                and latest_oscillator < previous_oscillator
-            ):
+            if latest_price > previous_price and latest_oscillator < previous_oscillator:
                 return "hidden_bullish"
         else:
-            if (
-                latest_price > previous_price
-                and latest_oscillator < previous_oscillator
-            ):
+            if latest_price > previous_price and latest_oscillator < previous_oscillator:
                 return "regular_bearish"
-            if (
-                latest_price < previous_price
-                and latest_oscillator > previous_oscillator
-            ):
+            if latest_price < previous_price and latest_oscillator > previous_oscillator:
                 return "hidden_bearish"
         return None
 
@@ -244,10 +224,7 @@ and detailed deterministic reasoning."""
         """Run the core momentum routine for one price series."""
         if not isinstance(prices, list) or len(prices) < 15:
             raise ValueError("Insufficient price data for momentum analysis")
-        if any(
-            isinstance(value, bool) or not isinstance(value, (int, float))
-            for value in prices
-        ):
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in prices):
             raise ValueError("prices must contain numeric values")
         prices = [float(value) for value in prices]
 
@@ -259,8 +236,7 @@ and detailed deterministic reasoning."""
                 raise ValueError("prices, highs, and lows must have equal lengths")
             series = highs + lows
             if any(
-                isinstance(value, bool) or not isinstance(value, (int, float))
-                for value in series
+                isinstance(value, bool) or not isinstance(value, (int, float)) for value in series
             ):
                 raise ValueError("highs and lows must contain numeric values")
             highs = [float(value) for value in highs]
@@ -309,26 +285,26 @@ and detailed deterministic reasoning."""
         if rsi_val is not None:
             if rsi_val > 70:
                 bear_score += 1.0
-                reasons.append(f"RSI is overbought at {rsi_val:.1f}")
+                reasons.append(f"RSI overbought di {rsi_val:.1f}")
             elif rsi_val < 30:
                 bull_score += 1.0
-                reasons.append(f"RSI is oversold at {rsi_val:.1f}")
+                reasons.append(f"RSI oversold di {rsi_val:.1f}")
             elif rsi_val >= 55:
                 bull_score += 0.8
-                reasons.append(f"RSI bullish above centerline at {rsi_val:.1f}")
+                reasons.append(f"RSI bullish di atas garis tengah {rsi_val:.1f}")
             elif rsi_val <= 45:
                 bear_score += 0.8
-                reasons.append(f"RSI bearish below centerline at {rsi_val:.1f}")
+                reasons.append(f"RSI bearish di bawah garis tengah {rsi_val:.1f}")
             else:
-                reasons.append(f"RSI neutral at {rsi_val:.1f}")
+                reasons.append(f"RSI netral di {rsi_val:.1f}")
 
         if macd_res:
             if macd_res.histogram > 0:
                 bull_score += 1.0
-                reasons.append(f"MACD histogram positive ({macd_res.histogram:.4f})")
+                reasons.append(f"Histogram MACD positif ({macd_res.histogram:.4f})")
             elif macd_res.histogram < 0:
                 bear_score += 1.0
-                reasons.append(f"MACD histogram negative ({macd_res.histogram:.4f})")
+                reasons.append(f"Histogram MACD negatif ({macd_res.histogram:.4f})")
             if macd_res.macd_line > macd_res.signal_line:
                 bull_score += 0.5
             else:
@@ -337,14 +313,10 @@ and detailed deterministic reasoning."""
         if stoch_res:
             if stoch_res.k < 20 and stoch_res.d < 20:
                 bull_score += 0.8
-                reasons.append(
-                    f"Stochastic oversold (K:{stoch_res.k:.1f}, D:{stoch_res.d:.1f})"
-                )
+                reasons.append(f"Stochastic oversold (K:{stoch_res.k:.1f}, D:{stoch_res.d:.1f})")
             elif stoch_res.k > 80 and stoch_res.d > 80:
                 bear_score += 0.8
-                reasons.append(
-                    f"Stochastic overbought (K:{stoch_res.k:.1f}, D:{stoch_res.d:.1f})"
-                )
+                reasons.append(f"Stochastic overbought (K:{stoch_res.k:.1f}, D:{stoch_res.d:.1f})")
             elif stoch_res.k > stoch_res.d:
                 bull_score += 0.4
             elif stoch_res.k < stoch_res.d:
@@ -352,10 +324,10 @@ and detailed deterministic reasoning."""
 
         if velocity > 1.0:
             bull_score += 0.5
-            reasons.append(f"Positive velocity (+{velocity:.2f}%)")
+            reasons.append(f"Kecepatan positif (+{velocity:.2f}%)")
         elif velocity < -1.0:
             bear_score += 0.5
-            reasons.append(f"Negative velocity ({velocity:.2f}%)")
+            reasons.append(f"Kecepatan negatif ({velocity:.2f}%)")
 
         for divergence in divergences:
             score = 1.5
@@ -364,7 +336,7 @@ and detailed deterministic reasoning."""
                 bull_score += score
             else:
                 bear_score += score
-            reasons.append(f"{label} on {divergence.indicator}")
+            reasons.append(f"Divergensi {label} pada {divergence.indicator}")
 
         diff = bull_score - bear_score
         if diff >= 2.0:
@@ -402,9 +374,7 @@ and detailed deterministic reasoning."""
             "agent": self.name,
             "signal": signal,
             "confidence": confidence,
-            "reasoning": (
-                "; ".join(reasons) if reasons else "Neutral momentum conditions"
-            ),
+            "reasoning": ("; ".join(reasons) if reasons else "Kondisi momentum netral"),
             "rsi_value": round(rsi_val, 2) if rsi_val is not None else None,
             "macd_data": macd_dict,
             "stoch_data": stoch_dict,
@@ -457,11 +427,7 @@ and detailed deterministic reasoning."""
 
         if agent_memory is not None and hasattr(agent_memory, "adjust_confidence"):
             try:
-                regime = (
-                    "TRENDING"
-                    if ("BULLISH" in signal or "BEARISH" in signal)
-                    else "RANGING"
-                )
+                regime = "TRENDING" if ("BULLISH" in signal or "BEARISH" in signal) else "RANGING"
                 adjusted_conf, mem_note = agent_memory.adjust_confidence(
                     self.name, regime, confidence
                 )
@@ -508,9 +474,7 @@ and detailed deterministic reasoning."""
     def _create_fallback_result(self, prices: Any, reason: str) -> dict[str, Any]:
         """Create a fallback result on error or insufficient data."""
         clean_prices = (
-            [p for p in prices if isinstance(p, (int, float))]
-            if isinstance(prices, list)
-            else []
+            [p for p in prices if isinstance(p, (int, float))] if isinstance(prices, list) else []
         )
         return {
             "agent": self.name,

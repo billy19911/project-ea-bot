@@ -300,7 +300,7 @@ class TechnicalAnalystAgent(BaseAgent):
                 "agent": self.name,
                 "signal": signal,
                 "confidence": confidence,
-                "reasons": ["No events to analyse"],
+                "reasons": ["Tidak ada event untuk dianalisis"],
                 "event_count": 0,
             }
 
@@ -354,8 +354,8 @@ class TechnicalAnalystAgent(BaseAgent):
                 net = bull_score - bear_score
                 total = bull_score + bear_score
                 reasons.append(
-                    f"Strong {regime.replace('trend_', '')} trend (ADX {trend_strength:.0f}) — "
-                    "counter-trend reads discounted"
+                    f"Tren {regime.replace('trend_', '')} kuat (ADX {trend_strength:.0f}) — "
+                    "sinyal melawan tren didiskon"
                 )
 
         # --- Decide + conflict detection ---------------------------------
@@ -373,13 +373,13 @@ class TechnicalAnalystAgent(BaseAgent):
         if conflict:
             confidence *= 0.6
             reasons.append(
-                f"Conflicting evidence (bull {bull_score:.1f} vs bear {bear_score:.1f}) — "
-                "reduced conviction"
+                f"Bukti bertentangan (bull {bull_score:.1f} vs bear {bear_score:.1f}) — "
+                "keyakinan diturunkan"
             )
         if bull_ev:
-            reasons.append(f"Bullish evidence: {', '.join(sorted(set(bull_ev)))}")
+            reasons.append(f"Bukti bullish: {', '.join(sorted(set(bull_ev)))}")
         if bear_ev:
-            reasons.append(f"Bearish evidence: {', '.join(sorted(set(bear_ev)))}")
+            reasons.append(f"Bukti bearish: {', '.join(sorted(set(bear_ev)))}")
 
         # --- Pattern memory (advisory) -----------------------------------
         try:
