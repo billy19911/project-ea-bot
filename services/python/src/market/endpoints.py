@@ -109,6 +109,16 @@ async def get_symbol_spec_endpoint(
     return _get_spec(symbol)
 
 
+@router.get("/session")
+async def market_session(
+    symbol: str = Query(default="XAUUSD", description="Symbol to check"),
+) -> dict:
+    """Return live market-session status for *symbol* (open/closed + reason)."""
+    from .sessions import get_market_session
+
+    return {"status": "ok", **get_market_session(symbol)}
+
+
 @router.get("/sentiment")
 async def get_market_sentiment(
     symbol: str = Query(default="XAUUSD", description="Trading symbol"),

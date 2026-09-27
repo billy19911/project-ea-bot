@@ -23,6 +23,11 @@ Design rules:
   it (close/high/low series, computed market state, the detected events,
   volatility inputs); the latest snapshot per symbol is cached so cycles that
   arrive without one (e.g. a manual run) are still analysed with real data.
+* **Market session awareness** — before polling a symbol the loop asks
+  :func:`market.sessions.get_market_session` whether the market is open. A
+  closed market (weekend/holiday/off-session) is skipped entirely instead of
+  analysing stale bars; crypto stays open 24/7. The check is fail-open: any
+  error means "poll anyway".
 * **OFF by default** — the lifespan starts this loop only when
   ``MARKET_FEED_ENABLED=true`` (operator opt-in).
 
@@ -72,6 +77,12 @@ class MarketFeedLoop:
             event is routed. Used to WAKE the scheduler immediately so the
             signal → execution path is not delayed by the idle poll. Fail-safe:
             a raising callback is swallowed.
+        session_max_age_s: Data older than this (seconds) means the market is
+            closed; passed to :func:`market.sessions.get_market_session`.
+        session_provider: Optional ``Callable[[str], dict]`` returning a
+            session status for a symbol. Test seam; when ``None`` the
+            production :func:`market.sessions.get_market_session` is used with
+            ``connector=self._connector`` and ``max_age_s=self.session_max_age_s``.
     """
 
     def __init__(
@@ -87,6 +98,8 @@ class MarketFeedLoop:
         event_cooldown_s: float = 300.0,
         clock: Optional[Callable[[], float]] = None,
         on_emit: Optional[Callable[[], None]] = None,
+        session_max_age_s: float = 1800.0,
+        session_provider: Optional[Callable[[str], dict]] = None,
     ) -> None:
         self.queue = queue
         self.symbols = [str(s).strip() for s in (symbols or []) if str(s).strip()]
@@ -98,6 +111,8 @@ class MarketFeedLoop:
         self._clock = clock if clock is not None else time.monotonic
         self._on_emit = on_emit
         self._connector = connector if connector is not None else self._default_connector()
+        self.session_max_age_s = float(session_max_age_s)
+        self._session_provider = session_provider
         if detector_factory is not None:
             self._detector = detector_factory()
         else:
@@ -115,6 +130,23 @@ class MarketFeedLoop:
         from ..mt5 import connector as mt5_connector
 
         return mt5_connector
+
+    def _session_status(self, symbol: str) -> dict:
+        """Return the market-session status for *symbol* (fail-open upstream).
+
+        Uses the injected ``session_provider`` when present (test seam);
+        otherwise the production :func:`market.sessions.get_market_session`
+        with this loop's connector and ``session_max_age_s``.
+        """
+        if self._session_provider is not None:
+            return self._session_provider(symbol)
+        from ..market.sessions import get_market_session
+
+        return get_market_session(
+            symbol,
+            connector=self._connector,
+            max_age_s=self.session_max_age_s,
+        )
 
     @property
     def running(self) -> bool:
@@ -138,6 +170,19 @@ class MarketFeedLoop:
 
     def _poll_symbol(self, symbol: str) -> int:
         """Poll one symbol; returns the number of events emitted (0 on skip)."""
+        session: Optional[dict] = None
+        try:
+            session = self._session_status(symbol)
+            if not session.get("open", True):
+                logger.info(
+                    "Market feed: %s market closed (%s) — skipping",
+                    symbol,
+                    session.get("reason"),
+                )
+                return 0
+        except Exception as exc:  # noqa: BLE001 — fail-open, never block on session check
+            logger.debug("Market feed session check skipped: %s", exc)
+
         try:
             bars = self._connector.get_ohlc(symbol, self.timeframe, self.count)
         except Exception as exc:  # noqa: BLE001 - MT5 must never kill the loop
@@ -165,6 +210,11 @@ class MarketFeedLoop:
 
         self._fingerprints[symbol] = fingerprint
         snapshot = self._build_snapshot(symbol, ohlcv, events)
+        if session is not None:
+            try:
+                snapshot["session"] = session
+            except Exception:  # noqa: BLE001 - session attach is best-effort
+                logger.debug("Market feed could not attach session to snapshot for %s", symbol)
         try:
             set_latest_snapshot(symbol, snapshot)
         except Exception:  # noqa: BLE001 - the snapshot cache must never kill the loop
