@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
+import { analysisSignature, chartSignature } from '../../lib/chartSignature';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import { useLiveQuotes, type LivePosition } from '../../lib/useLiveQuotes';
 import { shouldFlash } from '../../lib/liveFlash';
@@ -25,6 +26,76 @@ function fmtLive(v: number): string {
   if (Math.abs(v) >= 1000) return v.toFixed(1);
   if (Math.abs(v) >= 10) return v.toFixed(2);
   return v.toFixed(5);
+}
+
+// Merge a freshly fetched base window (no `before`) into the currently loaded
+// dataset. If the user had lazy-loaded older history (current has MORE bars and
+// the same symbol/timeframe), the incoming base window is a strict suffix of it;
+// we keep the existing older portion and splice in the fresh tail (updated live
+// bar + any newly closed bars). Returns the incoming payload unchanged when
+// there is nothing to preserve (different identity, or no extra history), so the
+// common case stays zero-copy.
+function mergeRefreshWithHistory(prev: ChartData | null, incoming: ChartData): ChartData {
+  if (!prev?.ok || !prev.bars?.length || !incoming.ok || !incoming.bars?.length) return incoming;
+  if (prev.symbol !== incoming.symbol || prev.timeframe !== incoming.timeframe) return incoming;
+  if (prev.bars.length <= incoming.bars.length) return incoming;
+
+  // Index of the incoming window's first bar inside the currently loaded set.
+  const startIdx = prev.bars.findIndex((b) => b.time === incoming.bars![0].time);
+  if (startIdx <= 0) return incoming; // no overlap / no older history to keep
+
+  const merge = (a?: (number | null)[], b?: (number | null)[]) => [...(b ?? []), ...(a ?? [])];
+  const prevOv = prev.overlays;
+  return {
+    ...incoming,
+    bars: [...prev.bars.slice(0, startIdx), ...incoming.bars],
+    overlays: {
+      ema_fast: {
+        period: incoming.overlays?.ema_fast.period ?? prevOv?.ema_fast.period ?? 20,
+        values: merge(incoming.overlays?.ema_fast.values, prevOv?.ema_fast.values?.slice(0, startIdx)),
+      },
+      ema_slow: {
+        period: incoming.overlays?.ema_slow.period ?? prevOv?.ema_slow.period ?? 50,
+        values: merge(incoming.overlays?.ema_slow.values, prevOv?.ema_slow.values?.slice(0, startIdx)),
+      },
+      bollinger:
+        incoming.overlays?.bollinger && prevOv?.bollinger
+          ? {
+              period: incoming.overlays.bollinger.period,
+              std: incoming.overlays.bollinger.std,
+              upper: merge(incoming.overlays.bollinger.upper, prevOv.bollinger.upper?.slice(0, startIdx)),
+              middle: merge(incoming.overlays.bollinger.middle, prevOv.bollinger.middle?.slice(0, startIdx)),
+              lower: merge(incoming.overlays.bollinger.lower, prevOv.bollinger.lower?.slice(0, startIdx)),
+            }
+          : incoming.overlays?.bollinger ?? null,
+    },
+    panels: {
+      rsi:
+        incoming.panels?.rsi && prev.panels?.rsi
+          ? { period: incoming.panels.rsi.period, values: merge(incoming.panels.rsi.values, prev.panels.rsi.values?.slice(0, startIdx)) }
+          : incoming.panels?.rsi ?? null,
+      macd:
+        incoming.panels?.macd && prev.panels?.macd
+          ? {
+              fast: incoming.panels.macd.fast,
+              slow: incoming.panels.macd.slow,
+              signal: incoming.panels.macd.signal,
+              line: merge(incoming.panels.macd.line, prev.panels.macd.line?.slice(0, startIdx)),
+              signal_line: merge(incoming.panels.macd.signal_line, prev.panels.macd.signal_line?.slice(0, startIdx)),
+              histogram: merge(incoming.panels.macd.histogram, prev.panels.macd.histogram?.slice(0, startIdx)),
+            }
+          : incoming.panels?.macd ?? null,
+    },
+    provenance: {
+      ...incoming.provenance,
+      source: incoming.provenance?.source ?? prev.provenance?.source ?? 'mt5',
+      mode: incoming.provenance?.mode ?? prev.provenance?.mode ?? 'live-read-only',
+      bar_count: prev.bars.slice(0, startIdx).length + incoming.bars.length,
+    },
+    // Preserve the "older bars still exist" flag only until we know the merged
+    // set is exhausted; the incoming page knew whether even older data remains.
+    has_more: prev.has_more,
+  };
 }
 
 // Analysis response shape (additional to candles)
@@ -112,6 +183,26 @@ export default function MarketPage() {
 
   const reqSeq = useRef(0);
   const loadingMoreRef = useRef(false);
+  // Structural fingerprints of the last applied payloads. A ~10s auto-refresh
+  // often returns byte-identical data (no new bar yet); assigning it would make
+  // PriceChart rebuild its whole SVG for nothing — the visible "kedip". We only
+  // adopt a new object when its signature actually differs.
+  const chartSigRef = useRef<string>('');
+  const analysisSigRef = useRef<string>('');
+  // Mirror of the current `data` for use inside `load` without making it a
+  // dependency (which would restart the auto-refresh interval on every fetch).
+  const dataRef = useRef<ChartData | null>(null);
+  dataRef.current = data;
+
+  // Keep the signature guard in sync with whatever `data` currently holds — not
+  // just what `load` last adopted. This is what lets lazy-loaded history survive
+  // auto-refresh: after `loadMoreHistory` prepends bars, this effect records the
+  // enlarged dataset's signature so the next base-window refresh (whose signature
+  // differs) still runs `mergeRefreshWithHistory` instead of being skipped, and
+  // never re-adopts the small window on its own.
+  useEffect(() => {
+    if (data) chartSigRef.current = chartSignature(data);
+  }, [data]);
 
   // Realtime stream (WS): price quotes + open-position P&L, read-only.
   const {
@@ -141,17 +232,35 @@ export default function MarketPage() {
       }
       const chartBody: ChartData = await candlesRes.json();
       if (seq !== reqSeq.current) return;
-      setData(chartBody);
-      setUpdatedAt(new Date());
+      // If the user already lazy-loaded older history, the base window returned
+      // here is a strict suffix of it. Merge the fresh tail into the existing
+      // dataset instead of replacing it — otherwise every auto-refresh would
+      // drop the prepended bars and jarringly reset the viewport.
+      const next = mergeRefreshWithHistory(dataRef.current, chartBody);
+      // Adopt only when the payload structurally changed — see chartSignature.
+      const nextChartSig = chartSignature(next);
+      if (nextChartSig !== chartSigRef.current) {
+        chartSigRef.current = nextChartSig;
+        setData(next);
+        setUpdatedAt(new Date());
+      }
       if (chartBody.ok && chartBody.symbol) {
         setSymbols(prev => (prev.includes(chartBody.symbol!) ? prev : [...prev, chartBody.symbol!]));
       }
       // Handle analysis response (optional)
       if (analysisRes.ok) {
         const aBody: AnalysisData = await analysisRes.json();
-        if (seq === reqSeq.current) setAnalysis(aBody);
+        if (seq !== reqSeq.current) return;
+        const nextAnalysisSig = analysisSignature(aBody);
+        if (nextAnalysisSig !== analysisSigRef.current) {
+          analysisSigRef.current = nextAnalysisSig;
+          setAnalysis(aBody);
+        }
       } else if (seq === reqSeq.current) {
-        setAnalysis(null);
+        if (analysisSigRef.current !== '') {
+          analysisSigRef.current = '';
+          setAnalysis(null);
+        }
       }
     } catch {
       if (seq === reqSeq.current) setError('Tidak bisa menghubungi API. Periksa Node pada :3789.');

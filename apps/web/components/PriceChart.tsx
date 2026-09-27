@@ -17,6 +17,7 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { nextViewport } from '../lib/viewport';
+import { chartSignature } from '../lib/chartSignature';
 
 export type ChartBar = {
   time: string;
@@ -761,7 +762,28 @@ function PriceChart({
   );
 }
 
-// Memoised: the parent re-renders on every live tick (~2.5s) and auto-refresh
-// (~10s), but the chart's props rarely change → skip the whole SVG re-render.
-// The parent must therefore pass referentially stable props (memoised `levels`).
-export default memo(PriceChart);
+// Memoised with an explicit comparator: the parent re-renders on every live Web
+// tick (~2.5s) and auto-refresh (~10s), but the chart only needs to re-draw when
+// the DATA actually changed. A plain memo compares `data` by reference — and a
+// JSON refetch always yields a new object — so it would rebuild the entire SVG
+// every refresh (the "kedip"). We compare the structural signature instead, plus
+// the toggle flags, the levels, and the loading flag. Callbacks are assumed
+// stable (memoised with useCallback in the parent).
+function levelsSignature(levels: ChartLevel[]): string {
+  let out = '';
+  for (const l of levels) out += `${l.kind}:${l.label}:${l.value};`;
+  return out;
+}
+
+export default memo(PriceChart, (prev, next) => {
+  if (chartSignature(prev.data) !== chartSignature(next.data)) return false;
+  if (levelsSignature(prev.levels ?? []) !== levelsSignature(next.levels ?? [])) return false;
+  return (
+    prev.showEma === next.showEma &&
+    prev.showBollinger === next.showBollinger &&
+    prev.showRsi === next.showRsi &&
+    prev.showMacd === next.showMacd &&
+    prev.loadingMore === next.loadingMore &&
+    prev.onNeedMoreHistory === next.onNeedMoreHistory
+  );
+});
