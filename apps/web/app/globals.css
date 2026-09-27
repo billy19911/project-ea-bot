@@ -10,6 +10,18 @@
  * = warm charcoal (default). No fluff shadows — 1px hairlines do the work.
  * ========================================================================= */
 
+/* Tailwind v4 (the components/ primitives use Tailwind utility classes such as
+ * px-4 / py-2.5 / min-w-full / border). Without this import those utilities are
+ * never generated and the tables render unstyled (columns collapsing together). */
+@import 'tailwindcss';
+
+/* Explicit content sources: scan every app/ and components/ file for utility
+ * classes (Tailwind v4 auto-detects the repo root, but being explicit avoids
+ * class detection being missed when the CSS lives inside app/). */
+@source '../app';
+@source '../components';
+@source '../lib';
+
 :root,
 [data-theme='light'] {
   color-scheme: light;
