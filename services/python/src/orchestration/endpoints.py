@@ -78,6 +78,22 @@ async def scheduler_status() -> dict[str, Any]:
     }
 
 
+@router.get("/signals/active", summary="Active trade signals per symbol (FOKUS #2)")
+async def active_signals() -> dict[str, Any]:
+    """Return the authoritative per-symbol signal registry state.
+
+    Lets the dashboard/Telegram answer "is there a live signal right now?"
+    without re-convening the committee. Each entry carries the signal's phase
+    (PENDING/EXECUTING/OPEN/CLOSED/FAILED/SKIPPED), direction, levels and reason.
+    """
+    from .signal_registry import get_signal_registry
+
+    registry = get_signal_registry()
+    signals = registry.snapshot()
+    active = [s for s in signals if s.get("phase") in ("PENDING", "EXECUTING", "OPEN")]
+    return {"signals": signals, "active": active, "count": len(signals)}
+
+
 @router.get("/observability/traces", summary="Get recent pipeline traces")
 async def observability_traces(
     limit: int = Query(default=50, ge=1, le=500),

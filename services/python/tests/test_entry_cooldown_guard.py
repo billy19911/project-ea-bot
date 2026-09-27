@@ -18,12 +18,7 @@ produces an EXECUTED cycle).
 
 from __future__ import annotations
 
-from orchestration.pipeline import (
-    STAGE_BLOCKED,
-    STATUS_BLOCKED,
-    STATUS_EXECUTED,
-    TradingPipeline,
-)
+from orchestration.pipeline import STAGE_BLOCKED, STATUS_BLOCKED, STATUS_EXECUTED, TradingPipeline
 from risk.gate import GateDecision
 
 
@@ -45,9 +40,7 @@ class FakeRiskGate:
     def __init__(self, decision: GateDecision | None = None) -> None:
         self._decision = decision
 
-    def validate_proposal(
-        self, proposal, account_state, current_positions, market_info
-    ):
+    def validate_proposal(self, proposal, account_state, current_positions, market_info):
         return self._decision
 
 
@@ -129,12 +122,18 @@ def _context(symbol="EURUSD", atr=0.0):
 
 
 def _pipeline(entry_cooldown_s=0.0, entry_min_distance_atr=0.0) -> TradingPipeline:
+    # The pending-signal gate (FOKUS #2) intentionally supersedes the cooldown
+    # guard: after a successful entry the symbol is OPEN and no further cycle
+    # runs. These tests target the cooldown guard in isolation, so the gate is
+    # disabled here. The gate itself is covered by test_signal_registry.py and
+    # test_pending_signal_gate.py.
     return TradingPipeline(
         supervisor=FakeSupervisor(_synthesis()),
         risk_gate=FakeRiskGate(_approved()),
         execution_engine=FakeExecutionEngine(_ExecResult()),
         entry_cooldown_s=entry_cooldown_s,
         entry_min_distance_atr=entry_min_distance_atr,
+        pending_signal_guard=False,
     )
 
 

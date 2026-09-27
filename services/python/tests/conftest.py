@@ -46,6 +46,19 @@ def _isolate_lesson_stores(tmp_path, monkeypatch):
     to touch real lesson/engine-v2 files.
     """
     monkeypatch.setenv("LESSON_STORE_PATH", str(tmp_path / "lessons.jsonl"))
-    monkeypatch.setenv(
-        "ENGINE_V2_STORE_PATH", str(tmp_path / "learning_engine_v2.jsonl")
-    )
+    monkeypatch.setenv("ENGINE_V2_STORE_PATH", str(tmp_path / "learning_engine_v2.jsonl"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_signal_registry():
+    """Reset the process-wide signal registry between tests.
+
+    The registry gates re-analysis while a symbol has a live signal, and it is
+    intentionally process-wide in production. Tests must not leak signal state
+    (a PENDING signal from one test would gate the next).
+    """
+    from orchestration.signal_registry import reset_signal_registry
+
+    reset_signal_registry()
+    yield
+    reset_signal_registry()

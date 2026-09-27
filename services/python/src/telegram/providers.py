@@ -185,4 +185,43 @@ def build_default_providers() -> dict[str, Callable[[], Any]]:
         "risk_provider": _risk_provider,
         "decision_trace_provider": _decision_trace_provider,
         "review_provider": _review_provider,
+        "signal_provider": _signal_provider,
+    }
+
+
+def _signal_provider() -> dict[str, Any]:
+    """Answer "is there a signal right now?" from the signal registry.
+
+    FOKUS #2: the supervisor answers a signal inquiry directly from the
+    authoritative registry — it does NOT re-convene the committee. Returns the
+    live signal(s) or an explicit "no active signal" answer.
+    """
+    try:
+        from ..orchestration.signal_registry import get_signal_registry
+
+        active = [
+            s
+            for s in get_signal_registry().snapshot()
+            if s.get("phase") in ("PENDING", "EXECUTING", "OPEN")
+        ]
+    except Exception:  # noqa: BLE001 - never raise into a command handler
+        active = []
+
+    if not active:
+        return {
+            "summary": "Tidak ada sinyal trade aktif saat ini.",
+            "active": False,
+            "signals": [],
+        }
+
+    parts = []
+    for s in active:
+        parts.append(
+            f"{s.get('symbol')} {s.get('direction')} "
+            f"({s.get('phase')}, conf {s.get('confidence', 0):.2f})"
+        )
+    return {
+        "summary": "Sinyal aktif: " + "; ".join(parts),
+        "active": True,
+        "signals": active,
     }

@@ -39,6 +39,7 @@ def format_help() -> str:
         "/risk — risk summary\n"
         "/why — explain the last decision (structured summary + evidence)\n"
         "/review — latest trade review summary\n"
+        "/signal — is there an active trade signal right now?\n"
         "/help — this message"
     )
 
@@ -119,6 +120,27 @@ def format_why(payload: Any) -> str:
     return f"🧠 Decision Explanation: {payload}"
 
 
+def format_signal(payload: Any) -> str:
+    """Format a ``/signal`` response — is there a live signal right now?"""
+    if isinstance(payload, str):
+        return payload
+    if isinstance(payload, dict):
+        summary = payload.get("summary")
+        if summary:
+            return f"🎯 Signal\n{summary}"
+        active = payload.get("signals")
+        if isinstance(active, list) and active:
+            lines = ["🎯 Signal Aktif"]
+            for s in active:
+                lines.append(
+                    f"• {s.get('symbol')} {s.get('direction')} "
+                    f"({s.get('phase')}, conf {s.get('confidence', 0):.2f})"
+                )
+            return "\n".join(lines)
+        return "🎯 Tidak ada sinyal trade aktif saat ini."
+    return f"🎯 Signal: {payload}"
+
+
 def format_review(payload: Any) -> str:
     """Format a ``/review`` response."""
     if isinstance(payload, str):
@@ -184,6 +206,7 @@ class TelegramGateway:
         risk_provider: Optional[Callable[[], Any]] = None,
         decision_trace_provider: Optional[Callable[[], Any]] = None,
         review_provider: Optional[Callable[[], Any]] = None,
+        signal_provider: Optional[Callable[[], Any]] = None,
     ) -> None:
         self.transport = transport
         self.allowlist = {str(c) for c in (allowlist or [])}
@@ -192,6 +215,7 @@ class TelegramGateway:
         self._risk_provider = risk_provider
         self._decision_trace_provider = decision_trace_provider
         self._review_provider = review_provider
+        self._signal_provider = signal_provider
 
     # -- authorization ---------------------------------------------------
     def is_authorized(self, chat_id: Any) -> bool:
@@ -217,6 +241,8 @@ class TelegramGateway:
             return format_why(self._call_provider(self._decision_trace_provider))
         if command == "/review":
             return format_review(self._call_provider(self._review_provider))
+        if command == "/signal":
+            return format_signal(self._call_provider(self._signal_provider))
         if command == "/help":
             return format_help()
 
@@ -265,9 +291,7 @@ class TelegramGateway:
             try:
                 self.transport.send_message(target, message)
                 sent = True
-            except (
-                Exception
-            ) as exc:  # noqa: BLE001 - Telegram must never break autonomy
+            except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
                 logger.error("Failed to send Telegram alert to %s: %s", target, exc)
         return sent
 
@@ -286,12 +310,8 @@ class TelegramGateway:
         for target in targets:
             try:
                 message_id = self.transport.send_message(target, text)
-                result[str(target)] = (
-                    int(message_id) if message_id is not None else None
-                )
-            except (
-                Exception
-            ) as exc:  # noqa: BLE001 - Telegram must never break autonomy
+                result[str(target)] = int(message_id) if message_id is not None else None
+            except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
                 logger.error("Failed to send Telegram message to %s: %s", target, exc)
                 result[str(target)] = None
         return result
@@ -312,8 +332,6 @@ class TelegramGateway:
             try:
                 if edit(chat_id, message_id, text):
                     edited = True
-            except (
-                Exception
-            ) as exc:  # noqa: BLE001 - Telegram must never break autonomy
+            except Exception as exc:  # noqa: BLE001 - Telegram must never break autonomy
                 logger.error("Failed to edit Telegram message for %s: %s", chat_id, exc)
         return edited

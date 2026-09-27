@@ -38,6 +38,7 @@ from trading.scheduler import AutonomousScheduler
 
 from .account_context import AccountContextProvider
 from .pipeline import TradingPipeline
+from .signal_registry import get_signal_registry
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,20 @@ def _build_position_monitor(
 
             Fail-safe: enqueue errors are swallowed (review still runs first).
             """
+            # FOKUS #2: a closed position clears the symbol's active signal so a
+            # fresh committee may convene for the next opportunity. Fail-safe.
+            try:
+                from .signal_registry import get_signal_registry
+
+                symbol = ""
+                if isinstance(trade_result, dict):
+                    symbol = str(trade_result.get("symbol") or "")
+                else:
+                    symbol = str(getattr(trade_result, "symbol", "") or "")
+                if symbol:
+                    get_signal_registry().mark_closed(symbol, "posisi ditutup")
+            except Exception as exc:  # noqa: BLE001 - must not block close path
+                logger.warning("Signal registry close mark failed: %s", exc)
             # Original review/lesson path runs first (fail-safe).
             try:
                 on_position_closed(trade_result)
@@ -591,6 +606,7 @@ class OrchestrationRuntime:
             entry_min_distance_atr=entry_min_distance_atr,
             htf_filter_enabled=htf_filter_enabled,
             htf_min_strength=htf_min_strength,
+            signal_registry=get_signal_registry(),
         )
 
     def run_cycle(
@@ -742,7 +758,16 @@ class OrchestrationRuntime:
         return self.traces.recent(limit)
 
     def _record_decision(self, record: dict[str, Any]) -> None:
-        """Append a decision record (with a server timestamp) to the history."""
+        """Append a decision record (with a server timestamp) to the history.
+
+        FOKUS #2: a ``SIGNAL_PENDING`` cycle is a *gate* outcome — the committee
+        was intentionally NOT re-run because a signal is already live. Recording
+        it as a new "siklus" would recreate exactly the "many signals" clutter
+        the user complained about, so gated cycles are not appended to the
+        decision history (they remain visible in the trace store for audit).
+        """
+        if str(record.get("status") or "").upper() == "SIGNAL_PENDING":
+            return
         entry = dict(record)
         entry.setdefault("recorded_at", time.time())
         self._decisions.append(entry)

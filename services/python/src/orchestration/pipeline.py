@@ -39,6 +39,8 @@ from trading.level_plan import (
 )
 from trading.market_snapshot import get_latest_snapshot
 
+from .signal_registry import get_signal_registry, is_pending_guard_enabled
+
 logger = logging.getLogger(__name__)
 
 # Defaults used when COMPLETING a proposal whose synthesis left sizing/SL-TP
@@ -59,6 +61,9 @@ STATUS_BLOCKED = "BLOCKED"
 STATUS_NO_TRADE = "NO_TRADE"
 STATUS_WAIT = "WAIT"
 STATUS_ERROR = "ERROR"
+# A signal for this symbol is already live (PENDING/EXECUTING/OPEN) or in a
+# post-failure cooldown → the committee was intentionally NOT re-convened.
+STATUS_SIGNAL_PENDING = "SIGNAL_PENDING"
 
 # Status values for an individual pipeline stage trace entry.
 STAGE_OK = "OK"
@@ -241,6 +246,8 @@ class TradingPipeline:
         entry_min_distance_atr: float = 0.0,
         htf_filter_enabled: bool = False,
         htf_min_strength: float = 0.0,
+        signal_registry: Optional[Any] = None,
+        pending_signal_guard: bool = True,
     ) -> None:
         self.supervisor = supervisor
         self.risk_gate = risk_gate
@@ -278,6 +285,14 @@ class TradingPipeline:
         # or weak bias never blocks a trade.
         self.htf_filter_enabled = bool(htf_filter_enabled)
         self.htf_min_strength = float(htf_min_strength)
+        # Signal registry (FOKUS #2): the authoritative per-symbol signal gate.
+        # When a signal is already live (PENDING/EXECUTING/OPEN) the committee is
+        # NOT re-convened — the pipeline short-circuits to SIGNAL_PENDING. When
+        # ``None`` a process-wide registry is resolved lazily so the gate is on
+        # by default without extra wiring.
+        self._signal_registry = signal_registry
+        # Master switch for the pending-signal gate (env override honoured).
+        self.pending_signal_guard = bool(pending_signal_guard) and is_pending_guard_enabled()
         # Last SUCCESSFUL entry per (upper-case) symbol: {"price": float,
         # "ts": float}. Blocked/failed entries are never recorded.
         self._last_entries: dict[str, dict[str, float]] = {}
@@ -303,6 +318,13 @@ class TradingPipeline:
         # lessons are summarised into the analysis context so leads can cite
         # them (advisory only — signals/confidence stay deterministic).
         self.lesson_provider = lesson_provider
+
+    @property
+    def signal_registry(self) -> Any:
+        """Resolve the signal registry (lazy process-wide default)."""
+        if self._signal_registry is None:
+            self._signal_registry = get_signal_registry()
+        return self._signal_registry
 
     # ------------------------------------------------------------------
     # Public API
@@ -343,6 +365,33 @@ class TradingPipeline:
         # Telegram report can reference a real, traceable id.
         result.trace_id = str(context.get("trace_id") or event_id)
         result.symbol = self._event_symbol(event, context)
+
+        # ── Step 0: Pending-signal gate (FOKUS #2) ──────────────────────
+        # If a signal for this symbol is already live (PENDING/EXECUTING/OPEN)
+        # or the symbol is in a post-failure cooldown, do NOT re-convene the
+        # committee. The supervisor also does not re-ask while a trade is open.
+        # This is what stops the "same BUY/ERROR every cycle" spam.
+        if self.pending_signal_guard and result.symbol:
+            try:
+                should_convene, gate_reason = self.signal_registry.should_convene(result.symbol)
+            except Exception as exc:  # fail-open: a broken gate never blocks
+                should_convene, gate_reason = True, ""
+                logger.debug("Pending-signal gate skipped: %s", exc)
+            if not should_convene:
+                existing = self.signal_registry.get(result.symbol)
+                result.decision = (
+                    str(getattr(existing, "direction", "") or "WAIT").upper()
+                    if existing is not None
+                    else "WAIT"
+                )
+                result.status = STATUS_SIGNAL_PENDING
+                result.risk_reason = gate_reason
+                result.summary = gate_reason
+                result.add_stage("supervisor", STAGE_SKIPPED, gate_reason)
+                result.add_stage("risk", STAGE_SKIPPED, "signal sudah aktif")
+                result.add_stage("execution", STAGE_SKIPPED, "signal sudah aktif")
+                self._finalise(result, emit=False)
+                return result
 
         # ── Step A: Supervisor analysis ─────────────────────────────────
         analysis_context = self._build_analysis_context(event, event_type, context)
@@ -387,6 +436,21 @@ class TradingPipeline:
 
         result.decision = str(proposal.get("direction", "WAIT")).upper()
         result.proposal_id = str(proposal.get("proposal_id") or _new_id("prop"))
+
+        # A real, actionable signal exists → mark it PENDING in the registry so
+        # subsequent cycles for this symbol are gated instead of re-convening
+        # the committee. Fail-safe: a broken registry never breaks the cycle.
+        if self.pending_signal_guard and result.symbol:
+            try:
+                self.signal_registry.open_signal(
+                    result.symbol,
+                    result.decision,
+                    confidence=result.confidence,
+                    levels=proposal,
+                    proposal_id=result.proposal_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - never break the cycle
+                logger.debug("Signal registry open skipped: %s", exc)
 
         # ── Multi-timeframe filter ───────────────────────────────────────
         # An LTF entry that fights a strong HTF bias is vetoed before the gate.
@@ -437,10 +501,13 @@ class TradingPipeline:
         result.risk_reason = str(getattr(decision, "reason", ""))
 
         if not result.risk_approved:
-            # BLOCKED path: do NOT execute.
+            # BLOCKED path: do NOT execute. The signal was not eligible, so mark
+            # it SKIPPED in the registry — a new (possibly different) signal may
+            # still be raised later, but the identical one is not re-emitted.
             result.status = STATUS_BLOCKED
             result.add_stage("risk", STAGE_BLOCKED, result.risk_reason)
             result.add_stage("execution", STAGE_SKIPPED, "risk did not approve")
+            self._mark_signal(result, "skipped", f"ditolak risk gate: {result.risk_reason}")
             self._finalise(result)
             return result
 
@@ -577,6 +644,19 @@ class TradingPipeline:
             # bridge it into the review learning loops. Fail-safe.
             self._remember_entry_context(
                 exec_result, result, proposal, validation, analysis_context
+            )
+            # The position is live → OPEN. No re-analysis until it closes.
+            self._mark_signal(
+                result, "open", "entry terbuka", ticket=result.execution_result.get("ticket")
+            )
+        else:
+            # Execution failed (e.g. terminal not armed → 403). Mark FAILED so
+            # the symbol enters a cooldown and the identical BUY/ERROR signal is
+            # NOT re-emitted every cycle — this is the spam fix.
+            self._mark_signal(
+                result,
+                "failed",
+                result.error or "eksekusi gagal",
             )
         self._finalise(result)
         return result
@@ -1376,14 +1456,50 @@ class TradingPipeline:
             "position_opened": getattr(exec_result, "position_opened", None),
         }
 
-    def _finalise(self, result: PipelineResult) -> None:
+    def _mark_signal(
+        self,
+        result: PipelineResult,
+        action: str,
+        reason: str = "",
+        ticket: Any = None,
+    ) -> None:
+        """Update the signal registry for ``result.symbol`` (fail-safe).
+
+        ``action`` is one of ``open`` / ``executing`` / ``failed`` / ``skipped``
+        / ``closed``. Never raises into the cycle.
+        """
+        if not self.pending_signal_guard or not result.symbol:
+            return
+        try:
+            registry = self.signal_registry
+            if action == "open":
+                registry.mark_open(result.symbol, ticket, reason)
+            elif action == "executing":
+                registry.mark_executing(result.symbol, reason)
+            elif action == "failed":
+                registry.mark_failed(result.symbol, reason)
+            elif action == "skipped":
+                registry.mark_skipped(result.symbol, reason)
+            elif action == "closed":
+                registry.mark_closed(result.symbol, reason)
+        except Exception as exc:  # noqa: BLE001 - never break the cycle
+            logger.debug("Signal registry update (%s) skipped: %s", action, exc)
+
+    def _finalise(self, result: PipelineResult, emit: bool = True) -> None:
         """Finish a cycle: invoke the optional result hook (fail-safe).
 
         Every ``run()`` exit path funnels through here, so the hook observes
         exactly one finished result per cycle. A broken hook is logged and
         swallowed — reporting must never break the autonomous loop.
+
+        Args:
+            emit: When False the result hook is NOT invoked. Used for the
+                pending-signal short-circuit: no new signal exists, so nothing
+                should be reported/notified (that would be the spam we are
+                trying to stop). The result still returns to the caller and is
+                recorded by the runtime's decision history.
         """
-        if self.result_hook is None:
+        if not emit or self.result_hook is None:
             return
         try:
             self.result_hook(result)
