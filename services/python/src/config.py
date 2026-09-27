@@ -57,25 +57,29 @@ class Settings(BaseSettings):
     market_feed_interval_s: float = Field(default=60.0, alias="MARKET_FEED_INTERVAL_S")
     # Anti-spam: minimum seconds before the same (symbol, event_type) may be
     # re-emitted into the pipeline (and reported to Telegram) again.
-    market_feed_event_cooldown_s: float = Field(
-        default=300.0, alias="MARKET_FEED_EVENT_COOLDOWN_S"
+    market_feed_event_cooldown_s: float = Field(default=300.0, alias="MARKET_FEED_EVENT_COOLDOWN_S")
+    # Multi-timeframe analysis (HTF bias + LTF entry). When enabled the feed
+    # loop fetches this comma-separated set of timeframes, attaches
+    # `timeframe_prices` (multi-TF consensus) and `htf_bias` to every snapshot,
+    # and the pipeline may veto LTF entries that fight the HTF trend.
+    multi_timeframe_enabled: bool = Field(default=False, alias="MULTI_TIMEFRAME_ENABLED")
+    multi_timeframe_list: str = Field(default="M15,H1,H4", alias="MULTI_TIMEFRAME_LIST")
+    # HTF bias whose strength is below this is treated as NEUTRAL (no filter).
+    multi_timeframe_min_strength: float = Field(default=0.0, alias="MULTI_TIMEFRAME_MIN_STRENGTH")
+    # When true, an LTF entry that fights a STRONG HTF bias is vetoed.
+    multi_timeframe_filter_enabled: bool = Field(
+        default=True, alias="MULTI_TIMEFRAME_FILTER_ENABLED"
     )
 
     # Risk monitor (FIX B) — periodically checks account drawdown/exposure/margin
     # via MT5 (read-only) and emits RISK_* events so the supervisor routes them
     # to RiskLead. Default OFF: the operator must explicitly switch it on.
     risk_monitor_enabled: bool = Field(default=False, alias="RISK_MONITOR_ENABLED")
-    risk_monitor_interval_s: float = Field(
-        default=60.0, alias="RISK_MONITOR_INTERVAL_S"
-    )
+    risk_monitor_interval_s: float = Field(default=60.0, alias="RISK_MONITOR_INTERVAL_S")
     # Max drawdown fraction (0.05 = 5%) before RISK_DRAWDOWN is emitted.
-    risk_drawdown_threshold: float = Field(
-        default=0.05, alias="RISK_DRAWDOWN_THRESHOLD"
-    )
+    risk_drawdown_threshold: float = Field(default=0.05, alias="RISK_DRAWDOWN_THRESHOLD")
     # Max exposure fraction (margin/equity, 0.30 = 30%) before RISK_EXPOSURE.
-    risk_exposure_threshold: float = Field(
-        default=0.30, alias="RISK_EXPOSURE_THRESHOLD"
-    )
+    risk_exposure_threshold: float = Field(default=0.30, alias="RISK_EXPOSURE_THRESHOLD")
     # Min free-margin fraction (margin_free/equity, 0.20 = 20%) before RISK_MARGIN.
     risk_margin_threshold: float = Field(default=0.20, alias="RISK_MARGIN_THRESHOLD")
 
@@ -84,13 +88,29 @@ class Settings(BaseSettings):
     max_daily_loss: float = Field(default=500.0, alias="MAX_DAILY_LOSS")
     risk_per_trade: float = Field(default=0.02, alias="RISK_PER_TRADE")
 
+    # Dynamic stop-loss management (BEP / progressive TP1 lock / trailing).
+    # Applied per cycle by the trade manager to OPEN positions (arm-gated,
+    # fail-closed). Default OFF so behaviour is unchanged until opted in.
+    sltp_management_enabled: bool = Field(default=False, alias="SLTP_MANAGEMENT_ENABLED")
+    sltp_breakeven_enabled: bool = Field(default=True, alias="SLTP_BREAKEVEN_ENABLED")
+    # Move to break-even once the position is up by this many R.
+    sltp_bep_trigger_r: float = Field(default=1.0, alias="SLTP_BEP_TRIGGER_R")
+    # Extra R locked beyond entry at break-even (0 = pure entry).
+    sltp_bep_lock_r: float = Field(default=0.0, alias="SLTP_BEP_LOCK_R")
+    sltp_progressive_enabled: bool = Field(default=True, alias="SLTP_PROGRESSIVE_ENABLED")
+    # Reaching TP1 (this many R) locks this many R of profit.
+    sltp_tp1_lock_r: float = Field(default=0.5, alias="SLTP_TP1_LOCK_R")
+    sltp_trailing_enabled: bool = Field(default=True, alias="SLTP_TRAILING_ENABLED")
+    # Trailing distance = ATR * factor.
+    sltp_trail_atr_factor: float = Field(default=1.5, alias="SLTP_TRAIL_ATR_FACTOR")
+    # Minimum stop move (in R) before a modification is sent (anti-churn).
+    sltp_min_move_r: float = Field(default=0.05, alias="SLTP_MIN_MOVE_R")
+
     # Supervisor orchestration policy (audit P2-3). ``all_match`` (default) lets
     # every matching department lead / specialist run so departments genuinely
     # collaborate; ``first_match`` collapses to a single agent per cycle;
     # ``priority_based`` keeps all, ordered by priority.
-    supervisor_routing_policy: str = Field(
-        default="all_match", alias="SUPERVISOR_ROUTING_POLICY"
-    )
+    supervisor_routing_policy: str = Field(default="all_match", alias="SUPERVISOR_ROUTING_POLICY")
 
     # Signal confidence filter (PRD_V2 §32). Proposals with confidence below
     # this threshold are not actionable regardless of direction. Fail-closed:

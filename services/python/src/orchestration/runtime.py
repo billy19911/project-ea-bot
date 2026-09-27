@@ -184,6 +184,64 @@ def _build_position_monitor(
         return None
 
 
+def _build_trade_manager() -> Optional[Any]:
+    """Build the dynamic SL/TP trade manager from settings (fail-safe).
+
+    Returns ``None`` when ``SLTP_MANAGEMENT_ENABLED`` is false (the default), so
+    the runtime performs no stop management until explicitly opted in. The ATR
+    reader pulls the same feed-loop ATR the entry used, and the apply hook uses
+    the execution engine's arm-gated ``modify_position_sltp``.
+    """
+    try:
+        from config import settings
+        from execution.sltp_manager import SLTPConfig
+        from monitoring.trade_manager import TradeManager
+
+        if not getattr(settings, "sltp_management_enabled", False):
+            return None
+
+        cfg = SLTPConfig(
+            enabled=True,
+            breakeven_enabled=bool(getattr(settings, "sltp_breakeven_enabled", True)),
+            bep_trigger_r=float(getattr(settings, "sltp_bep_trigger_r", 1.0)),
+            bep_lock_r=float(getattr(settings, "sltp_bep_lock_r", 0.0)),
+            progressive_enabled=bool(getattr(settings, "sltp_progressive_enabled", True)),
+            tp1_trigger_r=1.0,
+            tp1_lock_r=float(getattr(settings, "sltp_tp1_lock_r", 0.5)),
+            trailing_enabled=bool(getattr(settings, "sltp_trailing_enabled", True)),
+            trail_atr_factor=float(getattr(settings, "sltp_trail_atr_factor", 1.5)),
+            min_move_r=float(getattr(settings, "sltp_min_move_r", 0.05)),
+        )
+
+        def _atr_reader(symbol: str) -> float:
+            """Return the feed-loop ATR for the symbol (0.0 when unavailable)."""
+            try:
+                from trading.market_snapshot import get_latest_snapshot
+
+                snap = get_latest_snapshot(symbol)
+                if not isinstance(snap, dict):
+                    return 0.0
+                vol = snap.get("volatility") or {}
+                atr_val = vol.get("atr") or snap.get("atr")
+                return float(atr_val or 0.0)
+            except Exception:  # noqa: BLE001 - trailing only; never block
+                return 0.0
+
+        def _apply(ticket: int, symbol: str, sl: float, tp: Any) -> dict:
+            from execution.engine import ExecutionEngine
+
+            return ExecutionEngine().modify_position_sltp(ticket, symbol, sl, tp)
+
+        return TradeManager(
+            config=cfg,
+            atr_reader=_atr_reader,
+            apply_sltp=_apply,
+        )
+    except Exception as exc:  # noqa: BLE001 - management must never block wiring
+        logger.warning("Trade manager not wired: %s", exc)
+        return None
+
+
 def _notify_cycle_result(result: Any) -> None:
     """Offer one finished cycle to the Telegram notifier (fail-safe).
 
@@ -361,6 +419,11 @@ class OrchestrationRuntime:
             event_queue=self.queue,
             scheduler=self.scheduler,
         )
+        # Dynamic stop-loss management (BEP / progressive / trailing) applied to
+        # open positions once per cycle. Opt-in via SLTP_MANAGEMENT_ENABLED;
+        # disabled by default so behaviour is unchanged. The manager is
+        # arm-gated/fail-closed inside the execution engine.
+        self.trade_manager = _build_trade_manager()
 
     @property
     def _reconciliation_runner(self) -> ReconciliationRunner:
@@ -499,6 +562,20 @@ class OrchestrationRuntime:
             lesson_provider = LessonFeedbackProvider(get_lesson_store())
         except Exception as exc:  # noqa: BLE001 - feedback must never block wiring
             logger.warning("Lesson feedback not wired: %s", exc)
+        # Multi-timeframe entry filter (opt-in). When enabled, an LTF entry
+        # fighting a strong HTF bias is vetoed. Default OFF.
+        htf_filter_enabled = False
+        htf_min_strength = 0.0
+        try:
+            from config import settings as _settings
+
+            htf_filter_enabled = bool(
+                getattr(_settings, "multi_timeframe_enabled", False)
+                and getattr(_settings, "multi_timeframe_filter_enabled", True)
+            )
+            htf_min_strength = float(getattr(_settings, "multi_timeframe_min_strength", 0.0) or 0.0)
+        except Exception:  # noqa: BLE001 - filter stays off on any error
+            htf_filter_enabled = False
         return TradingPipeline(
             supervisor=supervisor,
             risk_gate=risk_gate,
@@ -512,6 +589,8 @@ class OrchestrationRuntime:
             entry_magic=entry_magic,
             entry_cooldown_s=entry_cooldown_s,
             entry_min_distance_atr=entry_min_distance_atr,
+            htf_filter_enabled=htf_filter_enabled,
+            htf_min_strength=htf_min_strength,
         )
 
     def run_cycle(
@@ -604,6 +683,14 @@ class OrchestrationRuntime:
                 self.position_monitor.monitor_all_positions()
             except Exception as exc:  # noqa: BLE001 - observation is best-effort
                 logger.warning("Position monitoring failed: %s", exc)
+        # Dynamic stop management (BEP / progressive / trailing) on open
+        # positions. No-op unless SLTP_MANAGEMENT_ENABLED. Arm-gated/fail-closed
+        # inside the engine, so an unarmed terminal never reaches the broker.
+        if self.trade_manager is not None:
+            try:
+                self.trade_manager.manage()
+            except Exception as exc:  # noqa: BLE001 - management is best-effort
+                logger.warning("Trade manager failed: %s", exc)
         # Exactly one price observation per _monitor_positions call — run_cycle
         # and the scheduler proxy both funnel through here (no double reads).
         self._observe_signal_prices()

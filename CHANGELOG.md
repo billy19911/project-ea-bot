@@ -3,6 +3,23 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Dynamic Stop-Loss Management (BEP / Progressive TP1 / Trailing)
+Fitur yang sebelumnya hanya "kode mati" kini berfungsi penuh dan tersambung ke broker.
+- **`execution/sltp_manager.py` (BARU)** — logika keputusan murni `decide_stop_loss()`: **break-even** (geser SL ke entry setelah profit N R), **progressive/TP1 lock** (kunci profit saat TP1), dan **trailing** (jarak `ATR × faktor`). Monotonik (hanya mengetatkan risiko, tidak pernah melebarkan), anti-churn via `min_move_r`. Konfigurasi `SLTPConfig`.
+- **`execution/engine.py` — `modify_position_sltp()`**: kemampuan BARU memodifikasi SL/TP posisi via MT5 `TRADE_ACTION_SLTP`. **Arm-gated/fail-closed** (pola sama dengan B-7): tanpa terminal ter-arm → 403; simulasi saat MT5 tak tersedia. Sebelumnya sistem **tidak punya** jalur modifikasi SL sama sekali.
+- **`monitoring/trade_manager.py` (BARU)** — orkestrator per-siklus: baca posisi → hitung SL → kirim. Fail-safe per-posisi, monotonik, ada `snapshot()` untuk observability (counter + riwayat perubahan).
+- **Wiring**: `orchestration/runtime.py` membangun `TradeManager` (opt-in `SLTP_MANAGEMENT_ENABLED`, default OFF) dan memanggilnya di `_monitor_positions()` tiap siklus. Endpoint baru `GET /sltp/status` (Python + proxy Node).
+- **Config** (`SLTP_*`): `SLTP_MANAGEMENT_ENABLED`, `SLTP_BEP_TRIGGER_R`, `SLTP_BEP_LOCK_R`, `SLTP_TP1_LOCK_R`, `SLTP_TRAIL_ATR_FACTOR`, `SLTP_MIN_MOVE_R`, dll.
+
+### Added — Multi-Timeframe Analysis (HTF Bias + LTF Entry Filter)
+- **`market/multi_timeframe.py` (BARU)** — `compute_htf_bias()` (bias tren TF tinggi via EMA slope, kekuatan ternormalisasi) + `build_timeframe_prices()` (ambil closes per-TF, konsensus multi-TF). Read-only, fail-safe.
+- **`trading/feed_loop.py`** — saat `MULTI_TIMEFRAME_ENABLED`, melampirkan `timeframe_prices` (konsensus multi-TF untuk momentum analyst) dan `htf_bias` ke setiap snapshot (opt-in, fail-safe).
+- **`orchestration/pipeline.py` — HTF-bias veto**: entry LTF yang **melawan** bias HTF kuat akan diveto menjadi NO_TRADE **sebelum** Risk Gate. Aktif hanya via `MULTI_TIMEFRAME_FILTER_ENABLED`; bias NEUTRAL/lemah tidak pernah memblokir (fail-safe).
+- **Config** (`MULTI_TIMEFRAME_*`): daftar TF (`M15,H1,H4`), kekuatan minimum, toggle filter.
+
+### Verifikasi
+- Python **2458 passed** (dari 2424, +34 test: `test_sltp_manager.py` 11, `test_trade_manager.py` 6, `test_multi_timeframe.py` 10, pipeline HTF-veto 5, engine SLTP 2); `black`/`isort`/`flake8` bersih. Node API **61 passed**; Web `tsc`+lint bersih.
+
 ### Added — Reconciliation Ledger Identity + Learning Engine 2.0 Wiring + Realistic Backtest
 - **`execution/engine.py` — ledger identity fields**: saat order dikonfirmasi sebagai posisi (`POSITION_CONFIRMED`), engine kini menyimpan `symbol`/`volume`/`magic` (sebelumnya hanya state+ticket). Reconciliation provider (`internal_positions_from_store`) jadi bisa mencocokkan posisi internal vs book broker (menutup gap B-4 follow-up). Jalur `adopted` (retry/lost-response) juga diperbaiki. +1 test end-to-end.
 - **Learning Engine 2.0 (PRD §43) — `learning/engine_v2_store.py` (BARU)**: store JSONL persist untuk `LearningEngineV2` (fail-safe: baris korup di-skip, file tak-bisa-ditulis → cache-only). `learning/feedback.py::record_review_lesson_v2()` menjembatani review → `Lesson` (selalu OBSERVATION; promosi hanya lewat agregasi pola). Di-wire di `main.py` lifespan dan di-rehydrate saat restart. Endpoint `/learning/analytics` kini mengembalikan section `learning_engine_v2` (pattern ter-agregasi + evidence level). **Advisory only** — tidak pernah mengubah parameter strategi live. +6 test.

@@ -722,3 +722,44 @@ def test_execution_blocked_logs_armed_terminal_ids(monkeypatch, caplog):
     assert result.error_code == 403
     assert "EXECUTION NOT ARMED" in result.error_message
     assert any("Armed terminal ids:" in rec.message for rec in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Audit SL-manage � ExecutionEngine.modify_position_sltp (arm-gated)
+# ---------------------------------------------------------------------------
+
+
+def test_modify_sltp_invalid_ticket_or_sl():
+    engine = ExecutionEngine(mt5_connector=None, simulation_mode=True)
+    assert engine.modify_position_sltp(0, "XAUUSD", 2000.0)["success"] is False
+    assert engine.modify_position_sltp(123, "XAUUSD", 0.0)["success"] is False
+
+
+def test_modify_sltp_simulated_when_no_native_mt5(monkeypatch):
+    import sys
+
+    engine = ExecutionEngine(mt5_connector=None, simulation_mode=True)
+    monkeypatch.setitem(sys.modules, "MetaTrader5", None)
+    res = engine.modify_position_sltp(555, "XAUUSD", 2010.0, tp=2040.0)
+
+    assert res["success"] is True
+    assert res["simulated"] is True
+    assert res["sl"] == 2010.0
+
+
+def test_modify_sltp_fail_closed_when_not_armed(monkeypatch):
+    """A native modify without an armed/attached terminal stays blocked (403)."""
+    import sys
+    import types
+
+    engine = ExecutionEngine(mt5_connector=None, simulation_mode=False)
+    fake = types.ModuleType("MetaTrader5")
+    fake.TRADE_ACTION_SLTP = 5
+    monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
+    monkeypatch.setattr(engine, "_native_execution_armed", lambda: False)
+
+    res = engine.modify_position_sltp(777, "XAUUSD", 2010.0)
+
+    assert res["success"] is False
+    assert res["error_code"] == 403
+    assert "NOT ARMED" in res["message"]

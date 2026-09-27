@@ -353,6 +353,13 @@ app.get('/reconciliation/status', async (req, res) => {
   await sendProxy(res, '/reconciliation/status', undefined, req);
 });
 
+// Dynamic SL management (BEP / progressive / trailing) status — real data.
+app.get('/sltp/status', async (req, res) => {
+  const log = (req as any).log;
+  log.info('sltp.status');
+  await sendProxy(res, '/sltp/status', undefined, req);
+});
+
 function buildActivityRows(
   tasks: any[],
 ): Array<{ id: string; timestamp: string; agent: string; action: string; status: 'success' | 'warning' | 'error'; duration?: number }> {

@@ -465,5 +465,100 @@ class TestApprovalToken:
         assert engine.calls == []
 
 
+# ---------------------------------------------------------------------------
+# Multi-timeframe HTF-bias filter
+# ---------------------------------------------------------------------------
+class TestHTFBiasFilter:
+    def test_veto_buy_against_bearish_bias(self):
+        supervisor = FakeSupervisor(_synthesis(direction="BUY"))
+        gate = FakeRiskGate(_approved())
+        engine = FakeExecutionEngine(_ExecResult())
+        pipeline = TradingPipeline(
+            supervisor=supervisor,
+            risk_gate=gate,
+            execution_engine=engine,
+            htf_filter_enabled=True,
+            htf_min_strength=0.5,
+        )
+        ctx = _context()
+        ctx["htf_bias"] = {"direction": "BEARISH", "strength": 0.9, "timeframe": "H4"}
+
+        result = pipeline.run(_event(), ctx)
+
+        assert result.executed is False
+        assert engine.calls == []
+        assert "HTF bias veto" in (result.risk_reason or "")
+        assert result.status == "NO_TRADE"
+
+    def test_no_veto_when_entry_agrees_with_bias(self):
+        supervisor = FakeSupervisor(_synthesis(direction="BUY"))
+        gate = FakeRiskGate(_approved())
+        engine = FakeExecutionEngine(_ExecResult())
+        pipeline = TradingPipeline(
+            supervisor=supervisor,
+            risk_gate=gate,
+            execution_engine=engine,
+            htf_filter_enabled=True,
+            htf_min_strength=0.5,
+        )
+        ctx = _context()
+        ctx["htf_bias"] = {"direction": "BULLISH", "strength": 0.9, "timeframe": "H4"}
+
+        result = pipeline.run(_event(), ctx)
+
+        assert result.executed is True
+
+    def test_no_veto_when_bias_weak(self):
+        supervisor = FakeSupervisor(_synthesis(direction="BUY"))
+        gate = FakeRiskGate(_approved())
+        engine = FakeExecutionEngine(_ExecResult())
+        pipeline = TradingPipeline(
+            supervisor=supervisor,
+            risk_gate=gate,
+            execution_engine=engine,
+            htf_filter_enabled=True,
+            htf_min_strength=0.8,
+        )
+        ctx = _context()
+        ctx["htf_bias"] = {"direction": "BEARISH", "strength": 0.3, "timeframe": "H4"}
+
+        result = pipeline.run(_event(), ctx)
+
+        assert result.executed is True
+
+    def test_filter_disabled_ignores_bias(self):
+        supervisor = FakeSupervisor(_synthesis(direction="BUY"))
+        gate = FakeRiskGate(_approved())
+        engine = FakeExecutionEngine(_ExecResult())
+        pipeline = TradingPipeline(
+            supervisor=supervisor,
+            risk_gate=gate,
+            execution_engine=engine,
+            htf_filter_enabled=False,
+        )
+        ctx = _context()
+        ctx["htf_bias"] = {"direction": "BEARISH", "strength": 1.0, "timeframe": "H4"}
+
+        result = pipeline.run(_event(), ctx)
+
+        assert result.executed is True
+
+    def test_no_bias_fail_safe(self):
+        supervisor = FakeSupervisor(_synthesis(direction="BUY"))
+        gate = FakeRiskGate(_approved())
+        engine = FakeExecutionEngine(_ExecResult())
+        pipeline = TradingPipeline(
+            supervisor=supervisor,
+            risk_gate=gate,
+            execution_engine=engine,
+            htf_filter_enabled=True,
+            htf_min_strength=0.5,
+        )
+
+        result = pipeline.run(_event(), _context())
+
+        assert result.executed is True
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))

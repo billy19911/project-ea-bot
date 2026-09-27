@@ -106,6 +106,23 @@ async def reconciliation_status() -> dict[str, Any]:
     }
 
 
+@router.get("/sltp/status", summary="Dynamic SL management status (BEP/trailing)")
+async def sltp_status() -> dict[str, Any]:
+    """Return the trade manager's counters and recent stop modifications.
+
+    Real data only: ``enabled`` reflects ``SLTP_MANAGEMENT_ENABLED`` and
+    ``recent`` lists the last applied stop changes this process. Safe when the
+    manager is not wired: reports ``enabled: false``.
+    """
+    runtime = get_runtime()
+    manager = getattr(runtime, "trade_manager", None)
+    if manager is None:
+        return {"enabled": False, "counts": {}, "recent": [], "source": "unavailable"}
+    snap = manager.snapshot()
+    snap["source"] = "live"
+    return snap
+
+
 @router.post("/reconciliation/run", summary="Force a reconciliation run (Phase 35)")
 async def reconciliation_run() -> dict[str, Any]:
     """Trigger reconciliation immediately and audit the run (PRD_V2 §14 §35)."""

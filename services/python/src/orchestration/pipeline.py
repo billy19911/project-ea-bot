@@ -239,6 +239,8 @@ class TradingPipeline:
         entry_magic: int = 70000,
         entry_cooldown_s: float = 0.0,
         entry_min_distance_atr: float = 0.0,
+        htf_filter_enabled: bool = False,
+        htf_min_strength: float = 0.0,
     ) -> None:
         self.supervisor = supervisor
         self.risk_gate = risk_gate
@@ -269,6 +271,13 @@ class TradingPipeline:
         # ``entry_min_distance_atr * ATR`` away from the last entry price for
         # the same symbol. Needs a positive ATR to apply.
         self.entry_min_distance_atr = float(entry_min_distance_atr)
+        # Multi-timeframe filter: when enabled, an LTF entry whose direction
+        # fights a STRONG HTF bias is vetoed (becomes NO_TRADE). The bias comes
+        # from ``analysis_context["htf_bias"]`` (attached by the feed loop).
+        # Only a bias at/above ``htf_min_strength`` triggers the veto; a NEUTRAL
+        # or weak bias never blocks a trade.
+        self.htf_filter_enabled = bool(htf_filter_enabled)
+        self.htf_min_strength = float(htf_min_strength)
         # Last SUCCESSFUL entry per (upper-case) symbol: {"price": float,
         # "ts": float}. Blocked/failed entries are never recorded.
         self._last_entries: dict[str, dict[str, float]] = {}
@@ -378,6 +387,20 @@ class TradingPipeline:
 
         result.decision = str(proposal.get("direction", "WAIT")).upper()
         result.proposal_id = str(proposal.get("proposal_id") or _new_id("prop"))
+
+        # ── Multi-timeframe filter ───────────────────────────────────────
+        # An LTF entry that fights a strong HTF bias is vetoed before the gate.
+        # Fail-safe: a missing/invalid bias never blocks (returns None).
+        htf_veto = self._htf_bias_veto(proposal, analysis_context)
+        if htf_veto is not None:
+            result.decision = "WAIT"
+            result.status = STATUS_NO_TRADE
+            result.risk_reason = htf_veto
+            result.levels = self._indicative_levels(analysis, analysis_context)
+            result.add_stage("risk", STAGE_SKIPPED, "HTF bias veto (multi-timeframe)")
+            result.add_stage("execution", STAGE_SKIPPED, "no approved order")
+            self._finalise(result)
+            return result
 
         # ── Step B: Deterministic Risk Gate ─────────────────────────────
         # Use the *analysis* context (caller context + merged market snapshot)
@@ -721,6 +744,47 @@ class TradingPipeline:
 
         confidence = float(proposal.get("confidence") or 0.0)
         return confidence >= settings.min_signal_confidence
+
+    def _htf_bias_veto(
+        self,
+        proposal: dict[str, Any],
+        analysis_context: dict[str, Any],
+    ) -> Optional[str]:
+        """Return a veto reason when the entry fights a strong HTF bias.
+
+        Returns ``None`` (no veto) when: the filter is disabled, the bias is
+        missing/NEUTRAL/below ``htf_min_strength``, the entry direction is
+        undetermined, or the entry agrees with the bias. Fail-safe by design.
+        """
+        if not self.htf_filter_enabled:
+            return None
+        bias = analysis_context.get("htf_bias")
+        if not isinstance(bias, dict):
+            return None
+        direction = str(bias.get("direction", "")).upper()
+        if direction not in ("BULLISH", "BEARISH"):
+            return None
+        try:
+            strength = float(bias.get("strength") or 0.0)
+        except (TypeError, ValueError):
+            strength = 0.0
+        if strength < self.htf_min_strength:
+            return None
+
+        entry = str(proposal.get("direction", "")).upper()
+        if entry not in _ACTIONABLE:
+            return None
+        # A BUY fights a BEARISH bias; a SELL fights a BULLISH bias.
+        fights = (entry == "BUY" and direction == "BEARISH") or (
+            entry == "SELL" and direction == "BULLISH"
+        )
+        if not fights:
+            return None
+        tf = str(bias.get("timeframe") or "")
+        return (
+            f"HTF bias veto: {entry} entry fights {direction} bias on {tf} "
+            f"(strength {strength:.2f} >= {self.htf_min_strength:.2f})"
+        )
 
     @staticmethod
     def _no_trade_decision(analysis: Any) -> str:

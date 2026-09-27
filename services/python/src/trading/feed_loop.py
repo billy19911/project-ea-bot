@@ -100,6 +100,9 @@ class MarketFeedLoop:
         on_emit: Optional[Callable[[], None]] = None,
         session_max_age_s: float = 1800.0,
         session_provider: Optional[Callable[[str], dict]] = None,
+        multi_timeframe_enabled: bool = False,
+        multi_timeframe_list: str = "M15,H1,H4",
+        multi_timeframe_min_strength: float = 0.0,
     ) -> None:
         self.queue = queue
         self.symbols = [str(s).strip() for s in (symbols or []) if str(s).strip()]
@@ -113,6 +116,9 @@ class MarketFeedLoop:
         self._connector = connector if connector is not None else self._default_connector()
         self.session_max_age_s = float(session_max_age_s)
         self._session_provider = session_provider
+        self.multi_timeframe_enabled = bool(multi_timeframe_enabled)
+        self.multi_timeframe_list = str(multi_timeframe_list or "M15,H1,H4")
+        self.multi_timeframe_min_strength = float(multi_timeframe_min_strength)
         if detector_factory is not None:
             self._detector = detector_factory()
         else:
@@ -296,7 +302,7 @@ class MarketFeedLoop:
             if closes[i - 1]
         ]
         state = self._states.get(symbol)
-        return {
+        snapshot: dict[str, Any] = {
             "symbol": symbol,
             "prices": closes,
             "highs": highs,
@@ -312,6 +318,25 @@ class MarketFeedLoop:
                 "returns": returns,
             },
         }
+        # Multi-timeframe analysis (HTF bias + LTF entry). Opt-in; fail-safe so
+        # a data hiccup never breaks the loop.
+        if self.multi_timeframe_enabled:
+            try:
+                from ..market.multi_timeframe import build_timeframe_prices
+
+                tfs = tuple(tf.strip() for tf in self.multi_timeframe_list.split(",") if tf.strip())
+                mtf = build_timeframe_prices(
+                    symbol,
+                    connector=self._connector,
+                    timeframes=tfs,
+                )
+                if mtf.get("timeframe_prices"):
+                    snapshot["timeframe_prices"] = mtf["timeframe_prices"]
+                if mtf.get("htf_bias") is not None:
+                    snapshot["htf_bias"] = mtf["htf_bias"]
+            except Exception as exc:  # noqa: BLE001 - evidence is best-effort
+                logger.debug("Multi-TF analysis skipped for %s: %s", symbol, exc)
+        return snapshot
 
     @staticmethod
     def _bar_to_dict(bar: Any) -> dict[str, Any]:

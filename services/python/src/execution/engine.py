@@ -800,6 +800,94 @@ class ExecutionEngine:
                 return False
         return False
 
+    def modify_position_sltp(
+        self,
+        ticket: int,
+        symbol: str,
+        sl: float,
+        tp: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Modify an existing position's SL (and optionally TP) at the broker.
+
+        SAFETY (audit B-7 parity): a native ``mt5.order_send`` with
+        ``TRADE_ACTION_SLTP`` changes a REAL position, so it is gated by the
+        operator arm switch exactly like opening orders — fail-closed when no
+        eligible terminal is armed/attached. In simulation mode (or when native
+        MT5 is unavailable) this returns an honest ``simulated`` result and
+        never touches a broker.
+
+        Args:
+            ticket: The position ticket to modify.
+            symbol: Instrument symbol (required by the MT5 modify payload).
+            sl: The new stop-loss price.
+            tp: Optional new take-profit price (kept unchanged when None).
+
+        Returns:
+            dict with ``success`` (bool), ``error_code`` (int), ``message``,
+            ``reason``/``simulated`` metadata. Never raises.
+        """
+        if not ticket or ticket <= 0:
+            return {"success": False, "error_code": 400, "message": "Invalid ticket"}
+        if sl <= 0:
+            return {"success": False, "error_code": 400, "message": "Invalid SL price"}
+
+        # Simulation / no native library → labelled no-op (never fabricate a
+        # broker modification).
+        try:
+            import MetaTrader5 as mt5
+        except ImportError:
+            logger.info(
+                "SLTP modify (simulated): ticket=%s %s -> SL=%.5f",
+                ticket,
+                symbol,
+                sl,
+            )
+            return {
+                "success": True,
+                "simulated": True,
+                "error_code": 0,
+                "message": "Simulated SLTP modification (no native MT5)",
+                "sl": sl,
+                "tp": tp,
+            }
+
+        if not self._native_execution_armed():
+            logger.warning(
+                "SLTP modify blocked: no armed/attached terminal (fail-closed) " "for ticket=%s",
+                ticket,
+            )
+            return {
+                "success": False,
+                "error_code": 403,
+                "message": "EXECUTION NOT ARMED — SLTP modification disabled.",
+            }
+
+        try:
+            payload: dict[str, Any] = {
+                "action": mt5.TRADE_ACTION_SLTP,
+                "symbol": symbol,
+                "position": ticket,
+                "sl": sl,
+            }
+            if tp is not None and tp > 0:
+                payload["tp"] = tp
+            res = mt5.order_send(payload)
+            parsed = self._parse_send_result(res)
+            return {
+                "success": bool(parsed.get("success")),
+                "error_code": int(parsed.get("error_code", -1) or 0),
+                "message": str(parsed.get("message", "") or ""),
+                "sl": sl,
+                "tp": tp,
+            }
+        except Exception as exc:  # noqa: BLE001 - never fabricate success
+            logger.warning("Native MT5 SLTP modify raised: %s", exc)
+            return {
+                "success": False,
+                "error_code": -1,
+                "message": f"Native MT5 SLTP modify failed: {exc}",
+            }
+
     def _is_transient_error(self, code: int, message: str) -> bool:
         """Determine if an error code or message represents a transient failure.
 

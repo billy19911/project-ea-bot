@@ -349,6 +349,10 @@ async def lifespan(app: FastAPI):
             timeframe=settings.market_feed_timeframe,
             interval_s=settings.market_feed_interval_s,
             event_cooldown_s=settings.market_feed_event_cooldown_s,
+            # Multi-timeframe analysis (opt-in): attach HTF bias + per-TF closes.
+            multi_timeframe_enabled=settings.multi_timeframe_enabled,
+            multi_timeframe_list=settings.multi_timeframe_list,
+            multi_timeframe_min_strength=settings.multi_timeframe_min_strength,
             # Wake the scheduler the instant an event is enqueued so the
             # signal → decision → execution path is not delayed by the idle
             # poll (latency-sensitive entries).
