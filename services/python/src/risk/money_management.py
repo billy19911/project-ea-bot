@@ -99,12 +99,18 @@ class MoneyManager:
         tp_multiplier: float = 3.0,
         pips: float | None = None,
         point_value: float | None = None,
+        spread: float = 0.0,
     ) -> tuple[float, float]:
         """Calculate stop-loss and take-profit prices for a trade.
 
         SL/TP distance comes from ATR (``atr_value * multiplier``) when
         ``atr_value`` is given, otherwise from ``pips * point_value``.
         For longs the SL is below and TP above the entry; for shorts the reverse.
+
+        The ``spread`` is applied to the effective entry for longs only: a BUY
+        fills at the ask (``entry_price + spread``), so both the stop-loss and
+        the take-profit shift up with the spread. A SELL fills at the bid
+        (``entry_price``), so the levels are unchanged.
 
         Args:
             entry_price: Entry price.
@@ -115,6 +121,7 @@ class MoneyManager:
                 using pips the TP distance is ``pips * tp_multiplier``.
             pips: Fixed pip distance for the stop-loss (TP derived via multiplier).
             point_value: Price value of one pip; required when pips is given.
+            spread: Current bid/ask spread in price units (default 0.0).
 
         Returns:
             Tuple of (sl_price, tp_price).
@@ -140,8 +147,9 @@ class MoneyManager:
             reward_distance = pips * tp_multiplier * point_value
 
         if direction == "long":
-            sl_price = entry_price - risk_distance
-            tp_price = entry_price + reward_distance
+            effective_entry = entry_price + max(spread, 0.0)
+            sl_price = effective_entry - risk_distance
+            tp_price = effective_entry + reward_distance
         else:
             sl_price = entry_price + risk_distance
             tp_price = entry_price - reward_distance

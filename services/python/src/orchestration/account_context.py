@@ -56,7 +56,14 @@ def build_connector_account_context(symbol: str = "") -> dict[str, Any]:
     """
     context: dict[str, Any] = {}
     try:
-        from ..mt5 import connector  # local import: keep MT5 out of agent imports
+        try:
+            from ..mt5 import connector  # local import: keep MT5 out of agent imports
+        except ImportError:
+            # Some entrypoints import this module top-level (``src/`` directly
+            # on ``sys.path``, e.g. the test suite) where ``..mt5`` escapes the
+            # package; fall back to the flat name so the connector stays
+            # reachable. The outer handler still degrades to ``{}`` on failure.
+            from mt5 import connector
 
         # ── Account state ────────────────────────────────────────────────
         try:
@@ -100,10 +107,30 @@ def build_connector_account_context(symbol: str = "") -> dict[str, Any]:
                     ask = float(tick_d.get("ask", 0.0) or 0.0)
                     market_info: dict[str, Any] = {"bid": bid, "ask": ask}
                     if bid > 0:
-                        # spread in "pips" ≈ (ask - bid) / point; point unknown
-                        # here, so report the raw price delta and keep the gate's
-                        # default when it cannot be derived confidently.
-                        market_info["spread_price"] = abs(ask - bid)
+                        spread_price = abs(ask - bid)
+                        market_info["spread_price"] = spread_price
+                        # Pip size = point * 10 (standard FX convention). The
+                        # symbol spec supplies the point; without a spec fall
+                        # back to a 5-digit FX point so the gate ALWAYS gets a
+                        # numeric spread_pips (its max-spread check used to
+                        # read a key nobody populated — dead code).
+                        point = 0.0
+                        contract_size = 0.0
+                        try:
+                            spec = _to_dict(connector.get_symbol_info(symbol))
+                            point = float(spec.get("point", 0.0) or 0.0)
+                            contract_size = float(spec.get("contract_size", 0.0) or 0.0)
+                        except Exception as exc:  # noqa: BLE001 - spec is best-effort
+                            logger.debug("Symbol spec read failed: %s", exc)
+                        if point <= 0:
+                            point = 0.00001
+                        pip_size = point * 10.0
+                        market_info["point_value"] = point
+                        if contract_size > 0:
+                            market_info["contract_size"] = contract_size
+                        market_info["spread_pips"] = (
+                            spread_price / pip_size if pip_size > 0 else 0.0
+                        )
                     context["market_info"] = market_info
             except Exception as exc:  # noqa: BLE001 - tick read is best-effort
                 logger.debug("Market context read failed: %s", exc)
