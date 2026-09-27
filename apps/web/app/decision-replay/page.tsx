@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
-import { useApiData } from '@/lib/useApiData';
+import { useApiData, errorMessageFor } from '@/lib/useApiData';
 import styles from '@/components/ops.module.css';
 
 /**
@@ -56,7 +56,7 @@ export default function DecisionReplayPage() {
         const body = (await res.json().catch(() => ({}))) as ReplayBody;
         if (cancelled) return;
         setReplay(body);
-        if (!res.ok) setReplayError(`Replay failed (${res.status})`);
+        if (!res.ok) setReplayError(errorMessageFor(res.status));
       } catch {
         if (!cancelled) setReplayError('Could not reach the API.');
       } finally {

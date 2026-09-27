@@ -45,11 +45,7 @@ export function useApiData<T = unknown>(
     try {
       const res = await apiFetch(path);
       if (!res.ok) {
-        setError(
-          res.status === 503
-            ? 'Python service unavailable.'
-            : `Request failed (${res.status})`
-        );
+        setError(errorMessageFor(res.status));
         return;
       }
       let body: unknown = null;
@@ -71,6 +67,28 @@ export function useApiData<T = unknown>(
 
   return { data, error, loading, refresh: load };
 }
+
+/**
+ * errorMessageFor — turn an HTTP status into an operator-facing message.
+ *
+ * Never leak the raw status code on its own. A 401/403 means "you are not
+ * signed in (or the session expired)", which the rest of the dashboard
+ * already phrases as "open the Sign in page" (see `research/page.tsx`); a 503
+ * means the Python brain is down. Unknown statuses keep the code so support
+ * can still diagnose, but are labelled honestly.
+ */
+function errorMessageFor(status: number): string {
+  if (status === 401 || status === 403) {
+    return 'Sesi tidak valid — buka halaman Masuk untuk mendapatkan token.';
+  }
+  if (status === 503) {
+    return 'Python service unavailable.';
+  }
+  return `Request failed (${status})`;
+}
+
+/** Exported so pages that fetch outside the hook reuse the same wording. */
+export { errorMessageFor };
 
 /**
  * Prefer the PRD §85 envelope `{ value, status, updated_at, source }`; fall

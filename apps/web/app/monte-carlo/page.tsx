@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
-import { useApiData, fmtNum, fmtPct } from '@/lib/useApiData';
+import { useApiData, fmtNum, fmtPct, errorMessageFor } from '@/lib/useApiData';
 import styles from '@/components/ops.module.css';
 
 /**
@@ -66,7 +66,7 @@ export default function MonteCarloPage() {
         const body = (await res.json().catch(() => ({}))) as DetailBody;
         if (cancelled) return;
         setDetail(body);
-        if (!res.ok || body.ok === false) setDetailError(`Request failed (${res.status})`);
+        if (!res.ok || body.ok === false) setDetailError(errorMessageFor(res.status));
       } catch {
         if (!cancelled) setDetailError('Could not reach the API.');
       } finally {
