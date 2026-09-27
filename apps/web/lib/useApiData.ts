@@ -81,6 +81,9 @@ function errorMessageFor(status: number): string {
   if (status === 401 || status === 403) {
     return 'Sesi tidak valid — buka halaman Masuk untuk mendapatkan token.';
   }
+  if (status === 429) {
+    return 'Terlalu banyak permintaan (rate limit) — tunggu sebentar lalu coba lagi.';
+  }
   if (status === 503) {
     return 'Python service unavailable.';
   }

@@ -28,22 +28,33 @@ test('generalLimiter config exposes max 600 and a skip function', () => {
   assert.equal(typeof generalLimiter, 'function');
 });
 
-test('skip predicate exempts read-only dashboard polling GETs', () => {
+test('skip predicate exempts ALL read-only GET requests', () => {
   assert.equal(generalLimiterOptions.skip, skipPollingRead);
+  // Historical hot endpoints.
   assert.equal(skipPollingRead({ method: 'GET', path: '/observability/metrics' }), true);
-  assert.equal(skipPollingRead({ method: 'GET', path: '/observability/errors' }), true);
   assert.equal(skipPollingRead({ method: 'GET', path: '/ai-control/status' }), true);
-  assert.equal(skipPollingRead({ method: 'GET', path: '/system/health' }), true);
-  assert.equal(skipPollingRead({ method: 'GET', path: '/metrics' }), true);
   assert.equal(skipPollingRead({ method: 'GET', path: '/health' }), true);
+  // Endpoints that caused the observed 429 storm must now be exempt too.
+  assert.equal(skipPollingRead({ method: 'GET', path: '/v2/circuit-breaker' }), true);
+  assert.equal(skipPollingRead({ method: 'GET', path: '/v2/capital' }), true);
+  assert.equal(skipPollingRead({ method: 'GET', path: '/settings' }), true);
+  assert.equal(skipPollingRead({ method: 'GET', path: '/mt5/accounts/info' }), true);
+  // Any other GET (future read endpoints) is exempt by design.
+  assert.equal(skipPollingRead({ method: 'GET', path: '/market/news' }), true);
+  assert.equal(skipPollingRead({ method: 'GET', path: '/research/experiments' }), true);
+  // A GET explicitly flagged non-idempotent is NOT exempt.
+  assert.equal(
+    skipPollingRead({ method: 'GET', path: '/danger', __skipRateLimitExempt: false }),
+    false,
+  );
 });
 
-test('skip predicate does NOT exempt mutations or other routes', () => {
+test('skip predicate never exempts mutations', () => {
   assert.equal(skipPollingRead({ method: 'POST', path: '/observability/metrics' }), false);
-  assert.equal(skipPollingRead({ method: 'GET', path: '/strategies' }), false);
+  assert.equal(skipPollingRead({ method: 'POST', path: '/pipeline/run' }), false);
   assert.equal(skipPollingRead({ method: 'DELETE', path: '/observability/errors' }), false);
   assert.equal(skipPollingRead({ method: 'PATCH', path: '/strategies/STR-1/active' }), false);
-  assert.equal(skipPollingRead({ method: 'GET', path: '/system/overview' }), false);
+  assert.equal(skipPollingRead({ method: 'PUT', path: '/settings' }), false);
 });
 
 test('authLimiter is unchanged at 5/15min (security control intact)', () => {
