@@ -212,6 +212,46 @@ class TestConcurrency:
         assert peak[0] <= 2
 
 
+class TestAgentTimeout:
+    """A hung specialist must not block the cycle (audit: timeout_seconds)."""
+
+    def test_hung_agent_times_out_to_neutral(self):
+        """An agent exceeding its budget degrades to NEUTRAL, cycle completes."""
+        slow = StubAgent("slow", delay=2.0)
+        slow.timeout_seconds = 1
+        fast = StubAgent("fast")
+        reg = _make_registry(slow, fast)
+
+        sup = SupervisorAgent(token_budget=50000, routing_policy="all_match")
+        ctx = {"event_type": "TREND_BULLISH", "registry": reg, "agents": [slow, fast]}
+
+        started = time.monotonic()
+        result = sup.analyze(ctx)
+        elapsed = time.monotonic() - started
+
+        # The cycle must return close to the 1s budget, not the 2s sleep.
+        assert elapsed < 2.0
+        # The stuck agent is recorded as a neutral error result, not dropped.
+        slow_result = result["agent_results"]["slow"]
+        assert slow_result["signal"] == "NEUTRAL"
+        assert any("timeout" in str(r).lower() for r in slow_result["reasons"])
+        # The healthy agent is unaffected.
+        assert result["agent_results"]["fast"]["signal"] == "BULLISH"
+
+    def test_fast_agent_unaffected_by_timeout(self):
+        """A normal agent completes well within budget with its real result."""
+        quick = StubAgent("quick")
+        quick.timeout_seconds = 5
+        reg = _make_registry(quick)
+
+        sup = SupervisorAgent(token_budget=50000, routing_policy="all_match")
+        ctx = {"event_type": "TREND_BULLISH", "registry": reg, "agents": [quick]}
+
+        result = sup.analyze(ctx)
+        assert result["agent_results"]["quick"]["signal"] == "BULLISH"
+        assert result["agent_results"]["quick"]["confidence"] == 0.8
+
+
 # ===================================================================
 # 4. Token budget
 # ===================================================================

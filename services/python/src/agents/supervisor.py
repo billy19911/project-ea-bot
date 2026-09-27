@@ -24,6 +24,37 @@ from .synthesis import AgentSynthesizer
 logger = logging.getLogger(__name__)
 
 
+def _call_with_timeout(agent: BaseAgent, context: dict[str, Any]) -> dict[str, Any]:
+    """Run ``agent.analyze`` under its own ``timeout_seconds`` deadline.
+
+    A stuck specialist must never hang the whole cycle: in the sequential path
+    it would block the supervisor indefinitely, and in the concurrent path it
+    would pin a thread-pool slot forever. We therefore execute the call on a
+    dedicated daemon thread and join with the agent's configured budget. On
+    expiry we raise :class:`TimeoutError`, which the caller's existing
+    ``except`` handler converts into the neutral/error result — so a timeout is
+    handled exactly like any other agent failure and the cycle still completes.
+
+    ``timeout_seconds <= 0`` disables the deadline (in-process, no thread).
+    """
+    timeout = int(getattr(agent, "timeout_seconds", 0) or 0)
+    if timeout <= 0:
+        return agent.analyze(context)
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agent-timeout")
+    try:
+        future = executor.submit(agent.analyze, context)
+        try:
+            return future.result(timeout=timeout)
+        except TimeoutError as exc:
+            future.cancel()
+            agent_name = getattr(agent, "name", "?")
+            raise TimeoutError(f"agent '{agent_name}' exceeded its {timeout}s timeout") from exc
+    finally:
+        # Do not block on a wedged worker: shut the pool down without waiting.
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
 def normalize_agent_output(result: Any, agent_name: str = "") -> dict[str, Any]:
     """Normalize a specialist's output to a consistent contract (audit P2-5).
 
@@ -481,7 +512,7 @@ class SupervisorAgent(BaseAgent):
                 agent = registry.get(agent_name)
             if agent is not None:
                 try:
-                    result = agent.analyze(context)
+                    result = _call_with_timeout(agent, context)
                 except Exception as exc:  # pragma: no cover - defensive
                     result = {
                         "agent": agent_name,
