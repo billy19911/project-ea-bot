@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
+import { fmtDateTime } from '../../lib/useApiData';
 import AppShell from '../../components/AppShell';
 import Pagination from '../../components/ui/pagination';
 import TrendChart from '../../components/TrendChart';
@@ -558,7 +559,7 @@ export default function ObservabilityPage() {
                         <div className={styles.errorContent}>
                           <div className={styles.errorHeader}>
                             <strong>{err.agent}</strong>
-                            <code>{err.timestamp}</code>
+                            <code>{fmtDateTime(err.timestamp)}</code>
                           </div>
                           <p>{err.message}</p>
                         </div>

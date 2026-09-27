@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import { useAutoRefresh } from '@/lib/useAutoRefresh';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
+import { fmtDateTime } from '@/lib/useApiData';
 import Pagination from '@/components/ui/pagination';
 import styles from '@/components/ops.module.css';
 
@@ -138,7 +139,7 @@ export default function IncidentsPage() {
                     <td>{inc.system_state || '—'}</td>
                     <td>{inc.action_taken || '—'}</td>
                     <td className={styles.mono}>
-                      {inc.detected_at ? inc.detected_at.slice(0, 19).replace('T', ' ') : '—'}
+                      {fmtDateTime(inc.detected_at)}
                     </td>
                     <td>
                       {inc.open ? (

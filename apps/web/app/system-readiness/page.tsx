@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import AppShell from '../../components/AppShell';
 import { apiFetch } from '../../lib/api';
+import { fmtDateTime } from '../../lib/useApiData';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import Pagination from '../../components/ui/pagination';
 import styles from './page.module.css';
@@ -71,7 +72,7 @@ export default function SystemReadinessPage() {
                   </span>
                 </td>
                 <td>{c.version || '-'} </td>
-                <td>{c.verified_at ? c.verified_at.slice(0, 19).replace('T', ' ') : '—'}</td>
+                <td>{fmtDateTime(c.verified_at)}</td>
                 <td>{Array.isArray(c.details) ? c.details.join(', ') : c.details || '—'}</td>
               </tr>
             ))}

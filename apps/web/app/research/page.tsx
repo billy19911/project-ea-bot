@@ -23,6 +23,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Pagination, { usePagination } from '../../components/ui/pagination';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
+import { fmtDateTime } from '../../lib/useApiData';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 
@@ -758,7 +759,7 @@ function ProvenanceLine({ provenance }: { provenance: Provenance }) {
     <p className={styles.mutedText}>
       Sumber: {provenance.symbol} · {provenance.timeframe} · {provenance.bars} bar nyata
       {account?.login ? ` — akun ${account.login} (${account.server ?? '—'})` : ''} ·{' '}
-      {provenance.ran_at.replace('T', ' ').replace('+00:00', ' UTC')}
+      {fmtDateTime(provenance.ran_at)}
     </p>
   );
 }

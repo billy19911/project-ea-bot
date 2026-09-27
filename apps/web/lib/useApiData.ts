@@ -133,3 +133,33 @@ export function fmtDate(value: unknown, placeholder = '—'): string {
   if (Number.isNaN(d.getTime())) return placeholder;
   return d.toLocaleString();
 }
+
+/** fmtDateTime — compact `YYYY-MM-DD HH:MM:SS` (local), honest placeholder.
+ *
+ * Preferred for log/activity tables so operators read a stable, sortable
+ * timestamp instead of a raw ISO string with microseconds. Falls back to the
+ * raw value only when it truly cannot be parsed (never a fabricated date). */
+export function fmtDateTime(value: unknown, placeholder = '—'): string {
+  if (value == null || value === '') return placeholder;
+  const d = new Date(value as string);
+  if (Number.isNaN(d.getTime())) {
+    // Unparseable — show the raw string rather than hide it.
+    return typeof value === 'string' ? value : placeholder;
+  }
+  const p = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+    `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  );
+}
+
+/** fmtTime — local `HH:MM:SS` only (for dense log rows). */
+export function fmtTime(value: unknown, placeholder = '—'): string {
+  if (value == null || value === '') return placeholder;
+  const d = new Date(value as string);
+  if (Number.isNaN(d.getTime())) {
+    return typeof value === 'string' ? value : placeholder;
+  }
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}

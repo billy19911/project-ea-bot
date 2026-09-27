@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
+import { fmtDateTime } from '../../lib/useApiData';
 import AppShell from '../../components/AppShell';
 import Pagination from '../../components/ui/pagination';
 
@@ -313,7 +314,7 @@ export default function AIControlPage() {
                 <tbody>
                   {activity.map((log) => (
                     <tr key={log.id}>
-                      <td><code>{log.timestamp}</code></td>
+                      <td><code>{fmtDateTime(log.timestamp)}</code></td>
                       <td><strong>{log.agent}</strong></td>
                       <td>{log.action}</td>
                       <td>
@@ -350,7 +351,7 @@ export default function AIControlPage() {
                     <div className={styles.errorContent}>
                       <div className={styles.errorHeader}>
                         <strong>{err.agent}</strong>
-                        <code>{err.timestamp}</code>
+                        <code>{fmtDateTime(err.timestamp)}</code>
                       </div>
                       <p>{err.message}</p>
                     </div>

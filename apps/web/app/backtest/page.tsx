@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
+import { fmtDateTime } from '../../lib/useApiData';
 import AppShell from '../../components/AppShell';
 
 // ── Types matching the real API contract (research/endpoints.py) ──────────
@@ -423,18 +424,18 @@ export default function BacktestPage() {
                     <tr><td>Mode</td><td>{result.provenance.mode === 'date_range' ? 'Date Range' : 'Bar Count'}</td></tr>
                     <tr><td>Bars</td><td>{result.provenance.bars}</td></tr>
                     {result.provenance.mode === 'date_range' && result.provenance.start_date && (
-                      <tr><td>Start Date</td><td>{result.provenance.start_date}</td></tr>
+                      <tr><td>Start Date</td><td>{fmtDateTime(result.provenance.start_date)}</td></tr>
                     )}
                     {result.provenance.mode === 'date_range' && result.provenance.end_date && (
-                      <tr><td>End Date</td><td>{result.provenance.end_date}</td></tr>
+                      <tr><td>End Date</td><td>{fmtDateTime(result.provenance.end_date)}</td></tr>
                     )}
                     {result.provenance.first_bar_time && (
-                      <tr><td>First Bar</td><td>{result.provenance.first_bar_time}</td></tr>
+                      <tr><td>First Bar</td><td>{fmtDateTime(result.provenance.first_bar_time)}</td></tr>
                     )}
                     {result.provenance.last_bar_time && (
-                      <tr><td>Last Bar</td><td>{result.provenance.last_bar_time}</td></tr>
+                      <tr><td>Last Bar</td><td>{fmtDateTime(result.provenance.last_bar_time)}</td></tr>
                     )}
-                    <tr><td>Ran At</td><td>{result.provenance.ran_at}</td></tr>
+                    <tr><td>Ran At</td><td>{fmtDateTime(result.provenance.ran_at)}</td></tr>
                     <tr><td>Source</td><td>{result.provenance.source}</td></tr>
                     {result.provenance.account && (
                       <tr><td>Account</td><td>{result.provenance.account.login ?? '—'} / {result.provenance.account.server ?? '—'}</td></tr>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch, generateTraceId, getAuthToken } from '../../lib/api';
+import { fmtDateTime } from '../../lib/useApiData';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 import DailyReport from '../../components/DailyReport';
@@ -807,7 +808,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
             {auditPage.rows.map((e: any) => (
               <tr key={e.id}>
                 <td className={s.mono}>{e.id}</td>
-                <td>{e.timestamp}</td>
+                <td>{fmtDateTime(e.timestamp)}</td>
                 <td>{e.actor}</td>
                 <td>{e.action}</td>
                 <td>{e.target}</td>
@@ -839,7 +840,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           </tbody>
         </table>
         {healthPage.pager}
-        {health.checked_at && <div className={s.mono} style={{ marginTop: 10 }}>Checked at: {health.checked_at}</div>}
+        {health.checked_at && <div className={s.mono} style={{ marginTop: 10 }}>Checked at: {fmtDateTime(health.checked_at)}</div>}
       </section>
     );
   }

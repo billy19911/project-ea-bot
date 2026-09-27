@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
+import { fmtDateTime } from '../../lib/useApiData';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 import Pagination from '../../components/ui/pagination';
@@ -282,7 +283,7 @@ export default function StrategyCenterPage() {
                     <div key={ver.version} className={styles.versionItem}>
                       <div className={styles.versionHeader}>
                         <code>{ver.version}</code>
-                        <small>{ver.date}</small>
+                        <small>{fmtDateTime(ver.date)}</small>
                       </div>
                       <p>{ver.changes}</p>
                     </div>

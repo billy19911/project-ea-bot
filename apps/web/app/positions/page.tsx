@@ -5,7 +5,7 @@ import AppShell from '@/components/AppShell';
 import { DataTable } from '@/components/ui/data-table';
 import { Card } from '@/components/ui/card';
 import { apiFetch } from '@/lib/api';
-import { errorMessageFor } from '@/lib/useApiData';
+import { errorMessageFor, fmtDateTime } from '@/lib/useApiData';
 import { useAutoRefresh } from '@/lib/useAutoRefresh';
 
 type Position = {
@@ -24,7 +24,7 @@ type Position = {
 
 const columns = [
   { header: 'Ticket', accessor: (r: Position) => <span className="mono">{r.ticket}</span> },
-  { header: 'Time', accessor: (r: Position) => new Date(r.time).toLocaleString() },
+  { header: 'Time', accessor: (r: Position) => fmtDateTime(r.time) },
   { header: 'Symbol', accessor: (r: Position) => r.symbol },
   { header: 'Side', accessor: (r: Position) => <span className={r.side === 'BUY' ? 'trendUp' : 'trendDown'}>{r.side}</span> },
   { header: 'Qty', accessor: (r: Position) => <span className="mono">{r.quantity}</span> },

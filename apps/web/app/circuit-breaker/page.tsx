@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import { useAutoRefresh } from '@/lib/useAutoRefresh';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
+import { fmtDateTime } from '@/lib/useApiData';
 import Pagination from '@/components/ui/pagination';
 import styles from '@/components/ops.module.css';
 
@@ -192,7 +193,7 @@ export default function CircuitBreakerPage() {
                     <td>{r.to}</td>
                     <td>{r.trigger}</td>
                     <td>{r.reason}</td>
-                    <td className={styles.mono}>{r.timestamp.slice(0, 19).replace('T', ' ')}</td>
+                    <td className={styles.mono}>{fmtDateTime(r.timestamp)}</td>
                   </tr>
                 ))}
               </tbody>

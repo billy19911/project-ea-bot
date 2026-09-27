@@ -5,7 +5,7 @@ import { useAutoRefresh } from '@/lib/useAutoRefresh';
 import AppShell from '@/components/AppShell';
 import { DataTable } from '@/components/ui/data-table';
 import { apiFetch } from '@/lib/api';
-import { errorMessageFor } from '@/lib/useApiData';
+import { errorMessageFor, fmtDateTime } from '@/lib/useApiData';
 
 type Position = {
   ticket: number;
@@ -24,7 +24,7 @@ const columns = [
     header: 'Ticket',
     accessor: (r: Position) => <span className="mono">{r.ticket}</span>,
   },
-  { header: 'Time', accessor: (r: Position) => r.time?.replace('T', ' ') ?? '—' },
+  { header: 'Time', accessor: (r: Position) => fmtDateTime(r.time) },
   { header: 'Symbol', accessor: (r: Position) => r.symbol },
   {
     header: 'Side',

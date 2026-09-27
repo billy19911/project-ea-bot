@@ -5,7 +5,7 @@ import AppShell from '@/components/AppShell';
 import { DataTable } from '@/components/ui/data-table';
 import { Card } from '@/components/ui/card';
 import { apiFetch } from '@/lib/api';
-import { errorMessageFor } from '@/lib/useApiData';
+import { errorMessageFor, fmtDateTime } from '@/lib/useApiData';
 import { useAutoRefresh } from '@/lib/useAutoRefresh';
 
 type Order = {
@@ -24,7 +24,7 @@ type Order = {
 
 const columns = [
   { header: 'Ticket', accessor: (r: Order) => <span className="mono">{r.ticket}</span> },
-  { header: 'Time setup', accessor: (r: Order) => new Date(r.time_setup).toLocaleString() },
+  { header: 'Time setup', accessor: (r: Order) => fmtDateTime(r.time_setup) },
   { header: 'Symbol', accessor: (r: Order) => r.symbol },
   { header: 'Side', accessor: (r: Order) => <span className={r.side === 'BUY' ? 'trendUp' : 'trendDown'}>{r.side}</span> },
   { header: 'Type', accessor: (r: Order) => r.order_type },
