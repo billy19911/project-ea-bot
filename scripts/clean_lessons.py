@@ -57,6 +57,18 @@ def _is_junk(record: dict) -> bool:
     if trade_id == "" or trade_id.upper().startswith("T-"):
         return True
 
+    # A record whose ONLY meaningful field is a non-numeric trade id (e.g.
+    # ``{"trade_id": "T1"}`` leaked by the store tests) carries no trade data.
+    # Real MT5 tickets are digit strings; anything else with no content is junk.
+    if not trade_id.replace(".", "", 1).isdigit():
+        content_keys = {
+            k
+            for k, v in record.items()
+            if k != "trade_id" and v not in ("", None, {}, [])
+        }
+        if not content_keys:
+            return True
+
     source = str(record.get("source") or "")
     if source == "review_auto_trigger":
         if lesson in _JUNK_LESSON_TEXTS:
