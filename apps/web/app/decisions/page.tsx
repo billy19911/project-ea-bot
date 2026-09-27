@@ -64,7 +64,7 @@ export default function DecisionsPage() {
     return c;
   }, [all]);
 
-  const { page, pageSize, setPage, setPageSize, slice } = usePagination(rows.length, 25);
+  const { page, pageSize, setPage, setPageSize, slice } = usePagination(rows.length, 10);
   const pageRows = slice(rows);
 
   return (

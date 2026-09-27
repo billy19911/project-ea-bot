@@ -27,7 +27,7 @@ export default function ModelsPage() {
   const [source, setSource] = useState('unknown');
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(10);
 
   const load = useCallback(async () => {
     try {

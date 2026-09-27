@@ -177,7 +177,7 @@ export default function MarketPage() {
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
   const [posPage, setPosPage] = useState(1);
-  const [posPageSize, setPosPageSize] = useState(25);
+  const [posPageSize, setPosPageSize] = useState(10);
   const [live, setLive] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
 

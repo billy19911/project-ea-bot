@@ -73,7 +73,7 @@ export default function StrategyCenterPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(10);
 
   const selected = selectedId ? strategies.find((s) => s.id === selectedId) : null;
 

@@ -44,7 +44,7 @@ export default function ExecutionPage() {
   );
 
   // /decisions is newest-first; keep that order and page the window.
-  const { page, pageSize, setPage, setPageSize, slice } = usePagination(executed.length, 25);
+  const { page, pageSize, setPage, setPageSize, slice } = usePagination(executed.length, 10);
   const pageRows = slice(executed);
 
   const cards = [

@@ -13,7 +13,7 @@ import Pagination from '../../components/ui/pagination';
 // stays in memory; only the visible window is rendered. Page resets to 1 when
 // the list length changes (e.g. after a refresh) so we never land on an empty
 // page. Returns the slice to render plus a ready-to-drop-in <Pagination>.
-function usePagedRows<T>(rows: T[] | undefined, initialSize = 25) {
+function usePagedRows<T>(rows: T[] | undefined, initialSize = 10) {
   const data = rows ?? [];
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(initialSize);
@@ -451,16 +451,16 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
   // One paged view per long list. Hooks run unconditionally (required) — the
   // slices are only used inside the matching tab branch below.
   const tradesPage = usePagedRows<any>(trading?.recent_trades, 10);
-  const positionsPage = usePagedRows<any>(positions?.positions, 25);
-  const symbolsPage = usePagedRows<any>(market?.symbols, 15);
-  const agentsPage = usePagedRows<any>(aiControl?.agents, 15);
-  const tasksPage = usePagedRows<any>(tasks?.tasks, 25);
-  const decisionsPage = usePagedRows<any>(decisions?.decisions, 25);
-  const strategiesPage = usePagedRows<any>(strategies?.strategies, 25);
-  const auditPage = usePagedRows<any>(audit?.events, 25);
-  const healthPage = usePagedRows<any>(health?.components, 25);
-  const providersPage = usePagedRows<any>(providers?.providers, 25);
-  const modelsPage = usePagedRows<any>(models?.models, 50);
+  const positionsPage = usePagedRows<any>(positions?.positions, 10);
+  const symbolsPage = usePagedRows<any>(market?.symbols, 10);
+  const agentsPage = usePagedRows<any>(aiControl?.agents, 10);
+  const tasksPage = usePagedRows<any>(tasks?.tasks, 10);
+  const decisionsPage = usePagedRows<any>(decisions?.decisions, 10);
+  const strategiesPage = usePagedRows<any>(strategies?.strategies, 10);
+  const auditPage = usePagedRows<any>(audit?.events, 10);
+  const healthPage = usePagedRows<any>(health?.components, 10);
+  const providersPage = usePagedRows<any>(providers?.providers, 10);
+  const modelsPage = usePagedRows<any>(models?.models, 10);
 
   if (tab === 'overview') {
     if (!overview) return <div className={s.empty}>Belum ada data ringkasan. Pastikan token aktif lalu klik Muat ulang.</div>;
@@ -1142,7 +1142,7 @@ function TerminalPanel({
   const probedAt = terminals?.accounts_probed_at ?? null;
 
   const [termPage, setTermPage] = useState(1);
-  const [termPageSize, setTermPageSize] = useState(25);
+  const [termPageSize, setTermPageSize] = useState(10);
   const termPageCount = Math.max(1, Math.ceil(list.length / termPageSize));
   const safeTermPage = Math.min(termPage, termPageCount);
   const visibleTerminals = list.slice((safeTermPage - 1) * termPageSize, safeTermPage * termPageSize);

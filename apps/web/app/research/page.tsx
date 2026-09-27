@@ -136,7 +136,7 @@ export default function Home() {
   const [cmpResult, setCmpResult] = useState<Record<string, unknown> | null>(null);
   const [ranking, setRanking] = useState<Ranking | null>(null);
   const [rankingError, setRankingError] = useState('');
-  const pagination = usePagination(experiments.length, 25);
+  const pagination = usePagination(experiments.length, 10);
 
   const refresh = useCallback(async () => {
     try {

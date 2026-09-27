@@ -18,7 +18,7 @@ export type PaginationProps = {
   unitLabel?: string;
 };
 
-export function usePagination(total: number, initialSize = 25) {
+export function usePagination(total: number, initialSize = 10) {
   const [page, setPageState] = useState(1);
   const [pageSize, setPageSizeState] = useState(initialSize);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));

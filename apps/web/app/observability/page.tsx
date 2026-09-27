@@ -106,11 +106,11 @@ export default function ObservabilityPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [tab, setTab] = useState<'overview' | 'errors' | 'agents' | 'tokens'>('overview');
   const [errPage, setErrPage] = useState(1);
-  const [errPageSize, setErrPageSize] = useState(25);
+  const [errPageSize, setErrPageSize] = useState(10);
   const [agentPage, setAgentPage] = useState(1);
-  const [agentPageSize, setAgentPageSize] = useState(25);
+  const [agentPageSize, setAgentPageSize] = useState(10);
   const [modelPage, setModelPage] = useState(1);
-  const [modelPageSize, setModelPageSize] = useState(25);
+  const [modelPageSize, setModelPageSize] = useState(10);
 
   const fetchData = useCallback(async () => {
     // Fetch + parse each endpoint independently, tracking HTTP status so we

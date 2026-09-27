@@ -86,7 +86,7 @@ export default function TradeHistoryPage() {
           reports them; if you have not placed a trade, this stays empty.
         </p>
       ) : (
-        <DataTable columns={columns} rows={rows} pageSize={25} unitLabel="position" />
+        <DataTable columns={columns} rows={rows} pageSize={10} unitLabel="position" />
       )}
     </AppShell>
   );

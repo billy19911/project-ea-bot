@@ -113,7 +113,7 @@ export default function AIControlPage() {
   const [source, setSource] = useState<SourceState>('unavailable');
   const [loading, setLoading] = useState(true);
   const [modelPage, setModelPage] = useState(1);
-  const [modelPageSize, setModelPageSize] = useState(25);
+  const [modelPageSize, setModelPageSize] = useState(10);
   // LLM Advisor (ide #1) — advisory-only, guardrail fail-closed.
   const [advisorStatus, setAdvisorStatus] = useState<AdvisorStatus | null>(null);
   const [advisorRole, setAdvisorRole] = useState('market');

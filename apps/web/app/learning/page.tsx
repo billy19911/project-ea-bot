@@ -46,7 +46,7 @@ export default function LearningPage() {
   const byOutcome = data?.by_outcome ?? {};
   const total = data?.total ?? 0;
 
-  const { page, pageSize, setPage, setPageSize, slice } = usePagination(lessons.length, 25);
+  const { page, pageSize, setPage, setPageSize, slice } = usePagination(lessons.length, 10);
   const pageItems = slice(lessons);
 
   return (

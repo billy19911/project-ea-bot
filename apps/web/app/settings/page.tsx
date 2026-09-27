@@ -77,7 +77,7 @@ export default function SettingsPage() {
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'unauthorized' | 'unavailable'>('loading');
   const [saving, setSaving] = useState(false);
   const [modelPage, setModelPage] = useState(1);
-  const [modelPageSize, setModelPageSize] = useState(25);
+  const [modelPageSize, setModelPageSize] = useState(10);
 
   const load = useCallback(async () => {
     try {

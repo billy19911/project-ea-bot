@@ -19,7 +19,7 @@ export function DataTable<T extends unknown>({
   rows,
   className,
   paginate = true,
-  pageSize: initialPageSize = 25,
+  pageSize: initialPageSize = 10,
   unitLabel = 'rows',
 }: {
   columns: { header: string; accessor: (row: T) => React.ReactNode }[];

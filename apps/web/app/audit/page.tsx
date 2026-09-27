@@ -46,7 +46,7 @@ export default function AuditPage() {
     );
   }, [all, filter]);
 
-  const { page, pageSize, setPage, setPageSize, slice } = usePagination(rows.length, 25);
+  const { page, pageSize, setPage, setPageSize, slice } = usePagination(rows.length, 10);
   const pageRows = slice(rows);
 
   return (
