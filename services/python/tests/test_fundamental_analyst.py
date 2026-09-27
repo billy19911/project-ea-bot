@@ -174,7 +174,7 @@ class TestFundamentalSignal:
         result = self.agent.analyze(ctx)
         assert result["signal"] == "NEUTRAL"
         assert result["confidence"] == 0.55
-        assert "No economic events" in result["reasons"][0]
+        assert "Tidak ada event ekonomi" in result["reasons"][0]
 
     def test_empty_context_returns_neutral(self) -> None:
         """Empty context → NEUTRAL confidence 0.55."""
@@ -387,7 +387,9 @@ class TestEconomicEventParsing:
         assert score > 0  # hawkish → positive
 
     def test_text_sentiment_dovish(self) -> None:
-        score = FundamentalAnalystAgent._text_sentiment("FOMC Statement: Dovish, Rate Cut")
+        score = FundamentalAnalystAgent._text_sentiment(
+            "FOMC Statement: Dovish, Rate Cut"
+        )
         assert score < 0  # dovish → negative
 
     def test_text_sentiment_safe_haven(self) -> None:

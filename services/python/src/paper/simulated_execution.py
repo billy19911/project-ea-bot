@@ -395,11 +395,16 @@ class SimulatedExecutionEngine:
             logger.warning("Position not found for close: %s %s", symbol, side)
             return None
 
-        # Calculate realized P&L
+        # Calculate realized P&L using the broker's real contract size for the
+        # symbol (forex 100000 is wrong for XAUUSD/BTCUSD/indices and inflated
+        # the review/lesson P&L).
+        from .contract_size import resolve_contract_size
+
+        contract_size = resolve_contract_size(symbol)
         if position.side.upper() == "BUY":
-            pnl = (close_price - position.entry_price) * position.size * 100000
+            pnl = (close_price - position.entry_price) * position.size * contract_size
         else:
-            pnl = (position.entry_price - close_price) * position.size * 100000
+            pnl = (position.entry_price - close_price) * position.size * contract_size
 
         # Create close trade record
         close_trade = PaperTrade(

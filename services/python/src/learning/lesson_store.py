@@ -20,11 +20,15 @@ import logging
 import os
 from typing import Any, Optional
 
+from .store_paths import LESSON_PATH_ENV, resolve_store_path
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["JsonlLessonStore"]
 
-_DEFAULT_PATH = os.path.join("logs", "lessons.jsonl")
+# Default filename/relative location; the absolute path is resolved at
+# *instantiation* (not import) so env overrides and test isolation apply.
+_DEFAULT_FILENAME = "lessons.jsonl"
 
 
 class JsonlLessonStore:
@@ -36,7 +40,7 @@ class JsonlLessonStore:
     """
 
     def __init__(self, path: Optional[str] = None) -> None:
-        self.path = str(path or os.getenv("LESSON_STORE_PATH") or _DEFAULT_PATH)
+        self.path = str(path or resolve_store_path(_DEFAULT_FILENAME, LESSON_PATH_ENV))
         self._lessons: list[dict[str, Any]] = []
         self._load()
 
@@ -81,7 +85,9 @@ class JsonlLessonStore:
             with open(self.path, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(lesson, ensure_ascii=False, default=str) + "\n")
         except OSError as exc:
-            logger.warning("Could not persist lesson to %s (cache kept): %s", self.path, exc)
+            logger.warning(
+                "Could not persist lesson to %s (cache kept): %s", self.path, exc
+            )
 
     def all_lessons(self) -> list[dict[str, Any]]:
         """Return a shallow copy of every stored lesson."""

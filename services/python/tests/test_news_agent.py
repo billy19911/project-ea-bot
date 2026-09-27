@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import pytest
-
 from agents.analysts.news_agent import NewsItem, NewsSentimentAgent, NewsSentimentInput
 
 
@@ -94,7 +93,11 @@ class TestNewsSentimentAnalysis:
         data = {
             "news_items": [
                 {"headline": "Market crash", "sentiment": -0.85, "impact": "HIGH"},
-                {"headline": "Economic slowdown", "sentiment": -0.6, "impact": "MEDIUM"},
+                {
+                    "headline": "Economic slowdown",
+                    "sentiment": -0.6,
+                    "impact": "MEDIUM",
+                },
             ],
         }
         result = agent.analyze({"sentiment": data})
@@ -114,12 +117,17 @@ class TestNewsSentimentAnalysis:
 
     def test_critical_event_override(self, agent):
         data = {
-            "news_items": [{"headline": "Minor news", "sentiment": 0.1, "impact": "LOW"}],
+            "news_items": [
+                {"headline": "Strong rally", "sentiment": 0.7, "impact": "LOW"}
+            ],
             "economic_events": [{"impact": "CRITICAL", "sentiment": 0.5}],
         }
         result = agent.analyze({"sentiment": data})
-        assert result["signal"] == "BEARISH"
-        assert "Critical impact" in result["reasoning"][0] or len(result["reasoning"]) > 1
+        # Corrected logic: a CRITICAL event no longer forces BEARISH. The signal
+        # follows the *directional* sentiment (here clearly positive → BULLISH)
+        # and the critical event is reported honestly in the reasoning.
+        assert result["signal"] == "BULLISH"
+        assert any("KRITIS" in r for r in result["reasoning"])
 
     def test_high_impact_event_detection(self, agent):
         data = {
@@ -147,7 +155,7 @@ class TestNewsSentimentAnalysis:
     def test_empty_input_handling(self, agent):
         result = agent.analyze({"sentiment": {}})
         assert result["signal"] == "NEUTRAL"
-        assert any("No news items" in r for r in result["reasoning"])
+        assert any("Tidak ada berita" in r for r in result["reasoning"])
 
     def test_invalid_input_degradation(self, agent):
         result = agent.analyze({"sentiment": None})

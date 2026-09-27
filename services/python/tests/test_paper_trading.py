@@ -13,7 +13,6 @@ Covers:
 from datetime import datetime, timezone
 
 import pytest
-
 from execution import ExecutionResult, OrderRequest
 from paper.paper_account import PaperAccount, PaperPosition, PaperTrade
 from paper.simulated_execution import SimulatedExecutionEngine
@@ -75,6 +74,33 @@ class TestPaperAccount:
         )
         expected_pnl = (1.0900 - 1.0850) * 1.0 * 100000  # assuming contract size 100k
         assert pos_long.pnl == pytest.approx(expected_pnl, abs=0.01)
+
+    def test_pnl_uses_broker_contract_size_not_hardcoded(self, monkeypatch):
+        """Regression: P&L must use the per-symbol contract size.
+
+        The old code hard-coded 100000 for *every* symbol, inflating non-FX
+        P&L (XAUUSD/BTCUSD/indices) by orders of magnitude and corrupting
+        downstream review/lesson data.
+        """
+        # Simulate a broker reporting a non-forex contract size for XAUUSD.
+        monkeypatch.setattr(
+            "paper.contract_size.resolve_contract_size",
+            lambda symbol, default=100000.0: 100.0,  # gold: 100 oz/lot
+        )
+
+        now = datetime.now(timezone.utc)
+        pos = PaperPosition(
+            symbol="XAUUSD",
+            entry_price=2000.0,
+            size=0.5,
+            side="BUY",
+            entry_time=now,
+            current_price=2001.0,
+        )
+        # (2001 - 2000) * 0.5 lots * 100 oz = 50.0, NOT 50_000_000.
+        assert pos.pnl == pytest.approx(50.0, abs=0.01)
+        # Sanity: the old hard-coded 100000 would have produced 50_000_000.
+        assert pos.pnl < 1000.0
 
     def test_paper_trade_creation(self):
         """PaperTrade records execution details with timestamp."""
@@ -192,7 +218,9 @@ class TestSimulatedExecutionEngine:
             sl=1.0750,
             tp=1.0950,
         )
-        result = simulated_engine.simulate_order(req, base_price=1.0850, volatility=0.01)
+        result = simulated_engine.simulate_order(
+            req, base_price=1.0850, volatility=0.01
+        )
         assert result.success is True
         pos = result.position_opened
         assert pos["stop_loss"] == 1.0750

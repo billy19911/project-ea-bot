@@ -21,11 +21,14 @@ import logging
 import os
 from typing import Any, Optional
 
+from .store_paths import ENGINE_V2_PATH_ENV, resolve_store_path
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["JsonlEngineV2Store", "set_engine_v2_store", "get_engine_v2_store"]
 
-_DEFAULT_PATH = os.path.join("logs", "learning_engine_v2.jsonl")
+# Default filename; absolute path resolved at instantiation (see lesson_store).
+_DEFAULT_FILENAME = "learning_engine_v2.jsonl"
 
 # Process-wide store (mirrors lesson_store's module-global pattern).
 _STORE: Optional["JsonlEngineV2Store"] = None
@@ -40,7 +43,9 @@ class JsonlEngineV2Store:
     """
 
     def __init__(self, path: Optional[str] = None) -> None:
-        self.path = str(path or os.getenv("ENGINE_V2_STORE_PATH") or _DEFAULT_PATH)
+        self.path = str(
+            path or resolve_store_path(_DEFAULT_FILENAME, ENGINE_V2_PATH_ENV)
+        )
         self._lessons: list[dict[str, Any]] = []
         self._load()
 
@@ -58,7 +63,9 @@ class JsonlEngineV2Store:
                     try:
                         lesson = json.loads(line)
                     except json.JSONDecodeError:
-                        logger.warning("Skipping corrupt v2 lesson line in %s", self.path)
+                        logger.warning(
+                            "Skipping corrupt v2 lesson line in %s", self.path
+                        )
                         continue
                     if isinstance(lesson, dict):
                         self._lessons.append(lesson)
@@ -85,7 +92,9 @@ class JsonlEngineV2Store:
             with open(self.path, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(lesson, ensure_ascii=False, default=str) + "\n")
         except OSError as exc:
-            logger.warning("Could not persist v2 lesson to %s (cache kept): %s", self.path, exc)
+            logger.warning(
+                "Could not persist v2 lesson to %s (cache kept): %s", self.path, exc
+            )
 
     def all_lessons(self) -> list[dict[str, Any]]:
         """Return a shallow copy of every stored lesson."""

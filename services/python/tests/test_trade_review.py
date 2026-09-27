@@ -2,7 +2,6 @@
 """Tests for the Trade Review module (Phase 17)."""
 
 import pytest
-
 from src.review import TradeReviewer, TradeReviewResult
 
 
@@ -135,26 +134,36 @@ class TestTimingScore:
 
     def test_buy_near_support(self, reviewer: TradeReviewer) -> None:
         # Entry right at support → score should be high
-        score = reviewer.score_timing(1.1000, support=1.1000, resistance=1.1200, direction="BUY")
+        score = reviewer.score_timing(
+            1.1000, support=1.1000, resistance=1.1200, direction="BUY"
+        )
         assert score == 100.0
 
     def test_buy_far_from_support(self, reviewer: TradeReviewer) -> None:
         # Entry far from support → score should be lower (close to neutral 50)
-        score = reviewer.score_timing(1.1000, support=1.0000, resistance=1.1200, direction="BUY")
+        score = reviewer.score_timing(
+            1.1000, support=1.0000, resistance=1.1200, direction="BUY"
+        )
         # Distance to support = 0.10, support_range = 0.01, proximity = max(0, 1-0.10/0.01) = 0
         assert score == 50.0
 
     def test_sell_near_resistance(self, reviewer: TradeReviewer) -> None:
-        score = reviewer.score_timing(1.1000, support=1.0800, resistance=1.1000, direction="SELL")
+        score = reviewer.score_timing(
+            1.1000, support=1.0800, resistance=1.1000, direction="SELL"
+        )
         assert score == 100.0
 
     def test_sell_far_from_resistance(self, reviewer: TradeReviewer) -> None:
-        score = reviewer.score_timing(1.1000, support=1.0800, resistance=1.2000, direction="SELL")
+        score = reviewer.score_timing(
+            1.1000, support=1.0800, resistance=1.2000, direction="SELL"
+        )
         assert score == 50.0
 
     def test_no_support_or_resistance(self, reviewer: TradeReviewer) -> None:
         # Without S/R, should be neutral baseline
-        score = reviewer.score_timing(1.1000, support=None, resistance=None, direction="BUY")
+        score = reviewer.score_timing(
+            1.1000, support=None, resistance=None, direction="BUY"
+        )
         assert score == 50.0
 
     def test_zero_entry_price(self, reviewer: TradeReviewer) -> None:
@@ -162,7 +171,9 @@ class TestTimingScore:
         assert score == 0.0
 
     def test_unknown_direction(self, reviewer: TradeReviewer) -> None:
-        score = reviewer.score_timing(1.1000, support=1.0, resistance=1.2, direction="HOLD")
+        score = reviewer.score_timing(
+            1.1000, support=1.0, resistance=1.2, direction="HOLD"
+        )
         assert score == 50.0
 
 
@@ -188,9 +199,9 @@ class TestDecisionQuality:
     def test_outcome_does_not_change_the_score(self, reviewer: TradeReviewer) -> None:
         """A good process that lost must score the same as if it had won."""
         agent = {"confidence": 0.7, "signal": "BUY", "reasoning": "plan"}
-        assert reviewer.score_decision_quality(agent, "WIN") == reviewer.score_decision_quality(
-            agent, "LOSS"
-        )
+        assert reviewer.score_decision_quality(
+            agent, "WIN"
+        ) == reviewer.score_decision_quality(agent, "LOSS")
 
     def test_win_with_hold_signal(self, reviewer: TradeReviewer) -> None:
         agent = {"confidence": 0.5, "signal": "HOLD"}
@@ -322,12 +333,12 @@ class TestReviewTrade:
     ) -> None:
         price_history = [1.1050, 1.1100]
         result = reviewer.review_trade(winning_buy_trade, price_history)
-        # Summary should contain key metrics
+        # Summary should contain key metrics (human-readable, Bahasa Indonesia)
         assert "MAE=" in result.summary
         assert "MFE=" in result.summary
         assert "Timing=" in result.summary
-        assert "Decision=" in result.summary
-        assert "Execution=" in result.summary
+        assert "Keputusan=" in result.summary
+        assert "Eksekusi=" in result.summary
 
     def test_review_unknown_trade_id(
         self,

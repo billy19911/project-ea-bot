@@ -26,7 +26,12 @@ from agents.base import AgentPriority, BaseAgent
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PostTradeReviewAgent", "InMemoryLessonStore", "get_lesson_store", "set_lesson_store"]
+__all__ = [
+    "PostTradeReviewAgent",
+    "InMemoryLessonStore",
+    "get_lesson_store",
+    "set_lesson_store",
+]
 
 _BULLISH_TOKENS = {"BUY", "LONG", "BULLISH", "BULL", "UP"}
 _BEARISH_TOKENS = {"SELL", "SHORT", "BEARISH", "BEAR", "DOWN"}
@@ -34,31 +39,46 @@ _BEARISH_TOKENS = {"SELL", "SHORT", "BEARISH", "BEAR", "DOWN"}
 #: Deterministic rule per (outcome, followed_plan). ``None`` adherence means
 #: the trade record did not carry both the signal and the actual direction.
 _RULES: dict[tuple[str, Optional[bool]], str] = {
-    ("win", True): "Keep executing signal-consistent entries; the committee plan worked.",
-    ("win", False): "Trade won despite deviating from the committee signal — do not repeat it.",
-    ("win", None): "Log the committee signal and actual direction to measure plan adherence.",
-    ("loss", True): "Plan-following loss: acceptable risk; keep the process, review sizing only.",
+    (
+        "win",
+        True,
+    ): "Terus eksekusi entry yang konsisten dengan sinyal komite; rencana komite berhasil.",
+    (
+        "win",
+        False,
+    ): "Trade menang meski menyimpang dari sinyal komite — jangan diulang.",
+    (
+        "win",
+        None,
+    ): "Catat sinyal komite dan arah aktual untuk mengukur kepatuhan rencana.",
+    (
+        "loss",
+        True,
+    ): "Loss saat mengikuti rencana: risiko wajar; pertahankan proses, tinjau hanya sizing.",
     (
         "loss",
         False,
-    ): "Loss while deviating from the committee signal: enforce signal-consistent entries.",
+    ): "Loss saat menyimpang dari sinyal komite: perkuat disiplin entry sesuai sinyal.",
     (
         "loss",
         None,
-    ): "Log the committee signal and actual direction; adherence is currently unmeasured.",
+    ): "Catat sinyal komite dan arah aktual; kepatuhan belum terukur.",
     (
         "breakeven",
         True,
-    ): "Breakeven while following the plan: process is sound, no change required.",
+    ): "Breakeven saat mengikuti rencana: proses sudah benar, tidak perlu diubah.",
     (
         "breakeven",
         False,
-    ): "Breakeven while deviating: review exit management against the committee plan.",
+    ): "Breakeven saat menyimpang: tinjau manajemen exit terhadap rencana komite.",
     (
         "breakeven",
         None,
-    ): "Log the committee signal and actual direction for future adherence checks.",
-    ("unknown", None): "Insufficient data for a specific rule; log the trade for trend analysis.",
+    ): "Catat sinyal komite dan arah aktual untuk pemeriksaan kepatuhan berikutnya.",
+    (
+        "unknown",
+        None,
+    ): "Data tidak cukup untuk aturan spesifik; catat trade untuk analisis tren.",
 }
 
 _CONFIDENCE_BY_OUTCOME = {
@@ -145,13 +165,17 @@ class PostTradeReviewAgent(BaseAgent):
             priority=AgentPriority.LOW,  # post-trade, not time-critical
             permissions=["ANALYZE_TRADES"],
         )
-        self._lesson_store = lesson_store if lesson_store is not None else _default_lesson_store
+        self._lesson_store = (
+            lesson_store if lesson_store is not None else _default_lesson_store
+        )
 
     # ------------------------------------------------------------------
     # Routing
     # ------------------------------------------------------------------
 
-    def can_handle(self, event_type: str, context: dict[str, Any] | None = None) -> bool:
+    def can_handle(
+        self, event_type: str, context: dict[str, Any] | None = None
+    ) -> bool:
         """Accept trade-close review events only."""
         return event_type.startswith("TRADE_CLOSE") or event_type == "POST_TRADE_REVIEW"
 
@@ -216,12 +240,16 @@ class PostTradeReviewAgent(BaseAgent):
             entry = trade.get("entry_price")
             exit_price = trade.get("exit_price", trade.get("close_price"))
             direction = _normalize_direction(trade.get("side", trade.get("direction")))
-            if not (_is_number(entry) and _is_number(exit_price) and direction is not None):
+            if not (
+                _is_number(entry) and _is_number(exit_price) and direction is not None
+            ):
                 return data
 
             history = trade.get("price_history")
             prices = (
-                [float(p) for p in history if _is_number(p)] if isinstance(history, list) else []
+                [float(p) for p in history if _is_number(p)]
+                if isinstance(history, list)
+                else []
             )
             review = TradeReviewer().review_trade(
                 {
@@ -272,11 +300,15 @@ class PostTradeReviewAgent(BaseAgent):
     def analyze(self, context: dict[str, Any]) -> dict[str, Any]:
         """Review one closed trade; always returns a Supervisor-compatible dict."""
         if not isinstance(context, dict):
-            return self._unsupported("No closed trade data available for review (fail-closed)")
+            return self._unsupported(
+                "No closed trade data available for review (fail-closed)"
+            )
 
         trade = context.get("closed_trade")
         if not isinstance(trade, dict) or not trade:
-            return self._unsupported("No closed trade data available for review (fail-closed)")
+            return self._unsupported(
+                "No closed trade data available for review (fail-closed)"
+            )
 
         pnl = self._resolve_pnl(trade)
         outcome = self._resolve_outcome(trade, pnl)
@@ -317,7 +349,9 @@ class PostTradeReviewAgent(BaseAgent):
         try:
             self._lesson_store.add_lesson(lesson)
         except Exception as exc:  # fail-safe: persistence must never break review
-            logger.warning("Lesson store failed for %s (review continues): %s", trade_id, exc)
+            logger.warning(
+                "Lesson store failed for %s (review continues): %s", trade_id, exc
+            )
 
         confidence = _CONFIDENCE_BY_OUTCOME.get(outcome, 0.5)
         reasons = [

@@ -29,7 +29,9 @@ def test_add_lesson_appends_one_json_line(tmp_path) -> None:
     store.add_lesson({"trade_id": "T1", "outcome": "win"})
 
     assert path.exists()
-    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    lines = [
+        line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
     assert len(lines) == 1
     assert json.loads(lines[0])["trade_id"] == "T1"
 
@@ -136,3 +138,21 @@ def test_default_path_falls_back_to_logs_dir(monkeypatch) -> None:
     store = JsonlLessonStore()
 
     assert store.path.replace("\\", "/").endswith("logs/lessons.jsonl")
+
+
+def test_default_path_is_absolute_and_cwd_independent(monkeypatch, tmp_path) -> None:
+    """Regression: the default path must not depend on the process CWD.
+
+    The old relative ``logs/lessons.jsonl`` resolved differently for the server
+    (CWD = services/python) and the root pytest run (CWD = repo root), which let
+    tests write placeholder lessons into the operator's production file.
+    """
+    import os
+
+    monkeypatch.delenv("LESSON_STORE_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)  # simulate a different CWD
+
+    store = JsonlLessonStore()
+
+    assert os.path.isabs(store.path), f"expected absolute path, got {store.path!r}"
+    assert store.path.replace("\\", "/").endswith("services/python/logs/lessons.jsonl")

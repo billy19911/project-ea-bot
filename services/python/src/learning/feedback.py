@@ -66,7 +66,9 @@ class LessonFeedbackProvider:
             ]
 
         wins = sum(1 for lesson in lessons if self._outcome_of(lesson) in _WIN_OUTCOMES)
-        losses = sum(1 for lesson in lessons if self._outcome_of(lesson) in _LOSS_OUTCOMES)
+        losses = sum(
+            1 for lesson in lessons if self._outcome_of(lesson) in _LOSS_OUTCOMES
+        )
 
         recent = []
         for lesson in reversed(lessons[-max(0, int(max_lessons)) :]):
@@ -125,9 +127,19 @@ def record_review_lesson(store: Any, record: Any) -> None:
         review = getattr(record, "review", None)
         root_cause = getattr(record, "root_cause", None)
         outcome = str(getattr(review, "outcome", "") or "")
+        # ``TradeReviewResult`` has no ``symbol`` field, so reading
+        # ``review.symbol`` always yielded "" — every auto-trigger lesson was
+        # persisted with an empty symbol. The symbol travels on the record's
+        # raw close context (``trade_result``) instead.
+        trade_result = getattr(record, "trade_result", None)
+        symbol = ""
+        if isinstance(trade_result, dict):
+            symbol = str(trade_result.get("symbol") or "")
+        if not symbol:
+            symbol = str(getattr(review, "symbol", "") or "")
         lesson: dict[str, Any] = {
             "trade_id": trade_id,
-            "symbol": str(getattr(review, "symbol", "") or ""),
+            "symbol": symbol,
             "outcome": outcome.lower() if outcome else "",
             "root_cause": str(getattr(root_cause, "primary_cause", "") or ""),
             "lesson": str(getattr(review, "summary", "") or ""),
@@ -166,7 +178,9 @@ def record_review_lesson_v2(engine: Any, store: Any, record: Any) -> Any:
         root_cause = _review_field(record, "root_cause", None)
 
         trade_id = str(_review_field(record, "trade_id", "") or "")
-        symbol = str(trade_result.get("symbol") or _review_field(review, "symbol", "") or "")
+        symbol = str(
+            trade_result.get("symbol") or _review_field(review, "symbol", "") or ""
+        )
         outcome = str(
             trade_result.get("outcome") or _review_field(review, "outcome", "") or ""
         ).lower()
@@ -193,7 +207,9 @@ def record_review_lesson_v2(engine: Any, store: Any, record: Any) -> Any:
             store.add_lesson(recorded.to_dict())
         return recorded
     except Exception as exc:  # noqa: BLE001 - learning must never break review
-        logger.warning("Learning Engine v2 recording failed (review continues): %s", exc)
+        logger.warning(
+            "Learning Engine v2 recording failed (review continues): %s", exc
+        )
         return None
 
 

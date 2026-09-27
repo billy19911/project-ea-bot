@@ -58,8 +58,13 @@ class PaperPosition:
         else:
             price_diff = self.entry_price - self.current_price
 
-        # Assuming standard contract size 100,000 for forex
-        contract_size = 100000
+        # Resolve the broker's real contract size per symbol instead of the
+        # old hard-coded forex 100000 (which inflated non-FX P&L by orders of
+        # magnitude and corrupted downstream review/lesson data). Lazy import
+        # avoids a circular import at module load.
+        from .contract_size import resolve_contract_size
+
+        contract_size = resolve_contract_size(self.symbol)
         self.pnl = price_diff * self.size * contract_size
 
         if self.entry_price > 0:
