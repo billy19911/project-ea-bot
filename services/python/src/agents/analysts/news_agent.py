@@ -145,21 +145,40 @@ class NewsSentimentAgent(BaseAgent):
                 IMPACT_SCORE.get(str(e.get("impact", "LOW")).upper(), 1) >= IMPACT_SCORE["CRITICAL"]
                 for e in high_impact_events
             )
-            if has_critical or high_impact_count >= CRITICAL_IMPACT_COUNT:
-                signal, confidence = "BEARISH", 0.82
-            elif avg_sentiment >= SENTIMENT_THRESH_HIGH:
-                signal, confidence = "BULLISH", 0.75
+            # Directional signal from the WEIGHTED news sentiment. A high-impact
+            # event only matters when it also carries directional sentiment; an
+            # event with no realised deviation (sentiment 0) must NOT force a
+            # BEARISH call. This keeps the committee honest and related to the
+            # actual data instead of defaulting to BEARISH on any high-impact day.
+            if avg_sentiment >= SENTIMENT_THRESH_HIGH:
+                signal, confidence = "BULLISH", min(0.85, 0.6 + avg_sentiment)
             elif avg_sentiment <= SENTIMENT_THRESH_LOW:
-                signal, confidence = "BEARISH", 0.73
+                signal, confidence = "BEARISH", min(0.85, 0.6 + abs(avg_sentiment))
+            elif weighted_impact <= -IMPACT_SCORE["HIGH"]:
+                # Strongly negative net impact (weighted) → mild bearish tilt.
+                signal, confidence = "BEARISH", 0.62
+            elif weighted_impact >= IMPACT_SCORE["HIGH"]:
+                signal, confidence = "BULLISH", 0.62
             else:
                 signal, confidence = "NEUTRAL", 0.55
-            reasoning = [f"Net sentiment: {avg_sentiment:.3f}"]
+
+            reasoning = [
+                f"Sentimen berita bersih: {avg_sentiment:+.3f} "
+                f"(dari {len(data.news_items)} berita)",
+            ]
             if high_impact_events:
-                reasoning.append(f"{high_impact_count} high-impact events detected")
+                titles = [
+                    str(e.get("title") or e.get("headline") or "").strip()
+                    for e in high_impact_events
+                ]
+                titles = [t for t in titles if t]
+                shown = ", ".join(titles[:3])
+                extra = f" (+{len(titles) - 3})" if len(titles) > 3 else ""
+                reasoning.append(f"{high_impact_count} event berdampak tinggi: {shown}{extra}")
             if has_critical:
-                reasoning.append("Critical impact event(s) in calendar")
+                reasoning.append("Ada event berdampak KRITIS di kalender")
             if not data.news_items and not data.economic_events:
-                reasoning.append("No news items available for analysis")
+                reasoning.append("Tidak ada berita/event untuk dianalisis")
 
             # Historical pattern memory (PRD §43/§54): add evidence-backed
             # reasoning from similar past events. Advisory only.

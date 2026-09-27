@@ -387,7 +387,7 @@ class FundamentalAnalystAgent(BaseAgent):
                     "agent": self.name,
                     "signal": "NEUTRAL",
                     "confidence": CONF_NEUTRAL,
-                    "reasons": ["No economic events available for analysis"],
+                    "reasons": ["Tidak ada event ekonomi dalam kalender untuk dianalisis"],
                     "metrics": {
                         "event_count": 0,
                         "hawkish_score": 0.0,
@@ -465,12 +465,27 @@ class FundamentalAnalystAgent(BaseAgent):
                 confidence = min(0.85, CONF_BULLISH + abs(net_score) * 0.1)
 
             reasoning: list[str] = [
-                f"Analyzed {event_count} economic events " f"({high_impact_count} high-impact)",
-                f"Hawkish score: {hawkish_score:.3f}",
-                f"Dovish score: {dovish_score:.3f}",
-                f"Safe-haven score: {safe_haven_score:.3f}",
-                f"Net fundamental score: {net_score:.3f}",
+                f"Menganalisis {event_count} event ekonomi "
+                f"({high_impact_count} berdampak tinggi)",
             ]
+            # Explain the score in plain terms instead of only dumping raw
+            # numbers. When no event has a realised deviation, say so honestly —
+            # that is exactly why the score is 0, not a missing computation.
+            realised = [e for e in data.events if e.has_deviation]
+            if not realised and hawkish_score == 0.0 and dovish_score == 0.0:
+                reasoning.append(
+                    "Belum ada event dengan angka rilis (actual); skor fundamental "
+                    "0 karena hanya forecast/previous yang tersedia"
+                )
+            if hawkish_score > 0:
+                reasoning.append(f"Sinyal hawkish (USD kuat → XAU bearish): {hawkish_score:.2f}")
+            if dovish_score > 0:
+                reasoning.append(f"Sinyal dovish (USD lemah → XAU bullish): {dovish_score:.2f}")
+            if safe_haven_score > 0:
+                reasoning.append(f"Permintaan safe-haven (gold bullish): {safe_haven_score:.2f}")
+            reasoning.append(f"Skor fundamental bersih: {net_score:+.3f}")
+            if signal == "NEUTRAL":
+                reasoning.append("Tidak ada dorongan fundamental yang jelas → NEUTRAL")
             reasoning.extend(deviation_reasons[:5])  # top 5 deviations
 
             metrics = {

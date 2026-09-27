@@ -180,14 +180,42 @@ function formatAvgConf(value: number | null | undefined): string {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '—';
 }
 
-// Evidence bisa berupa string atau objek — jangan pernah render objek mentah.
+// Evidence bisa berupa string atau objek — render sebagai teks yang terbaca,
+// bukan JSON mentah. Bentuk yang dikenal (skor bull/bear, event ekonomi)
+// diterjemahkan ke Bahasa Indonesia ringkas; sisanya "key: value".
 function evidenceText(item: unknown): string {
+  if (item === null || item === undefined) return '—';
   if (typeof item === 'string') return item;
-  try {
-    return JSON.stringify(item);
-  } catch {
-    return String(item);
+  if (typeof item === 'number' || typeof item === 'boolean') return String(item);
+  if (typeof item === 'object') {
+    const o = item as Record<string, unknown>;
+    if ('bull_score' in o || 'bear_score' in o) {
+      const bull = Number(o.bull_score ?? 0);
+      const bear = Number(o.bear_score ?? 0);
+      const net = Number(o.net ?? bull - bear);
+      const arah = net > 0 ? 'bullish' : net < 0 ? 'bearish' : 'netral';
+      return `Skor: bullish ${bull.toFixed(2)} vs bearish ${bear.toFixed(2)} → ${arah} (net ${net.toFixed(2)})`;
+    }
+    if ('headline' in o || 'title' in o) {
+      const title = String(o.title ?? o.headline ?? '');
+      const impact = o.impact ? String(o.impact) : '';
+      const sentiment = o.sentiment !== undefined ? Number(o.sentiment) : null;
+      const parts = [title];
+      if (impact) parts.push(`dampak ${impact}`);
+      if (sentiment !== null && Number.isFinite(sentiment)) {
+        parts.push(`sentimen ${sentiment > 0 ? '+' : ''}${sentiment.toFixed(2)}`);
+      }
+      return parts.join(' · ');
+    }
+    try {
+      return Object.entries(o)
+        .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
+        .join(' · ');
+    } catch {
+      return String(item);
+    }
   }
+  return String(item);
 }
 
 // Thin wrapper: hanya 2xx OK yang diterima sebagai data (pola observability)
