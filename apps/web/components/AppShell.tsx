@@ -385,7 +385,12 @@ export default function AppShell({
         let ok = true;
         try {
           const data = await res.json();
-          ok = String(data?.status ?? 'ok').toLowerCase() === 'ok';
+          // The Node API reports health as "healthy" (see /health in
+          // apps/api/src/index.ts) — not "ok". Accept any known-healthy value so
+          // a healthy service never reads as DEGRADED; anything explicitly
+          // unhealthy ("degraded"/"down"/"unhealthy"/"error") is DEGRADED.
+          const status = String(data?.status ?? 'healthy').toLowerCase();
+          ok = ['ok', 'healthy', 'up'].includes(status);
         } catch {
           ok = true; // reachable but non-JSON — still online
         }
