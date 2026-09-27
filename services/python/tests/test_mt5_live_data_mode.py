@@ -39,6 +39,20 @@ def _reset_mode():
 # ---------------------------------------------------------------------------
 
 
+class TestDataSourceFlag:
+    """FOKUS #5 — the data-source flag must expose synthetic data honestly."""
+
+    def test_simulated_when_live_mode_off(self):
+        connector._live_mode = False
+        assert connector.data_source() == "SIMULATED"
+        assert connector.is_simulated_data() is True
+
+    def test_live_when_live_mode_on(self):
+        connector._live_mode = True
+        assert connector.data_source() == "LIVE"
+        assert connector.is_simulated_data() is False
+
+
 class TestUseLiveDataMode:
     def test_returns_false_when_package_missing(self, monkeypatch):
         """ImportError must be swallowed and return False (no raise)."""

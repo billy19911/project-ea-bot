@@ -46,6 +46,8 @@ interface DecisionRecord {
   levels?: DecisionLevels | null;
   agent_results?: Record<string, AgentResult> | null;
   supervisor_summary?: string;
+  /** FOKUS #5 — sumber data pasar: LIVE / SIMULATED / UNKNOWN. */
+  data_source?: string;
   /** Epoch detik — ditambahkan runtime saat mencatat siklus. */
   recorded_at?: number;
 }
@@ -309,6 +311,15 @@ export default function AgentsPage() {
   const activeAgentCount = agentList.filter((a) => a.status === 'active').length;
   const lastCycleAt = decisions[0]?.recorded_at ?? null;
 
+  // FOKUS #5: market-data source of the most recent cycle (LIVE/SIMULATED).
+  const dataSource = selected?.data_source ?? decisions[0]?.data_source ?? null;
+  const dataSourceLabel =
+    dataSource?.toUpperCase() === 'LIVE'
+      ? 'LIVE'
+      : dataSource?.toUpperCase() === 'SIMULATED'
+        ? 'SIMULASI'
+        : '—';
+
   const agentEntries = selected?.agent_results
     ? Object.entries(selected.agent_results)
     : [];
@@ -342,7 +353,18 @@ export default function AgentsPage() {
               <span className={styles.summaryLabel}>Agent aktif</span>
               <span className={styles.summaryValue}>{activeAgentCount}</span>
             </div>
+            <div className={`${styles.card} ${styles.summaryCard}`}>
+              <span className={styles.summaryLabel}>Sumber data</span>
+              <span className={styles.summaryValue}>{dataSourceLabel}</span>
+            </div>
           </div>
+
+          {dataSource?.toUpperCase() === 'SIMULATED' && (
+            <p className={styles.inlineError}>
+              ⚠️ Data pasar SIMULASI (MT5 belum ter-attach) — analisa bukan dari
+              harga riil. Jangan jadikan dasar eksekusi.
+            </p>
+          )}
 
           {errors.decisions && <p className={styles.inlineError}>{errors.decisions}</p>}
 

@@ -152,6 +152,10 @@ class PipelineResult:
     # signal report / control plane can show committee evidence (Phase 5).
     agent_results: dict[str, Any] = field(default_factory=dict)
     supervisor_summary: str = ""
+    # FOKUS #5: the market-data source behind this cycle — "LIVE" or
+    # "SIMULATED". Analysts on synthetic data must never masquerade as real
+    # intelligence; the dashboard/reports show this flag.
+    data_source: str = "UNKNOWN"
 
     def add_stage(self, stage: str, status: str, detail: str = "") -> None:
         """Append a stage entry (as a plain dict) to the trace."""
@@ -183,6 +187,7 @@ class PipelineResult:
             "levels": self.levels,
             "agent_results": self.agent_results,
             "supervisor_summary": self.supervisor_summary,
+            "data_source": self.data_source,
         }
 
 
@@ -372,6 +377,10 @@ class TradingPipeline:
         # Telegram report can reference a real, traceable id.
         result.trace_id = str(context.get("trace_id") or event_id)
         result.symbol = self._event_symbol(event, context)
+
+        # FOKUS #5: tag the cycle with the market-data source so a synthetic
+        # (MT5-not-attached) analysis is never mistaken for real intelligence.
+        result.data_source = self._resolve_data_source()
 
         # ── Step 0: Pending-signal gate (FOKUS #2) ──────────────────────
         # If a signal for this symbol is already live (PENDING/EXECUTING/OPEN)
@@ -769,6 +778,9 @@ class TradingPipeline:
         # Fase 6: merge the market evidence behind this event (or the latest
         # cached snapshot) so the analysis committee runs on real data.
         self._merge_market_snapshot(event, analysis_context)
+        # FOKUS #5: tell the committee (and any consumer) whether the merged
+        # market data is LIVE or SIMULATED.
+        analysis_context.setdefault("data_source", self._resolve_data_source())
         # Phase 7: attach prior lessons (advisory). Fail-safe — a broken
         # provider must never break the cycle.
         if self.lesson_provider is not None:
@@ -844,6 +856,20 @@ class TradingPipeline:
         except (TypeError, ValueError):
             pass
         return float(settings.min_signal_confidence)
+
+    @staticmethod
+    def _resolve_data_source() -> str:
+        """Return ``"LIVE"`` or ``"SIMULATED"`` for the active market feed.
+
+        Fail-safe: any import/read error returns ``"UNKNOWN"`` rather than
+        claiming live data.
+        """
+        try:
+            from mt5.connector import data_source
+
+            return str(data_source())
+        except Exception:  # noqa: BLE001 - never break a cycle
+            return "UNKNOWN"
 
     def _strategy_params(self) -> dict[str, Any]:
         """Return the active strategy parameters (cached, fail-safe)."""

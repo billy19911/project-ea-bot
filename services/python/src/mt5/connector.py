@@ -126,6 +126,23 @@ def is_live_mode() -> bool:
     return _live_mode
 
 
+def data_source() -> str:
+    """Return the active market-data source: ``"LIVE"`` or ``"SIMULATED"``.
+
+    FOKUS #5 safety: when ``_live_mode`` is False the connector returns
+    *synthetic* prices/bars/account/positions. Analysts would then "analyse"
+    random data with no visible warning. Surfacing this flag lets the pipeline
+    and dashboard mark results as SIMULATED instead of silently treating them
+    as real market intelligence.
+    """
+    return "LIVE" if _live_mode else "SIMULATED"
+
+
+def is_simulated_data() -> bool:
+    """True when market data is synthetic (MT5 not attached / live mode off)."""
+    return not _live_mode
+
+
 def shutdown() -> None:
     """Disconnect from MT5 if in live mode."""
     global _live_mode, _mt5_available
@@ -268,11 +285,7 @@ def get_symbols() -> list[SymbolInfo]:
 
     result = []
     for sym, (bid, ask, spread) in SIMULATED_PRICES.items():
-        digits = (
-            2
-            if sym in ("XAUUSD", "XAGUSD")
-            else (5 if "." in sym and len(sym) <= 6 else 2)
-        )
+        digits = 2 if sym in ("XAUUSD", "XAGUSD") else (5 if "." in sym and len(sym) <= 6 else 2)
         result.append(
             SymbolInfo(
                 symbol=sym,
@@ -324,9 +337,7 @@ def get_symbol_info(symbol: str) -> Optional[SymbolInfo]:
         return None
     bid, ask, spread = SIMULATED_PRICES[symbol]
     digits = (
-        2
-        if symbol in ("XAUUSD", "XAGUSD")
-        else (5 if "." in symbol and len(symbol) <= 6 else 2)
+        2 if symbol in ("XAUUSD", "XAGUSD") else (5 if "." in symbol and len(symbol) <= 6 else 2)
     )
     return SymbolInfo(
         symbol=symbol,
@@ -334,9 +345,7 @@ def get_symbol_info(symbol: str) -> Optional[SymbolInfo]:
         ask=_jitter(ask, spread),
         spread=int(spread * (100 if digits <= 2 else 10000)),
         digits=digits,
-        contract_size=(
-            100000 if symbol not in ("XAUUSD", "XAGUSD", "BTCUSD", "ETHUSD") else 1
-        ),
+        contract_size=(100000 if symbol not in ("XAUUSD", "XAGUSD", "BTCUSD", "ETHUSD") else 1),
         point=0.00001 if digits == 5 else 0.01,
         trade_mode="FULL",
         currency_profit="USD",
@@ -803,9 +812,7 @@ def get_orders() -> list[Order]:
                     status=str(o.state),
                     time_setup=datetime.fromtimestamp(o.time_setup),
                     time_expiration=(
-                        datetime.fromtimestamp(o.time_expiration)
-                        if o.time_expiration > 0
-                        else None
+                        datetime.fromtimestamp(o.time_expiration) if o.time_expiration > 0 else None
                     ),
                 )
                 for o in raw
@@ -829,11 +836,7 @@ def execute_order(request) -> dict:
         }
 
     # Simulation — always succeeds, paper trading
-    sym = (
-        request.symbol
-        if hasattr(request, "symbol")
-        else request.get("symbol", "EURUSD")
-    )
+    sym = request.symbol if hasattr(request, "symbol") else request.get("symbol", "EURUSD")
     price_base = SIMULATED_PRICES.get(sym, (1.0, 1.0, 0.0))[0]
     price = round(price_base + random.uniform(-0.001, 0.001), 5)
     return {
