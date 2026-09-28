@@ -254,7 +254,10 @@ async def lifespan(app: FastAPI):
                 logger.warning("Learning Engine v2 recording failed (review continues)")
 
         set_lesson_store(JsonlLessonStore())
-        set_auto_trigger(ReviewAutoTrigger(on_review=_on_review))
+        # max_history raised (500 → 2000) so the R-multiple performance view can
+        # aggregate a meaningful number of closed trades. Each record is small;
+        # the deque stays bounded regardless of trade volume.
+        set_auto_trigger(ReviewAutoTrigger(on_review=_on_review, max_history=2000))
         logger.info("Learning feedback wired: persistent lesson store + review bridge")
     except Exception:  # pragma: no cover - defensive, never block startup
         logger.exception("Learning feedback wiring failed (system continues)")
@@ -266,11 +269,13 @@ async def lifespan(app: FastAPI):
         from execution.intents import set_store as set_intent_store
         from execution.state_machine import set_store as set_order_store
         from persistence import (
+            EntryContextStore,
             IntentStore,
             KillSwitchStateStore,
             OrderStateStore,
             PositionReconciliationStore,
         )
+        from review.entry_context import set_entry_context_store
         from risk.kill_switch import set_kill_switch_store
 
         order_store = OrderStateStore()
@@ -282,6 +287,11 @@ async def lifespan(app: FastAPI):
         ks_store = KillSwitchStateStore()
         set_kill_switch_store(ks_store)
 
+        # Entry-context persistence (R-multiple fix): the original stop-loss /
+        # entry price captured at entry now survive a restart, so trades opened
+        # before a restart can still compute an honest R when they close.
+        set_entry_context_store(EntryContextStore())
+
         # PositionReconciliationStore is injected into PositionMonitor instances
         # at construction time (not global), so it is wired in
         # orchestration/runtime.py where the monitor is constructed.
@@ -289,7 +299,7 @@ async def lifespan(app: FastAPI):
 
         logger.info(
             "Durable state persistence wired: order ledger, intents, kill switch, "
-            "position reconciliation"
+            "position reconciliation, entry context"
         )
     except Exception:  # pragma: no cover - defensive, never block startup
         logger.exception("Durable state persistence wiring failed (system continues)")

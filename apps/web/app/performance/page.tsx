@@ -194,10 +194,10 @@ export default function PerformancePage() {
               <p className={styles.empty}>Loading…</p>
             ) : rRows.length === 0 ? (
               <p className={styles.empty}>
-                Belum ada trade dengan R. R dihitung saat posisi ditutup (butuh stop-loss awal
-                tersimpan).
+                Belum ada trade dengan R. R dihitung saat posisi ditutup menggunakan
+                stop-loss awal + harga close nyata dari riwayat deal MT5.
                 {(rData?.r_unavailable ?? 0) > 0 &&
-                  ` ${rData!.r_unavailable} trade ditutup tapi R belum bisa dihitung (dibuka sebelum fitur R aktif).`}
+                  ` ${rData!.r_unavailable} trade ditutup tapi R belum bisa dihitung (stop-loss awal tidak tersimpan — mis. entry manual atau context hilang sebelum fitur persist aktif).`}
               </p>
             ) : (
               <>

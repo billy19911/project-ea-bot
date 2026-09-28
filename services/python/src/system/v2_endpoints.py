@@ -949,7 +949,7 @@ def _closed_trade_r_rows() -> list[dict[str, Any]]:
 
     rows: list[dict[str, Any]] = []
     try:
-        for record in get_auto_trigger().recent(limit=1000):
+        for record in get_auto_trigger().recent(limit=2000):
             r = getattr(record, "r_multiple", None)
             ctx = getattr(record, "trade_result", None) or {}
             if r is None:
@@ -1004,7 +1004,7 @@ def _total_review_count() -> int:
     try:
         from ..review.auto_trigger import get_auto_trigger
 
-        return len(get_auto_trigger().recent(limit=1000))
+        return len(get_auto_trigger().recent(limit=2000))
     except Exception:  # noqa: BLE001
         return 0
 

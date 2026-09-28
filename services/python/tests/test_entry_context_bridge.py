@@ -24,6 +24,7 @@ Everything is fail-safe: a missing entry context never breaks the close path.
 from __future__ import annotations
 
 import pytest
+
 from orchestration.pipeline import STATUS_EXECUTED, TradingPipeline
 from review.auto_trigger import ReviewAutoTrigger, _to_review_record
 from review.close_detector import PositionCloseDetector
@@ -33,14 +34,19 @@ from review.entry_context import (
     get_entry_context,
     pop_entry_context,
     remember_entry_context,
+    set_entry_context_store,
 )
 from risk.gate import GateDecision
 
 
 @pytest.fixture(autouse=True)
 def _clean_registry():
+    # Isolate the in-memory registry: disable persistence so these tests never
+    # touch a real JSONL file (persistence has its own dedicated tests).
+    set_entry_context_store(None, disabled=True)
     clear_entry_contexts()
     yield
+    set_entry_context_store(None, disabled=True)
     clear_entry_contexts()
 
 
@@ -59,9 +65,7 @@ class FakeRiskGate:
     def __init__(self, decision: GateDecision | None = None) -> None:
         self._decision = decision
 
-    def validate_proposal(
-        self, proposal, account_state, current_positions, market_info
-    ):
+    def validate_proposal(self, proposal, account_state, current_positions, market_info):
         return self._decision
 
 
@@ -280,9 +284,7 @@ def test_to_review_record_keeps_context():
     record = _to_review_record(_closed_trade_with_context())
     assert record["symbol"] == "EURUSD"
     assert record["agent_outputs"] == {"momentum": {"confidence": 0.8}}
-    assert record["news_events"] == [
-        {"title": "NFP", "country": "US", "impact": "High"}
-    ]
+    assert record["news_events"] == [{"title": "NFP", "country": "US", "impact": "High"}]
     # regime fallback: regime_at_entry missing -> regime key used
     assert record["regime_at_entry"] == "trending"
 

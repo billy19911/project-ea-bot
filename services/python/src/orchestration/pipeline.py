@@ -1440,17 +1440,33 @@ class TradingPipeline:
             # Initial stop-loss of THIS order — captured so the close path can
             # compute the trade's R-multiple (risk = |entry - initial SL|).
             # Prefer the completed proposal's stop_loss; fall back to the raw
-            # proposal. Never overridden by later trailing changes (that is the
-            # whole point: R is defined against the ORIGINAL risk).
-            try:
-                stop_loss = float(
-                    proposal.get("stop_loss")
-                    or proposal.get("sl")
-                    or (validation.get("proposal") or {}).get("stop_loss")
-                    or 0.0
-                )
-            except (TypeError, ValueError):
-                stop_loss = 0.0
+            # proposal, the validation proposal, then the execution result.
+            # Never overridden by later trailing changes (that is the whole
+            # point: R is defined against the ORIGINAL risk).
+            stop_loss = 0.0
+            for candidate in (
+                proposal.get("stop_loss"),
+                proposal.get("sl"),
+                (validation.get("proposal") or {}).get("stop_loss"),
+                getattr(exec_result, "stop_loss", None),
+            ):
+                try:
+                    if candidate:
+                        stop_loss = float(candidate)
+                        if stop_loss > 0:
+                            break
+                except (TypeError, ValueError):
+                    continue
+
+            # Direction must be a definite BUY/SELL so the R sign is correct;
+            # never store an ambiguous "" / "HOLD" that would flip the sign.
+            direction = str(result.decision or proposal.get("direction") or "").strip().upper()
+            if direction not in ("BUY", "SELL"):
+                # Fall back to the executed order side when available.
+                exec_side = ""
+                if isinstance(getattr(result, "execution_result", None), dict):
+                    exec_side = str(result.execution_result.get("side") or "").strip().upper()
+                direction = exec_side if exec_side in ("BUY", "SELL") else ""
 
             from review.entry_context import remember_entry_context
 
@@ -1458,7 +1474,7 @@ class TradingPipeline:
                 ticket,
                 {
                     "symbol": str(result.symbol or proposal.get("symbol") or ""),
-                    "direction": str(result.decision or proposal.get("direction") or ""),
+                    "direction": direction,
                     "agent_outputs": agent_outputs,
                     "news_events": news_events,
                     "regime": regime,

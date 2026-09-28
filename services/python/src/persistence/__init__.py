@@ -6,6 +6,7 @@ Phase B-5 (Release Blocker): Durable state persistence across restarts.
 
 from __future__ import annotations
 
+from .entry_context_store import EntryContextStore
 from .intent_store import IntentStore
 from .kill_switch_store import KillSwitchStateStore
 from .order_state_store import OrderStateStore
@@ -16,4 +17,5 @@ __all__ = [
     "IntentStore",
     "KillSwitchStateStore",
     "PositionReconciliationStore",
+    "EntryContextStore",
 ]

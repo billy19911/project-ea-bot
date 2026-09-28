@@ -790,6 +790,94 @@ def get_positions_ex() -> tuple[bool, list[Position]]:
     return True, list(get_positions())
 
 
+def get_position_close_deal(ticket: Any, lookback_days: int = 30) -> Optional[dict[str, Any]]:
+    """Return the CLOSING deal for a position ticket from real MT5 history.
+
+    The close path (``review.close_detector``) only sees a position DISAPPEAR; a
+    disappearance alone gives no real close price (``price_current`` is the last
+    snapshot while the position was still open, which can be far from the actual
+    fill). This reads the broker's deal history — via
+    ``mt5.history_deals_get(position=ticket)`` — to obtain the real exit price,
+    exit time and realized profit for the trade, so the R-multiple is computed
+    from the true outcome rather than a stale snapshot.
+
+    Read-only: never sends, modifies or closes anything.
+
+    Args:
+        ticket: The position ticket (int/str). ``None``/empty → ``None``.
+        lookback_days: How far back to search (bounded so the call stays cheap
+            and never ties up the process-wide binding for long).
+
+    Returns:
+        ``{"price": float, "time": int|None, "profit": float, "volume": float,
+        "side": str}`` for the ``DEAL_ENTRY_OUT`` deal, or ``None`` when live
+        mode is off, the binding is unavailable, or no closing deal is found.
+        Never raises.
+    """
+    if ticket is None:
+        return None
+    if not _live_mode:
+        return None
+    try:
+        import MetaTrader5 as mt5
+    except Exception:
+        return None
+
+    try:
+        from datetime import timedelta
+
+        now = datetime.now()
+        deals = mt5.history_deals_get(
+            now - timedelta(days=max(1, int(lookback_days))),
+            now + timedelta(days=1),
+            position=int(ticket),
+        )
+    except Exception:
+        # Some builds do not accept the kwarg form / position filter — fail-safe.
+        try:
+            deals = mt5.history_deals_get(position=int(ticket))  # type: ignore[call-arg]
+        except Exception:
+            return None
+    if not deals:
+        return None
+
+    # Pick the closing deal (DEAL_ENTRY_OUT). MT5: entry 0=IN, 1=OUT, 2=INOUT.
+    closing = None
+    for deal in deals:
+        try:
+            if int(getattr(deal, "entry", -1)) == mt5.DEAL_ENTRY_OUT:
+                # Keep the latest OUT deal (there is normally exactly one).
+                if closing is None or int(getattr(deal, "time", 0)) >= int(
+                    getattr(closing, "time", 0)
+                ):
+                    closing = deal
+        except Exception:
+            continue
+    if closing is None:
+        return None
+
+    try:
+        price = float(getattr(closing, "price", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if price <= 0:
+        return None
+
+    # MT5 deal type: 0=BUY, 1=SELL. The closing deal side is OPPOSITE the
+    # position side (a BUY position is closed by a SELL deal).
+    raw_type = int(getattr(closing, "type", -1)) if hasattr(closing, "type") else None
+    side = {0: "SELL", 1: "BUY"}.get(raw_type) if raw_type in (0, 1) else None
+
+    return {
+        "price": price,
+        "time": getattr(closing, "time", None),
+        "profit": float(getattr(closing, "profit", 0.0) or 0.0),
+        "volume": float(getattr(closing, "volume", 0.0) or 0.0),
+        "side": side,
+        "ticket": getattr(closing, "ticket", None),
+    }
+
+
 def get_orders() -> list[Order]:
     """Return pending orders."""
     if _live_mode:

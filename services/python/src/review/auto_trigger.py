@@ -45,6 +45,24 @@ def _get(source: Any, name: str, default: Any = None) -> Any:
     return getattr(source, name, default)
 
 
+def _parse_closed_at(raw: Any) -> datetime:
+    """Parse a close timestamp (ISO string / datetime) or default to now (UTC).
+
+    Used so the review's ``closed_at`` — and therefore the R-multiple period
+    bucket — reflects the REAL close time from the MT5 closing deal, not the
+    moment the review happened to run.
+    """
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    if isinstance(raw, str) and raw:
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc)
+
+
 def _is_closed(trade_result: Any) -> bool:
     """Return True if ``trade_result`` represents a closed position.
 
@@ -93,14 +111,22 @@ def _to_review_record(trade_result: Any) -> dict[str, Any]:
     entry_price = _get(trade_result, "entry_price", _get(trade_result, "open_price", 0.0))
 
     direction = _get(trade_result, "direction", None)
-    if direction is None:
+    if direction is None or str(direction).strip() == "":
         # For a close, the closing order side is opposite the position side.
+        # Prefer an explicit side; only fall back to order_type when it is
+        # unambiguous. Never guess "BUY" from nothing — an unknown direction
+        # must yield no R (None) rather than a sign-flipped number.
         side = str(_get(trade_result, "side", "") or "").upper()
         if side in ("BUY", "SELL"):
             direction = side
         else:
             order_type = str(_get(trade_result, "order_type", "") or "").upper()
-            direction = "SELL" if "SELL" in order_type else "BUY"
+            if "SELL" in order_type:
+                direction = "SELL"
+            elif "BUY" in order_type:
+                direction = "BUY"
+            else:
+                direction = None
 
     trade_id = _get(trade_result, "trade_id", None) or _get(trade_result, "ticket", None)
     return {
@@ -108,7 +134,7 @@ def _to_review_record(trade_result: Any) -> dict[str, Any]:
         "symbol": str(_get(trade_result, "symbol", "") or ""),
         "entry_price": float(entry_price or 0.0),
         "exit_price": float(close_price or 0.0),
-        "direction": str(direction or "BUY"),
+        "direction": str(direction) if direction else "",
         "pnl": float(_get(trade_result, "pnl", 0.0) or 0.0),
         "stop_loss": float(_get(trade_result, "stop_loss", _get(trade_result, "sl", 0.0)) or 0.0),
         "agent_outputs": _get(trade_result, "agent_outputs", {}) or {},
@@ -121,6 +147,12 @@ def _to_review_record(trade_result: Any) -> dict[str, Any]:
         or _get(trade_result, "regime", None),
         "regime_at_exit": _get(trade_result, "regime_at_exit", None),
         "news_events": _get(trade_result, "news_events", None),
+        # Real close time (from the MT5 closing deal) when available, so R is
+        # bucketed by the actual close rather than the review-run moment.
+        "closed_at": _get(trade_result, "closed_at", None),
+        # Provenance of the close price ("deal_history" | "last_seen") — carried
+        # through for audit; never used to fabricate a value.
+        "close_price_source": _get(trade_result, "close_price_source", None),
     }
 
 
@@ -251,6 +283,7 @@ class ReviewAutoTrigger:
                 "stop_loss": record.get("stop_loss", 0.0),
                 "pnl": record.get("pnl", 0.0),
                 "regime": record.get("regime_at_entry") or "unknown",
+                "close_price_source": record.get("close_price_source"),
             },
             agent_outputs=(
                 dict(record.get("agent_outputs"))
@@ -263,6 +296,7 @@ class ReviewAutoTrigger:
                 else []
             ),
             r_multiple=_compute_r(record),
+            closed_at=_parse_closed_at(record.get("closed_at")),
         )
         with self._lock:
             self._stats["reviewed"] += 1
