@@ -73,6 +73,21 @@ class ArmTerminalRequest(BaseModel):
     armed: bool
 
 
+class TerminalConfigRequest(BaseModel):
+    """Body for PUT /mt5/terminals/{terminal_id}/config (F1/F3).
+
+    All fields optional — only the provided ones are updated. ``None`` clears a
+    field (reverts to the global default). ``fanout_target`` toggles whether the
+    terminal receives fan-out orders.
+    """
+
+    risk_per_trade_pct: float | None = None
+    fixed_lot: float | None = None
+    max_lot_per_trade: float | None = None
+    fanout_target: bool | None = None
+    execution: bool | None = None
+
+
 @router.get("/terminals")
 async def list_terminals() -> dict:
     """List configured + auto-detected terminals with live status.
@@ -132,6 +147,23 @@ async def arm_terminal_by_id(terminal_id: str, request: ArmTerminalRequest):
         return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=result)
     result["execution_armed"] = terminal_manager.is_execution_armed()
     result["armed_terminals"] = terminal_manager.get_armed_terminals()
+    return result
+
+
+@router.put("/terminals/{terminal_id}/config")
+async def update_terminal_config(terminal_id: str, request: TerminalConfigRequest):
+    """Update per-terminal config (F1/F3): lot/risk + fan-out participation.
+
+    Writes the allowlisted fields to ``mt5_terminals.json`` (applied without a
+    restart — the config is re-read each request). Returns 400 for an unknown
+    terminal or an invalid value. Safety: this never arms execution; arming is
+    a separate explicit switch.
+    """
+    patch = request.model_dump(exclude_unset=True)
+    result = terminal_manager.update_terminal_config(terminal_id, patch)
+    if not result.get("ok"):
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=result)
+    result["terminals"] = terminal_manager.list_terminals()["terminals"]
     return result
 
 

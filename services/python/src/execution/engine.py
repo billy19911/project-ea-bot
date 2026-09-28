@@ -114,6 +114,48 @@ class ExecutionResult:
     position_opened: Optional[dict[str, Any]] = None
 
 
+@dataclass
+class FanoutResult:
+    """Aggregate outcome of a multi-terminal fan-out (F1).
+
+    A single analysis decision is dispatched to every armed fan-out target.
+    ``per_terminal`` records the individual outcome so a partial failure is
+    visible (order succeeded on some terminals, failed on others) rather than
+    collapsed into one ambiguous verdict.
+
+    Attributes:
+        results: One dict per target terminal:
+            ``{terminal_id, label, symbol, volume, success, ticket, error_code,
+            error_message, price}``.
+        succeeded: Count of terminals where the order was executed.
+        failed: Count of terminals where the order did NOT execute.
+        target_count: How many terminals were targeted.
+    """
+
+    results: list[dict[str, Any]] = field(default_factory=list)
+    succeeded: int = 0
+    failed: int = 0
+    target_count: int = 0
+
+    @property
+    def any_success(self) -> bool:
+        return self.succeeded > 0
+
+    @property
+    def all_success(self) -> bool:
+        return self.target_count > 0 and self.failed == 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "results": list(self.results),
+            "succeeded": self.succeeded,
+            "failed": self.failed,
+            "target_count": self.target_count,
+            "any_success": self.any_success,
+            "all_success": self.all_success,
+        }
+
+
 class ExecutionEngine:
     """Execution engine with order validation, retry logic, and duplicate prevention.
 
@@ -887,6 +929,300 @@ class ExecutionEngine:
                 "error_code": -1,
                 "message": f"Native MT5 SLTP modify failed: {exc}",
             }
+
+    def execute_order_fanout(
+        self,
+        request: OrderRequest,
+        *,
+        targets: Optional[list[dict[str, Any]]] = None,
+        risk_price: float = 0.0,
+        tp_price: float = 0.0,
+    ) -> FanoutResult:
+        """Dispatch ONE decision to EVERY armed fan-out terminal (F1).
+
+        The MetaTrader5 binding is process-wide (one terminal per process), so
+        this RE-ATTACHES to each target terminal in turn, resolves that
+        terminal's own symbol name, recomputes the absolute entry/SL/TP from the
+        decision's *distances* against that terminal's live price, sizes the lot
+        from that account's equity, and sends the order. The binding is restored
+        to the originally attached terminal in a ``finally`` (fail-safe).
+
+        Safety:
+        - Fail-closed when ``require_approval`` is set and no token is present.
+        - Only targets returned by ``mt5.terminals.get_fanout_targets`` (running
+          + ``execution:true`` + armed) are eligible; the caller passes them in
+          (or they are resolved here when ``targets`` is None).
+        - Simulation mode never touches a broker (a per-terminal simulated fill).
+        - Partial failure is allowed: one terminal failing never aborts the
+          others; the outcome is recorded per terminal.
+
+        Args:
+            request: The base order (symbol, order_type, volume as fallback,
+                magic, comment, approval_token).
+            targets: Pre-resolved fan-out target entries. When None, they are
+                read from ``mt5.terminals.get_fanout_targets()``.
+            risk_price: SL distance in PRICE units from entry (0 = none). Used to
+                compute each terminal's absolute SL from its own entry price.
+            tp_price: TP distance in PRICE units from entry (0 = none).
+
+        Returns:
+            :class:`FanoutResult` with one result row per target.
+        """
+        # Audit B-3 parity: the fan-out is a real-money dispatch surface.
+        if self.require_approval and not getattr(request, "approval_token", None):
+            msg = (
+                "Fan-out rejected: require_approval is enabled but the order "
+                "carries no gate-issued approval_token (fail-closed)."
+            )
+            logger.warning(msg)
+            return FanoutResult(
+                results=[
+                    {
+                        "terminal_id": None,
+                        "success": False,
+                        "error_code": 403,
+                        "error_message": msg,
+                    }
+                ],
+                succeeded=0,
+                failed=1,
+                target_count=0,
+            )
+
+        if targets is None:
+            targets = self._get_fanout_targets()
+        if not targets:
+            logger.warning("Fan-out: no armed/eligible terminals to dispatch to.")
+            return FanoutResult(results=[], succeeded=0, failed=0, target_count=0)
+
+        # Simulation mode (or no native MT5): one simulated fill per terminal.
+        try:
+            import MetaTrader5 as mt5  # noqa: F401
+        except ImportError:
+            if self.simulation_mode:
+                out = FanoutResult(target_count=len(targets))
+                for t in targets:
+                    out.results.append(
+                        {
+                            "terminal_id": t.get("id"),
+                            "label": t.get("label"),
+                            "symbol": request.symbol,
+                            "volume": request.volume,
+                            "success": True,
+                            "ticket": self._next_simulated_ticket(),
+                            "error_code": 0,
+                            "error_message": "Simulated fan-out fill",
+                            "price": request.price or 0.0,
+                            "simulated": True,
+                        }
+                    )
+                    out.succeeded += 1
+                return out
+            return FanoutResult(
+                results=[{"success": False, "error_message": "No MT5 and simulation off"}],
+                succeeded=0,
+                failed=len(targets),
+                target_count=len(targets),
+            )
+
+        from mt5 import connector  # local import: avoid hard dependency at import time
+
+        original_path = self._current_attached_path()
+        out = FanoutResult(target_count=len(targets))
+        try:
+            for t in targets:
+                row = self._dispatch_to_terminal(t, request, risk_price, tp_price)
+                out.results.append(row)
+                if row.get("success"):
+                    out.succeeded += 1
+                else:
+                    out.failed += 1
+        finally:
+            # ALWAYS restore the binding to where it was (fail-safe).
+            try:
+                connector.shutdown()
+                if original_path:
+                    connector.use_live_data_mode(path=original_path)
+            except Exception as exc:  # noqa: BLE001 - restore is best-effort
+                logger.warning("Fan-out: could not restore binding: %s", exc)
+        return out
+
+    def _dispatch_to_terminal(
+        self,
+        target: dict[str, Any],
+        request: OrderRequest,
+        risk_price: float,
+        tp_price: float,
+    ) -> dict[str, Any]:
+        """Re-attach to ONE terminal and send the (re-priced) order.
+
+        Never raises: any error becomes a failed row so the fan-out continues.
+        """
+        tid = target.get("id")
+        row: dict[str, Any] = {
+            "terminal_id": tid,
+            "label": target.get("label") or tid,
+            "symbol": request.symbol,
+            "volume": request.volume,
+            "success": False,
+            "ticket": None,
+            "error_code": -1,
+            "error_message": "",
+            "price": None,
+        }
+        try:
+            import MetaTrader5 as mt5
+
+            from mt5 import connector
+            from mt5.symbol_resolver import clear_symbol_cache, resolve_symbol
+
+            path = target.get("path")
+            # Re-attach the process-wide binding to THIS terminal.
+            connector.shutdown()
+            if not connector.use_live_data_mode(path=path):
+                row["error_message"] = f"Gagal attach ke terminal '{tid}'."
+                return row
+            clear_symbol_cache()
+
+            # Resolve the broker's symbol name for this terminal (XAUUSD → XAUUSDc).
+            symbol = resolve_symbol(request.symbol) or request.symbol
+            row["symbol"] = symbol
+
+            tick = mt5.symbol_info_tick(symbol)
+            if tick is None:
+                row["error_message"] = f"Tidak ada tick untuk simbol '{symbol}'."
+                return row
+            entry = float(tick.ask if request.order_type.upper() == "BUY" else tick.bid)
+
+            sign = 1.0 if request.order_type.upper() == "BUY" else -1.0
+            sl = entry - sign * risk_price if risk_price and risk_price > 0 else 0.0
+            tp = entry + sign * tp_price if tp_price and tp_price > 0 else 0.0
+            row["price"] = entry
+
+            volume = self._size_for_terminal(target, entry, risk_price, symbol)
+            row["volume"] = volume
+            if volume <= 0:
+                row["error_message"] = "Volume lot tidak valid (0)."
+                return row
+
+            payload = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": symbol,
+                "volume": float(volume),
+                "type": (
+                    mt5.ORDER_TYPE_BUY
+                    if request.order_type.upper() == "BUY"
+                    else mt5.ORDER_TYPE_SELL
+                ),
+                "price": entry,
+                "sl": float(sl) if sl else 0.0,
+                "tp": float(tp) if tp else 0.0,
+                "magic": request.magic,
+                "comment": request.comment,
+                "type_time": mt5.ORDER_TIME_GTC,
+            }
+            res = mt5.order_send(payload)
+            parsed = self._parse_send_result(res)
+            row["success"] = bool(parsed.get("success"))
+            row["ticket"] = parsed.get("ticket")
+            row["error_code"] = int(parsed.get("error_code", 0) or 0)
+            row["error_message"] = str(parsed.get("message", "") or "")
+            return row
+        except Exception as exc:  # noqa: BLE001 - one failure must not stop others
+            logger.warning("Fan-out dispatch to %s failed: %s", tid, exc)
+            row["error_message"] = str(exc)[:200]
+            return row
+
+    def _size_for_terminal(
+        self,
+        target: dict[str, Any],
+        entry: float,
+        risk_price: float,
+        symbol: str = "",
+    ) -> float:
+        """Size the lot for ONE terminal from its account equity (F1/F3).
+
+        Priority: ``fixed_lot`` (explicit) → ``risk_per_trade_pct`` of the
+        terminal's equity given the SL distance → fall back to the base request
+        volume. Always clamped to ``[min_volume, max_lot_per_trade or max_volume]``.
+        """
+        fixed = target.get("fixed_lot")
+        max_lot = target.get("max_lot_per_trade") or self.max_volume
+        try:
+            if fixed and float(fixed) > 0:
+                vol = float(fixed)
+            else:
+                risk_pct = target.get("risk_per_trade_pct")
+                if risk_pct and float(risk_pct) > 0 and risk_price and risk_price > 0:
+                    import MetaTrader5 as mt5
+
+                    info = mt5.account_info()
+                    equity = float(getattr(info, "equity", 0.0) or 0.0) if info else 0.0
+                    if equity > 0:
+                        risk_money = equity * float(risk_pct) / 100.0
+                        # lot ≈ risk_money / (loss per lot at the SL distance).
+                        sym = mt5.symbol_info(symbol or "")
+                        tick_value = (
+                            float(getattr(sym, "trade_tick_value", 0.0) or 0.0) if sym else 0.0
+                        )
+                        tick_size = (
+                            float(getattr(sym, "trade_tick_size", 0.0) or 0.0) if sym else 0.0
+                        )
+                        if tick_value > 0 and tick_size > 0:
+                            risk_per_lot = risk_price / tick_size * tick_value
+                            vol = risk_money / risk_per_lot if risk_per_lot > 0 else 0.0
+                        else:
+                            vol = 0.0
+                    else:
+                        vol = 0.0
+                else:
+                    vol = 0.0
+            if vol <= 0:
+                return 0.0
+            # Clamp to broker volume constraints.
+            vol = max(float(self.min_volume), min(float(vol), float(max_lot)))
+            try:
+                sym = mt5.symbol_info(symbol or "")
+                step = float(getattr(sym, "volume_step", 0.0) or 0.0) if sym else 0.0
+                vmin = float(getattr(sym, "volume_min", 0.0) or 0.0) if sym else 0.0
+                if vmin > 0:
+                    vol = max(vol, vmin)
+                if step and step > 0:
+                    vol = round(vol / step) * step
+                    # Guard: rounding could drop below the broker minimum.
+                    if vmin > 0 and vol < vmin:
+                        vol = vmin
+            except Exception:  # noqa: BLE001 - clamping is best-effort
+                pass
+            return round(vol, 4)
+        except Exception:  # noqa: BLE001 - sizing must never raise
+            return 0.0
+
+    def _current_attached_path(self) -> Optional[str]:
+        """Return the folder of the currently attached terminal (or None)."""
+        try:
+            import MetaTrader5 as mt5
+
+            info = mt5.terminal_info()
+            path = getattr(info, "path", None) if info else None
+            return str(path) if path else None
+        except Exception:  # noqa: BLE001 - best-effort
+            return None
+
+    def _get_fanout_targets(self) -> list[dict[str, Any]]:
+        """Return armed+eligible fan-out targets (fail-closed to empty)."""
+        for mod_name in ("mt5.terminals", "src.mt5.terminals"):
+            try:
+                import importlib
+
+                terms = importlib.import_module(mod_name)
+                return list(terms.get_fanout_targets())
+            except ImportError:
+                continue
+            except Exception as exc:  # noqa: BLE001 - any doubt → blocked
+                logger.warning("Fan-out target lookup failed (blocked): %s", exc)
+                return []
+        return []
 
     def _is_transient_error(self, code: int, message: str) -> bool:
         """Determine if an error code or message represents a transient failure.

@@ -1128,6 +1128,11 @@ type TerminalEntry = {
   selected?: boolean;
   armed?: boolean;
   account?: TerminalAccount | null;
+  // F1/F3: per-account sizing + fan-out participation.
+  risk_per_trade_pct?: number | null;
+  fixed_lot?: number | null;
+  max_lot_per_trade?: number | null;
+  fanout_target?: boolean;
 };
 
 type TerminalsPayload = {
@@ -1214,6 +1219,30 @@ function TerminalPanel({
     }
   };
 
+  // F1/F3: update per-terminal config (lot/risk + fan-out participation).
+  const putConfig = async (path: string, body: Record<string, unknown>, okMsg: string) => {
+    if (!hasToken) return;
+    setBusy(true);
+    try {
+      const res = await apiFetch(path, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showNotice(data?.message || `Gagal (HTTP ${res.status})`);
+      } else {
+        showNotice(data?.message || okMsg);
+      }
+      onRefresh();
+    } catch {
+      showNotice('Tidak dapat menghubungi API.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // Probe akun: read-only, tapi memindahkan binding sementara — backend
   // menolak saat armed dan selalu memulihkan binding di finally. Pesannya
   // diambil apa adanya dari API (tidak pernah diklaim sukses palsu).
@@ -1280,6 +1309,8 @@ function TerminalPanel({
                 <th>Server</th>
                 <th>Mode</th>
                 <th>Balance</th>
+                <th>Lot / Risk</th>
+                <th>Fan-out</th>
                 <th>Eksekusi</th>
                 <th>Aksi</th>
               </tr>
@@ -1310,6 +1341,78 @@ function TerminalPanel({
                     )}
                   </td>
                   <td className={s.mono}>{fmtBalance(t)}</td>
+                  <td>
+                    {/* F3: lot/risk per akun. Fixed lot menang; kalau kosong,
+                        sizing dari risk % equity akun itu. */}
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <label style={{ fontSize: 11 }}>
+                        Lot{' '}
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          defaultValue={t.fixed_lot ?? ''}
+                          placeholder={t.risk_per_trade_pct ? `risk ${t.risk_per_trade_pct}%` : '—'}
+                          disabled={busy || !hasToken}
+                          style={{ width: 64 }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              const v = (e.target as HTMLInputElement).value.trim();
+                              putConfig(
+                                `/mt5/terminals/${encodeURIComponent(t.id)}/config`,
+                                { fixed_lot: v === '' ? null : Number(v) },
+                                `Lot ${t.id} disimpan.`,
+                              );
+                            }
+                          }}
+                          title="Isi lot tetap untuk akun ini (Enter untuk simpan). Kosongkan untuk pakai risk %."
+                        />
+                      </label>
+                      <label style={{ fontSize: 11 }}>
+                        Risk%{' '}
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          defaultValue={t.risk_per_trade_pct ?? ''}
+                          disabled={busy || !hasToken}
+                          style={{ width: 56 }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              const v = (e.target as HTMLInputElement).value.trim();
+                              putConfig(
+                                `/mt5/terminals/${encodeURIComponent(t.id)}/config`,
+                                { risk_per_trade_pct: v === '' ? null : Number(v) },
+                                `Risk ${t.id} disimpan.`,
+                              );
+                            }
+                          }}
+                          title="Risiko per trade (% equity akun ini, Enter untuk simpan). Dipakai bila Lot kosong."
+                        />
+                      </label>
+                    </div>
+                  </td>
+                  <td>
+                    {/* F1: ikut serta dalam fan-out (1 analisa → semua terminal). */}
+                    <button
+                      className={s.tab}
+                      disabled={busy || !hasToken}
+                      title={
+                        t.fanout_target === false
+                          ? `Sertakan ${t.id} dalam fan-out`
+                          : `Keluarkan ${t.id} dari fan-out`
+                      }
+                      onClick={() =>
+                        putConfig(
+                          `/mt5/terminals/${encodeURIComponent(t.id)}/config`,
+                          { fanout_target: t.fanout_target === false },
+                          `${t.id} ${t.fanout_target === false ? 'diikutkan' : 'dikeluarkan'} dari fan-out.`,
+                        )
+                      }
+                    >
+                      {t.fanout_target === false ? 'Terpisah' : 'Ikut'}
+                    </button>
+                  </td>
                   <td>
                     {t.execution_allowed ? (
                       <span className={`${s.badge} ${s.warning}`}>eligible</span>

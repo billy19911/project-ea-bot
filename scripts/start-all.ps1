@@ -71,6 +71,11 @@ $tgDigestWin = EnvOr 'TELEGRAM_DIGEST_WINDOW_S' '600'
 $tgDigestMax = EnvOr 'TELEGRAM_DIGEST_MAX_ITEMS' '15'
 $lessonP  = EnvOr 'LESSON_STORE_PATH' ''
 $pyApiKey = EnvOr 'PYTHON_API_KEY' ''
+# F1/F2 (opt-in, default OFF): fan-out multi-terminal + entry OB/FVG.
+$fanoutOn = EnvOr 'FANOUT_ENABLED' 'false'
+$zoneOn   = EnvOr 'ZONE_ENTRY_ENABLED' 'false'
+$zoneBias = EnvOr 'ZONE_BIAS_TFS' 'M30,H1'
+$zoneTf   = EnvOr 'ZONE_TF' 'M5'
 
 if (-not $jwt) {
   $bytes = New-Object byte[] 24
@@ -128,6 +133,11 @@ function Export-CommonEnv {
   $env:TELEGRAM_DIGEST_MAX_ITEMS = $tgDigestMax
   if ($lessonP) { $env:LESSON_STORE_PATH = $lessonP }
   if ($pyApiKey) { $env:PYTHON_API_KEY = $pyApiKey }
+  # F1/F2: fan-out + OB/FVG entry (default OFF).
+  $env:FANOUT_ENABLED = $fanoutOn
+  $env:ZONE_ENTRY_ENABLED = $zoneOn
+  $env:ZONE_BIAS_TFS = $zoneBias
+  $env:ZONE_TF = $zoneTf
 }
 
 $logDir = Join-Path $root 'logs'

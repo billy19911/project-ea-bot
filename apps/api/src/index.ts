@@ -1039,6 +1039,24 @@ app.post('/mt5/terminals/probe', authenticate, async (req, res) => {
   await sendPostProxy(res, '/mt5/terminals/probe', req, req.body ?? {}, 30000);
 });
 
+// F1/F3: per-terminal config (lot/risk per akun + fan-out participation).
+// Writes to mt5_terminals.json in the Python service (no restart needed).
+app.put('/mt5/terminals/:terminalId/config', authenticate, async (req, res) => {
+  const log = (req as any).log;
+  const terminalId = String(req.params.terminalId || '').trim();
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(terminalId)) {
+    res.status(400).json({ error: 'invalid_terminal_id' });
+    return;
+  }
+  log.info({ terminalId }, 'mt5.terminals.config.update');
+  await sendPutProxy(
+    res,
+    `/mt5/terminals/${encodeURIComponent(terminalId)}/config`,
+    req,
+    req.body ?? {},
+  );
+});
+
 // Daily trading report (UI/UX ide #9): REAL closed deals from the attached
 // MT5 terminal via Python. Read-only — never re-binds, never orders.
 app.get('/reports/daily', async (req, res) => {

@@ -37,6 +37,8 @@ __all__ = [
     "arm_execution",
     "arm_terminal",
     "get_armed_terminals",
+    "get_fanout_targets",
+    "update_terminal_config",
     "is_execution_armed",
     "execution_permitted",
     "scan_running_terminals",
@@ -169,15 +171,41 @@ def load_config() -> list[dict[str, Any]]:
         tpath = str(entry.get("path") or "").strip()
         if not tid or not tpath:
             continue
+        # Per-account sizing (optional). ``fixed_lot`` wins when set (>0),
+        # otherwise ``risk_per_trade_pct`` sizes from the account's equity.
+        # Invalid values degrade safely (0.0 / None = "use global default").
+        risk_pct = _coerce_float(entry.get("risk_per_trade_pct"))
+        fixed_lot = _coerce_float(entry.get("fixed_lot"))
+        max_lot = _coerce_float(entry.get("max_lot_per_trade"))
         result.append(
             {
                 "id": tid,
                 "label": str(entry.get("label") or tid),
                 "path": tpath,
                 "execution": bool(entry.get("execution", False)),
+                "risk_per_trade_pct": risk_pct if (risk_pct and risk_pct > 0) else None,
+                "fixed_lot": fixed_lot if (fixed_lot and fixed_lot > 0) else None,
+                "max_lot_per_trade": max_lot if (max_lot and max_lot > 0) else None,
+                # Whether this terminal participates in fan-out by default
+                # (operator can still toggle via the dashboard). Default True
+                # so existing configs keep working once armed.
+                "fanout_target": bool(entry.get("fanout_target", True)),
             }
         )
     return result
+
+
+def _coerce_float(value: Any) -> Optional[float]:
+    """Coerce a config value to a finite float, or ``None`` (fail-safe)."""
+    if value is None:
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if out != out:  # NaN
+        return None
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +309,11 @@ def list_terminals() -> dict[str, Any]:
                 "selected": bool(st.get("selected")),
                 "armed": bool(st.get("armed")),
                 "account": _account_cache.get(key),
+                # Per-account sizing + fan-out participation (F1).
+                "risk_per_trade_pct": t.get("risk_per_trade_pct"),
+                "fixed_lot": t.get("fixed_lot"),
+                "max_lot_per_trade": t.get("max_lot_per_trade"),
+                "fanout_target": bool(t.get("fanout_target", True)),
             }
         )
 
@@ -305,6 +338,12 @@ def list_terminals() -> dict[str, Any]:
                 "selected": bool(st.get("selected")),
                 "armed": bool(st.get("armed")),
                 "account": _account_cache.get(key),
+                # Auto-detected terminals are never fan-out targets (not in the
+                # config → no per-account sizing, not execution-eligible).
+                "risk_per_trade_pct": None,
+                "fixed_lot": None,
+                "max_lot_per_trade": None,
+                "fanout_target": False,
             }
         )
 
@@ -720,6 +759,94 @@ def get_armed_terminals() -> list[str]:
             continue
         armed.append(tid)
     return armed
+
+
+def update_terminal_config(terminal_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    """Update per-terminal config in ``mt5_terminals.json`` (F1/F3).
+
+    Only allowlisted keys are written: ``execution`` (bool), ``fanout_target``
+    (bool), ``risk_per_trade_pct`` (float|null), ``fixed_lot`` (float|null),
+    ``max_lot_per_trade`` (float|null). Writes atomically (tmp + replace). The
+    config is re-read on every request, so changes apply without a restart.
+
+    Returns ``{"ok": bool, "message": str, "terminal": <entry|None>}``.
+    """
+    path = _config_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"ok": False, "message": f"Config tidak ditemukan: {path}", "terminal": None}
+    except Exception as exc:  # pragma: no cover - defensive
+        return {"ok": False, "message": f"Config tidak terbaca: {exc}", "terminal": None}
+
+    entries = raw.get("terminals") if isinstance(raw, dict) else None
+    if not isinstance(entries, list):
+        return {"ok": False, "message": "Struktur config tidak valid.", "terminal": None}
+
+    target = next(
+        (e for e in entries if isinstance(e, dict) and str(e.get("id")) == terminal_id),
+        None,
+    )
+    if target is None:
+        return {
+            "ok": False,
+            "message": f"Terminal '{terminal_id}' tidak ada di config.",
+            "terminal": None,
+        }
+
+    # Apply only allowlisted, validated fields.
+    if "execution" in patch and patch["execution"] is not None:
+        target["execution"] = bool(patch["execution"])
+    if "fanout_target" in patch and patch["fanout_target"] is not None:
+        target["fanout_target"] = bool(patch["fanout_target"])
+    for key in ("risk_per_trade_pct", "fixed_lot", "max_lot_per_trade"):
+        if key in patch:
+            value = patch[key]
+            if value is None:
+                target.pop(key, None)
+            else:
+                num = _coerce_float(value)
+                if num is None or num < 0:
+                    return {"ok": False, "message": f"Nilai '{key}' tidak valid.", "terminal": None}
+                target[key] = num
+
+    try:
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception as exc:  # pragma: no cover - defensive
+        return {"ok": False, "message": f"Gagal menulis config: {exc}", "terminal": None}
+
+    updated = next((t for t in load_config() if t["id"] == terminal_id), None)
+    return {"ok": True, "message": f"Config '{terminal_id}' diperbarui.", "terminal": updated}
+
+
+def get_fanout_targets() -> list[dict[str, Any]]:
+    """Return the terminal entries eligible to receive a fan-out order (F1).
+
+    A fan-out target must satisfy ALL of:
+    - ``execution: true`` in the config (real-money accounts opt in explicitly),
+    - currently running,
+    - ARMED by the operator (per-terminal on/off switch),
+    - ``fanout_target`` true (operator has not excluded it).
+
+    Fail-closed: any doubt drops the terminal. Returns full entries (with
+    ``path`` + per-account sizing fields) so the fan-out engine can re-attach
+    and size each order from that terminal's own account.
+    """
+    view = list_terminals()
+    targets: list[dict[str, Any]] = []
+    for entry in view["terminals"]:
+        if not entry.get("execution_allowed"):
+            continue
+        if not entry.get("running"):
+            continue
+        if not entry.get("armed"):
+            continue
+        if not entry.get("fanout_target", True):
+            continue
+        targets.append(entry)
+    return targets
 
 
 def arm_terminal(terminal_id: str, armed: bool) -> dict[str, Any]:

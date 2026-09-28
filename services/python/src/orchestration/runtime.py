@@ -88,6 +88,40 @@ def _default_symbol_spec_provider():
     return _provider
 
 
+def _fanout_enabled() -> bool:
+    """Return whether multi-terminal fan-out is enabled (default OFF).
+
+    Read from ``FANOUT_ENABLED`` (true/1/yes/on). Default OFF so the historic
+    single-terminal behaviour is preserved unless the operator opts in.
+    """
+    import os as _os
+
+    raw = (_os.getenv("FANOUT_ENABLED") or "false").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _zone_entry_enabled() -> bool:
+    """Return whether the OB/FVG watch-and-fire entry gate is enabled (F2).
+
+    Read from ``ZONE_ENTRY_ENABLED`` (true/1/yes/on). Default OFF.
+    """
+    import os as _os
+
+    raw = (_os.getenv("ZONE_ENTRY_ENABLED") or "false").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _build_zone_entry_gate() -> Optional[Any]:
+    """Build the process-wide OB/FVG entry gate (F2) — fail-safe None."""
+    try:
+        from trading.entry_zone import ZoneEntryGate
+
+        return ZoneEntryGate()
+    except Exception as exc:  # noqa: BLE001 - never block startup
+        logger.warning("Zone entry gate not wired: %s", exc)
+        return None
+
+
 def _build_position_monitor(
     event_queue: Optional[EventQueue] = None,
     scheduler: Optional[AutonomousScheduler] = None,
@@ -705,6 +739,12 @@ class OrchestrationRuntime:
             # Always recompute the lot from the operator's risk knob (the lot is
             # then capped) so a stale/foreign proposal size can never win.
             force_risk_sizing=True,
+            # F1: fan-out ONE decision to every armed terminal when enabled.
+            # Default OFF (safe) — the operator opts in via FANOUT_ENABLED=true.
+            fanout_enabled=_fanout_enabled(),
+            # F2: OB/FVG watch-and-fire entry gate (opt-in via ZONE_ENTRY_ENABLED).
+            zone_entry_enabled=_zone_entry_enabled(),
+            zone_entry_gate=(_build_zone_entry_gate() if _zone_entry_enabled() else None),
         )
 
     def run_cycle(

@@ -204,6 +204,56 @@ def _coerce_confidence(value: Any) -> float:
         return 0.0
 
 
+class _FanoutExecutionAdapter:
+    """Present a fan-out result with the single-order ExecutionResult shape.
+
+    The pipeline's success/failure handling reads ``success`` /
+    ``error_message`` / ``ticket``. A fan-out has many outcomes, so this adapter
+    reports overall success when at least one terminal executed, carries the
+    per-terminal list, and summarises failures in ``error_message``.
+    """
+
+    def __init__(self, fanout: Any) -> None:
+        self._fanout = fanout
+        self.success = bool(getattr(fanout, "any_success", False))
+        self.ticket = None
+        # First successful ticket (convenience for callers expecting one).
+        for row in getattr(fanout, "results", []) or []:
+            if row.get("success") and row.get("ticket") is not None:
+                self.ticket = row.get("ticket")
+                break
+        self.error_code = 0 if self.success else 1
+        self.retries = 0
+        self.position_opened = None
+        succeeded = int(getattr(fanout, "succeeded", 0) or 0)
+        failed = int(getattr(fanout, "failed", 0) or 0)
+        total = int(getattr(fanout, "target_count", 0) or 0)
+        if self.success:
+            self.error_message = f"Fan-out: {succeeded}/{total} terminal berhasil."
+        else:
+            fails = [
+                f"{r.get('terminal_id')}: {r.get('error_message', '')}"
+                for r in (getattr(fanout, "results", []) or [])
+                if not r.get("success")
+            ]
+            self.error_message = (
+                f"Fan-out gagal di semua terminal ({failed}). " + "; ".join(fails[:3])
+            ).strip()
+
+    def to_dict(self) -> dict[str, Any]:
+        base = {
+            "success": self.success,
+            "ticket": self.ticket,
+            "error_code": self.error_code,
+            "error_message": self.error_message,
+            "retries": self.retries,
+            "position_opened": self.position_opened,
+        }
+        if hasattr(self._fanout, "to_dict"):
+            base["fanout"] = self._fanout.to_dict()
+        return base
+
+
 class TradingPipeline:
     """Runs one autonomous decision cycle end-to-end.
 
@@ -257,10 +307,23 @@ class TradingPipeline:
         signal_registry: Optional[Any] = None,
         pending_signal_guard: bool = True,
         strategy_config_provider: Optional[Callable[[], Optional[dict[str, Any]]]] = None,
+        fanout_enabled: bool = False,
+        zone_entry_enabled: bool = False,
+        zone_entry_gate: Optional[Any] = None,
     ) -> None:
         self.supervisor = supervisor
         self.risk_gate = risk_gate
         self.execution_engine = execution_engine
+        # Fan-out (F1): when True and the engine supports it, ONE decision is
+        # dispatched to every armed fan-out terminal (each sized from its own
+        # account). Default False preserves the historic single-terminal path
+        # (tests, paper, sim). The runtime opts in explicitly.
+        self.fanout_enabled = bool(fanout_enabled)
+        # Zone entry (F2): when enabled and a gate is supplied, an approved entry
+        # waits until price reaches the OB/FVG zone (watch-and-fire) instead of
+        # firing at market. Default OFF (safe, historic behaviour).
+        self.zone_entry_enabled = bool(zone_entry_enabled)
+        self.zone_entry_gate = zone_entry_gate
         self.order_builder = order_builder if order_builder is not None else OrderBuilder()
         self.strategy_version = strategy_version
         # Risk-% sizing knob: fraction of equity risked when the proposal does
@@ -605,6 +668,30 @@ class TradingPipeline:
             self._finalise(result)
             return result
 
+        # ── Step B6: Zone entry (F2) — watch-and-fire at the OB/FVG ─────
+        # When enabled, an approved entry WAITS until price reaches the OB/FVG
+        # zone (aligned with the M30/H1 bias). If price is not there yet, the
+        # signal is parked as pending and NO order is sent this cycle.
+        if self.zone_entry_enabled and self.zone_entry_gate is not None:
+            plan = self._zone_entry_plan(result.symbol, proposal, validation, analysis_context)
+            if plan is None:
+                result.status = STATUS_BLOCKED
+                result.risk_reason = "menunggu harga masuk zona OB/FVG"
+                result.add_stage("zone_entry", STAGE_BLOCKED, result.risk_reason)
+                result.add_stage("execution", STAGE_SKIPPED, "menunggu zona entry")
+                self._mark_signal(result, "skipped", "menunggu zona OB/FVG")
+                self._finalise(result)
+                return result
+            # At the zone → apply the plan's levels onto the proposal so the
+            # order carries the OB-based entry/SL/TP (RR-based).
+            try:
+                proposal["entry_price"] = plan["entry"]
+                proposal["stop_loss"] = plan["stop_loss"]
+                proposal["take_profit"] = plan["take_profit"]
+                result.add_stage("zone_entry", STAGE_OK, "harga di zona OB/FVG")
+            except Exception as exc:  # noqa: BLE001 - never block on a notes error
+                logger.debug("Zone entry plan apply skipped: %s", exc)
+
         # ── Step C: Execution (only when explicitly approved) ───────────
         if self.execution_engine is None:
             result.status = STATUS_ERROR
@@ -633,7 +720,7 @@ class TradingPipeline:
         result.execution_id = _new_id("exec")
 
         try:
-            exec_result = self.execution_engine.execute_order(request)
+            exec_result = self._dispatch_execution(request)
         except Exception as exc:  # recorded failure, never propagate
             logger.exception("Execution failed for event %s", event_id)
             result.status = STATUS_ERROR
@@ -1540,6 +1627,177 @@ class TradingPipeline:
             contract_size = DEFAULT_CONTRACT_SIZE
         return point_value, contract_size
 
+    def _zone_entry_plan(
+        self,
+        symbol: str,
+        proposal: dict[str, Any],
+        validation: dict[str, Any],
+        analysis_context: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Return an executable OB/FVG plan for ``symbol``, or None to wait (F2).
+
+        Gathers the multi-timeframe inputs (bias TF for direction, zone TF for
+        OB/FVG bands, the live price for the trigger) and asks the injected
+        :class:`ZoneEntryGate` whether to fire now. Only a plan whose direction
+        AGREES with the committee's proposal is accepted. Fail-safe: any error
+        returns None (the entry waits rather than firing blind).
+        """
+        try:
+            gate = self.zone_entry_gate
+            ctx = analysis_context if isinstance(analysis_context, dict) else {}
+            market = validation.get("market_info") if isinstance(validation, dict) else {}
+            market = market if isinstance(market, dict) else {}
+
+            trigger_price = 0.0
+            for candidate in (
+                market.get("ask"),
+                market.get("bid"),
+                market.get("price"),
+                ctx.get("price"),
+                ctx.get("close"),
+            ):
+                try:
+                    trigger_price = float(candidate)
+                    if trigger_price > 0:
+                        break
+                except (TypeError, ValueError):
+                    continue
+            if trigger_price <= 0:
+                return None
+
+            bars = self._zone_bars(symbol, ctx)
+            bias_closes = bars.get("bias_closes") or []
+            zone_highs = bars.get("zone_highs") or []
+            zone_lows = bars.get("zone_lows") or []
+            atr = float(bars.get("atr") or 0.0)
+
+            rr = 0.0
+            try:
+                rr = float(ctx.get("zone_rr") or 0.0)
+            except (TypeError, ValueError):
+                rr = 0.0
+
+            import trading.entry_zone as ez
+
+            plan = gate.evaluate(
+                symbol=symbol,
+                htf_closes=bias_closes,
+                zone_highs=zone_highs,
+                zone_lows=zone_lows,
+                trigger_price=trigger_price,
+                atr=atr,
+                rr=(rr if rr > 0 else ez.DEFAULT_RR),
+            )
+            if plan is None:
+                return None
+            plan_dict = plan.to_dict()
+            want = str(proposal.get("direction", "")).upper()
+            if want and plan_dict.get("direction") != want:
+                logger.info(
+                    "Zone entry skipped for %s: plan %s != proposal %s",
+                    symbol,
+                    plan_dict.get("direction"),
+                    want,
+                )
+                return None
+            return plan_dict
+        except Exception as exc:  # noqa: BLE001 - never break the cycle
+            logger.debug("Zone entry plan skipped for %s: %s", symbol, exc)
+            return None
+
+    def _zone_bars(self, symbol: str, ctx: dict[str, Any]) -> dict[str, Any]:
+        """Fetch MTF bars for the zone gate (bias/zones/atr) — fail-safe {}."""
+        provider = ctx.get("zone_bars_provider")
+        if callable(provider):
+            try:
+                data = provider(symbol)
+                return data if isinstance(data, dict) else {}
+            except Exception:  # noqa: BLE001
+                return {}
+        try:
+            import os
+
+            from mt5 import connector
+
+            bias_tfs = (os.getenv("ZONE_BIAS_TFS") or "M30,H1").split(",")
+            zone_tf = (os.getenv("ZONE_TF") or "M5").strip()
+
+            bias_closes: list[float] = []
+            for tf in bias_tfs:
+                tf = tf.strip()
+                if not tf:
+                    continue
+                bars = connector.get_ohlc(symbol, tf, 120)
+                for b in bars or []:
+                    close = b.get("close") if isinstance(b, dict) else getattr(b, "close", None)
+                    try:
+                        if close is not None:
+                            bias_closes.append(float(close))
+                    except (TypeError, ValueError):
+                        continue
+
+            zone_bars = connector.get_ohlc(symbol, zone_tf, 60) or []
+            zone_highs = [
+                float(b.get("high", 0.0)) if isinstance(b, dict) else float(getattr(b, "high", 0.0))
+                for b in zone_bars
+            ]
+            zone_lows = [
+                float(b.get("low", 0.0)) if isinstance(b, dict) else float(getattr(b, "low", 0.0))
+                for b in zone_bars
+            ]
+            atr = 0.0
+            try:
+                from trading.indicators import atr_series
+
+                closes = [
+                    (
+                        float(b.get("close", 0.0))
+                        if isinstance(b, dict)
+                        else float(getattr(b, "close", 0.0))
+                    )
+                    for b in zone_bars
+                ]
+                if len(closes) >= 15:
+                    series = atr_series(zone_highs, zone_lows, closes, 14)
+                    atr = float(series[-1]) if series else 0.0
+            except Exception:  # noqa: BLE001 - ATR is optional
+                atr = 0.0
+            return {
+                "bias_closes": bias_closes,
+                "zone_highs": zone_highs,
+                "zone_lows": zone_lows,
+                "atr": atr,
+            }
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _dispatch_execution(self, request: OrderRequest) -> Any:
+        """Dispatch one decision — fan-out to many terminals, or single order.
+
+        When ``fanout_enabled`` and the engine implements
+        ``execute_order_fanout``, the decision is sent to EVERY armed fan-out
+        terminal. SL/TP are passed as DISTANCES (|entry − sl|, |tp − entry|) so
+        each terminal recomputes absolute levels from its own price. The result
+        is a small adapter exposing ``success`` / ``error_message`` plus the
+        per-terminal list, so the existing success/failure handling keeps
+        working unchanged.
+
+        Otherwise the historic single-terminal call is used.
+        """
+        if self.fanout_enabled and hasattr(self.execution_engine, "execute_order_fanout"):
+            entry = float(getattr(request, "price", 0.0) or 0.0)
+            sl = float(getattr(request, "sl", 0.0) or 0.0)
+            tp = float(getattr(request, "tp", 0.0) or 0.0)
+            risk_distance = abs(entry - sl) if (entry > 0 and sl > 0) else 0.0
+            tp_distance = abs(tp - entry) if (entry > 0 and tp > 0) else 0.0
+            fanout = self.execution_engine.execute_order_fanout(
+                request,
+                risk_price=risk_distance,
+                tp_price=tp_distance,
+            )
+            return _FanoutExecutionAdapter(fanout)
+        return self.execution_engine.execute_order(request)
+
     def _build_order_request(
         self,
         proposal: dict[str, Any],
@@ -1583,6 +1841,16 @@ class TradingPipeline:
         """Serialise an ExecutionResult (or compatible) to a plain dict."""
         if isinstance(exec_result, dict):
             return dict(exec_result)
+        # Prefer a rich ``to_dict`` when the object provides one (e.g. the
+        # fan-out adapter), so per-terminal results survive serialisation.
+        to_dict = getattr(exec_result, "to_dict", None)
+        if callable(to_dict):
+            try:
+                data = dict(to_dict())
+                if data:
+                    return data
+            except Exception:  # noqa: BLE001 - fall back to the field read
+                pass
         return {
             "success": bool(getattr(exec_result, "success", False)),
             "ticket": getattr(exec_result, "ticket", None),
