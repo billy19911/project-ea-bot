@@ -27,7 +27,7 @@ function getTransport() {
   if (process.env.NODE_ENV === "development") {
     try {
       // pino-pretty harus terinstall sebagai devDependency
-      const pretty = require("pino-pretty");
+      require("pino-pretty");
       return {
         target: "pino-pretty",
         options: {

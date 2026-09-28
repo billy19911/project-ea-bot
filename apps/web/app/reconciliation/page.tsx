@@ -2,6 +2,7 @@
 
 import AppShell from '@/components/AppShell';
 import { useApiData, fmtDate } from '@/lib/useApiData';
+import { MISMATCH_KIND_LABELS, labelFor } from '@/lib/labels';
 import styles from '@/components/ops.module.css';
 
 /**
@@ -39,8 +40,8 @@ export default function ReconciliationPage() {
   return (
     <AppShell
       activeKey="reconciliation"
-      eyebrow="Xynn / Reconciliation"
-      title="Reconciliation"
+      eyebrow="Xynn / Rekonsiliasi"
+      title="Rekonsiliasi"
     >
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
@@ -117,7 +118,7 @@ export default function ReconciliationPage() {
                     <tbody>
                       {mismatches.map((m, i) => (
                         <tr key={`${m.kind ?? 'm'}-${i}`}>
-                          <td className={styles.mono}>{m.kind ?? '—'}</td>
+                          <td title={m.kind ?? ''}>{labelFor(MISMATCH_KIND_LABELS, String(m.kind ?? ''))}</td>
                           <td>{m.symbol ?? '—'}</td>
                           <td className={styles.mono}>{m.ticket ?? '—'}</td>
                           <td>{m.detail ?? '—'}</td>

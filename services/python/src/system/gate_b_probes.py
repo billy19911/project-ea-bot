@@ -69,9 +69,7 @@ def _probe_risk_gate() -> tuple[bool | None, str, str]:
 
     risk_gate = getattr(pipeline, "risk_gate", None)
     if risk_gate is None:
-        return _ev(
-            False, "RiskGate tidak terpasang di pipeline runtime", "runtime.pipeline"
-        )
+        return _ev(False, "RiskGate tidak terpasang di pipeline runtime", "runtime.pipeline")
     engine = getattr(pipeline, "execution_engine", None)
     if engine is None:
         return _ev(
@@ -115,9 +113,7 @@ def _probe_circuit_breaker() -> tuple[bool | None, str, str]:
     value = level == "normal"
     reason = f"circuit breaker level={level} latched={data.get('latched')}"
     if not value:
-        reason = (
-            f"circuit breaker NOT normal — level={level} reason={data.get('reason')}"
-        )
+        reason = f"circuit breaker NOT normal — level={level} reason={data.get('reason')}"
     return _ev(value, reason, "risk.multi_level_breaker")
 
 
@@ -189,9 +185,7 @@ def _probe_broker_spec() -> tuple[bool | None, str, str]:
     value = digits > 0 and point > 0
     reason = f"{_BROKER_SPEC_SYMBOL} digits={digits} point={point}"
     if not value:
-        reason = (
-            f"spec {_BROKER_SPEC_SYMBOL} tidak valid — digits={digits} point={point}"
-        )
+        reason = f"spec {_BROKER_SPEC_SYMBOL} tidak valid — digits={digits} point={point}"
     return _ev(value, reason, "mt5.connector")
 
 
@@ -236,9 +230,7 @@ def _probe_recovery() -> tuple[bool | None, str, str]:
     # Reconciliation snapshot store (on the runtime position monitor).
     try:
         monitor = getattr(_runtime(), "position_monitor", None)
-        recon_store = (
-            getattr(monitor, "reconciliation_store", None) if monitor else None
-        )
+        recon_store = getattr(monitor, "reconciliation_store", None) if monitor else None
         checks["reconciliation_store"] = recon_store is not None
     except Exception:  # noqa: BLE001
         checks["reconciliation_store"] = False

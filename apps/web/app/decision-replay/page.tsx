@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
 import { useApiData, errorMessageFor } from '@/lib/useApiData';
+import { humanize } from '@/lib/labels';
 import styles from '@/components/ops.module.css';
 
 /**
@@ -132,7 +133,7 @@ export default function DecisionReplayPage() {
   const [showRaw, setShowRaw] = useState(false);
 
   return (
-    <AppShell activeKey="decision-replay" eyebrow="Xynn / Decisions" title="Decision Replay">
+    <AppShell activeKey="decision-replay" eyebrow="Xynn / Keputusan" title="Replay Keputusan">
       <div className={styles.wrap}>
         {list.error && <div className={styles.error}>{list.error}</div>}
 
@@ -260,7 +261,9 @@ export default function DecisionReplayPage() {
                             <div className={styles.kvGrid}>
                               {entries.map(([k, v]) => (
                                 <div key={k} className={styles.kv}>
-                                  <span className={styles.kvKey}>{k}</span>
+                                  <span className={styles.kvKey} title={k}>
+                                    {humanize(k)}
+                                  </span>
                                   <span className={styles.kvVal}>
                                     <PayloadValue value={v} />
                                   </span>

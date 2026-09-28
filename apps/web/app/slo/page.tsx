@@ -57,7 +57,7 @@ export default function SloPage() {
   const visible = evaluations.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   return (
-    <AppShell activeKey="slo" eyebrow="Xynn / Observability" title="System SLO">
+    <AppShell activeKey="slo" eyebrow="Xynn / Observabilitas" title="SLO Sistem">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
 

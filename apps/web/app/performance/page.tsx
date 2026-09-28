@@ -80,7 +80,7 @@ export default function PerformancePage() {
   const fmtPct = (v?: number) => (typeof v === 'number' ? `${v.toFixed(1)}%` : '—');
 
   return (
-    <AppShell activeKey="performance" eyebrow="Xynn / Performance" title="Performance">
+    <AppShell activeKey="performance" eyebrow="Xynn / Performa" title="Performa">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
 

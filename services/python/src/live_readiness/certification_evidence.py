@@ -58,22 +58,12 @@ class _ArtifactRule:
 
 # Gate A looks for REAL local CI artifacts. Absent => unknown (never True).
 _ARTIFACT_RULES: tuple[_ArtifactRule, ...] = (
-    _ArtifactRule(
-        "python_tests", ("**/pytest*.txt", "**/python_tests*.json"), "laporan pytest"
-    ),
-    _ArtifactRule(
-        "node_tests", ("**/node_tests*.json", "**/jest*.json"), "laporan node test"
-    ),
-    _ArtifactRule(
-        "web_build", ("**/web_build*.txt", "**/next-build*.log"), "log build web"
-    ),
+    _ArtifactRule("python_tests", ("**/pytest*.txt", "**/python_tests*.json"), "laporan pytest"),
+    _ArtifactRule("node_tests", ("**/node_tests*.json", "**/jest*.json"), "laporan node test"),
+    _ArtifactRule("web_build", ("**/web_build*.txt", "**/next-build*.log"), "log build web"),
     _ArtifactRule("type_check", ("**/typecheck*.txt", "**/tsc*.txt"), "log type-check"),
-    _ArtifactRule(
-        "lint", ("**/lint*.txt", "**/flake8*.txt", "**/eslint*.json"), "log lint"
-    ),
-    _ArtifactRule(
-        "security_scan", ("**/security*.json", "**/bandit*.json"), "laporan security"
-    ),
+    _ArtifactRule("lint", ("**/lint*.txt", "**/flake8*.txt", "**/eslint*.json"), "log lint"),
+    _ArtifactRule("security_scan", ("**/security*.json", "**/bandit*.json"), "laporan security"),
 )
 
 # Directories that never contain real CI evidence: leftover pytest ``tmp_path``
@@ -122,9 +112,9 @@ def _collect_gate_a(root: Path) -> dict[str, dict[str, Any]]:
             rel = found.relative_to(root)
         except ValueError:  # pragma: no cover - defensive
             rel = found
-        mtime = datetime.fromtimestamp(
-            found.stat().st_mtime, tz=timezone.utc
-        ).isoformat(timespec="seconds")
+        mtime = datetime.fromtimestamp(found.stat().st_mtime, tz=timezone.utc).isoformat(
+            timespec="seconds"
+        )
         out[rule.check] = _ev(
             True,
             f"{rule.label} ada (mtime {mtime})",
@@ -155,9 +145,7 @@ def _collect_gate_b(probes: dict[str, Callable[[], Any]]) -> dict[str, dict[str,
         if isinstance(result, dict):
             value = result.get("value")
             reason = str(result.get("reason") or "")
-            source = str(
-                result.get("evidence_source") or result.get("source") or "runtime"
-            )
+            source = str(result.get("evidence_source") or result.get("source") or "runtime")
             out[check] = _ev(value, reason, source)
         elif isinstance(result, tuple) and len(result) == 3:
             out[check] = _ev(result[0], str(result[1]), str(result[2]))
@@ -190,9 +178,7 @@ def _research_evidence(
             store: Optional[list[dict[str, Any]]] = _research_results_store()
         except Exception as exc:  # noqa: BLE001
             for check in out:
-                out[check] = _unknown(
-                    f"store riset tidak tersedia: {exc}", "research_engine"
-                )
+                out[check] = _unknown(f"store riset tidak tersedia: {exc}", "research_engine")
             return out
     else:
         store = research_records
@@ -456,20 +442,14 @@ def _collect_gate_d(drills_path: Optional[Path] = None) -> dict[str, dict[str, A
         pass
     except OSError as exc:
         return {
-            check: _unknown(f"store drill tidak terbaca: {exc}", "ops_drill")
-            for check in checks
+            check: _unknown(f"store drill tidak terbaca: {exc}", "ops_drill") for check in checks
         }
     return out
 
 
 def _default_forward_evidence_path() -> Path:
     """``docs/evidence/forward-testing.json`` (the forward-testing store)."""
-    return (
-        Path(__file__).resolve().parents[4]
-        / "docs"
-        / "evidence"
-        / "forward-testing.json"
-    )
+    return Path(__file__).resolve().parents[4] / "docs" / "evidence" / "forward-testing.json"
 
 
 def _collect_gate_e(
@@ -510,9 +490,7 @@ def _collect_gate_e(
                 if status == "passed":
                     bits = ""
                     if isinstance(metrics, dict):
-                        bits = ", ".join(
-                            f"{k}={v}" for k, v in list(metrics.items())[:4]
-                        )
+                        bits = ", ".join(f"{k}={v}" for k, v in list(metrics.items())[:4])
                     reason = f"bukti {key} nyata ({at})"
                     if bits:
                         reason = f"{reason} — {bits}"
@@ -543,17 +521,13 @@ def _collect_gate_e(
                 else _ev(False, "belum ada rekaman eksekusi", "execution_quality")
             )
     else:
-        out["execution_quality"] = _unknown(
-            "analitik eksekusi tidak tersedia", "execution_quality"
-        )
+        out["execution_quality"] = _unknown("analitik eksekusi tidak tersedia", "execution_quality")
 
     if incident_manager is not None:
         try:
             critical_open = bool(incident_manager.has_critical_open())
         except Exception as exc:  # noqa: BLE001
-            out["no_critical_incident"] = _unknown(
-                f"manajer insiden gagal: {exc}", "incidents"
-            )
+            out["no_critical_incident"] = _unknown(f"manajer insiden gagal: {exc}", "incidents")
         else:
             out["no_critical_incident"] = (
                 _ev(True, "tidak ada insiden kritikal terbuka", "incidents")
@@ -561,9 +535,7 @@ def _collect_gate_e(
                 else _ev(False, "ada insiden kritikal terbuka", "incidents")
             )
     else:
-        out["no_critical_incident"] = _unknown(
-            "manajer insiden tidak tersedia", "incidents"
-        )
+        out["no_critical_incident"] = _unknown("manajer insiden tidak tersedia", "incidents")
     return out
 
 

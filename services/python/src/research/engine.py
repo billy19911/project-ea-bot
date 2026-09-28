@@ -206,13 +206,9 @@ class ResearchEngine:
                     if provenance:
                         self._run_provenance[experiment_id] = provenance
             except (KeyError, TypeError, ValueError) as exc:
-                logger.warning(
-                    f"Skipping malformed research record ({record_type}): {exc}"
-                )
+                logger.warning(f"Skipping malformed research record ({record_type}): {exc}")
 
-    def record_run_provenance(
-        self, experiment_id: str, provenance: dict[str, Any]
-    ) -> None:
+    def record_run_provenance(self, experiment_id: str, provenance: dict[str, Any]) -> None:
         """Persist provenance (symbol/timeframe/bars/account) for a run."""
         self._run_provenance[experiment_id] = provenance
         self._store.append(
@@ -544,8 +540,7 @@ class ResearchEngine:
         experiment.status = "completed"
         self._persist_result(experiment.id, result)
         logger.info(
-            f"Backtest completed: {result.total_trades} trades, "
-            f"PnL={result.net_pnl:.2f}"
+            f"Backtest completed: {result.total_trades} trades, " f"PnL={result.net_pnl:.2f}"
         )
         return result
 
@@ -671,9 +666,7 @@ class ResearchEngine:
         if strategy_type == "rsi_reversal":
             rsi_vals = rsi_series(prices, rsi_period)
         elif strategy_type == "macd_crossover":
-            macd_line, _signal, macd_hist = macd_series(
-                prices, macd_fast, macd_slow, macd_signal
-            )
+            macd_line, _signal, macd_hist = macd_series(prices, macd_fast, macd_slow, macd_signal)
         else:  # ema_crossover
             # Full-series EMAs in O(n). Running ema() over a growing window per
             # bar is O(n²) — identical values, but unusable at 100k bars.
@@ -757,8 +750,7 @@ class ResearchEngine:
                 if entry_atr is not None and entry_atr > 0:
                     stop_loss = entry_price - direction * stop_multiplier * entry_atr
                     take_profit = (
-                        entry_price
-                        + direction * stop_multiplier * reward_risk * entry_atr
+                        entry_price + direction * stop_multiplier * reward_risk * entry_atr
                     )
                 else:
                     stop_loss = None
@@ -936,13 +928,8 @@ class ResearchEngine:
         Raises:
             ValueError: If either experiment has no backtest result.
         """
-        if (
-            exp1.id not in self._backtest_results
-            or exp2.id not in self._backtest_results
-        ):
-            raise ValueError(
-                "Cannot compare: requires completed backtests for both experiments"
-            )
+        if exp1.id not in self._backtest_results or exp2.id not in self._backtest_results:
+            raise ValueError("Cannot compare: requires completed backtests for both experiments")
 
         result1 = self._backtest_results[exp1.id]
         result2 = self._backtest_results[exp2.id]

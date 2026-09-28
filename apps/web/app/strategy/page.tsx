@@ -8,6 +8,7 @@ import { fmtDateTime } from '../../lib/useApiData';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 import Pagination from '../../components/ui/pagination';
+import { PARAM_LABELS, labelFor } from '../../lib/labels';
 
 // View model: camelCase performance fields for rendering. Mapped from the
 // Node API's StrategyRecord (snake_case) in `mapStrategy`.
@@ -128,7 +129,7 @@ export default function StrategyCenterPage() {
   return (
     <AppShell
       activeKey="strategy"
-      eyebrow="Xynn / Strategy"
+      eyebrow="Xynn / Strategi"
       title="Pusat Strategi"
       actions={
         <Link href="/strategy-lab" style={{ textDecoration: 'none' }}>
@@ -242,8 +243,8 @@ export default function StrategyCenterPage() {
                 <div className={styles.paramGrid}>
                   {Object.entries(selected.parameters).map(([key, value]) => (
                     <div key={key} className={styles.paramItem}>
-                      <code>{key}</code>
-                      <span>{value}</span>
+                      <span title={key}>{labelFor(PARAM_LABELS, key)}</span>
+                      <strong>{value}</strong>
                     </div>
                   ))}
                 </div>

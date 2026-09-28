@@ -293,7 +293,7 @@ export default function ObservabilityPage() {
   return (
     <AppShell
       activeKey="observability"
-      eyebrow="Xynn / Observability"
+      eyebrow="Xynn / Observabilitas"
       title="Observability Sistem"
       actions={
         <>

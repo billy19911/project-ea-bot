@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
 import { useApiData, errorMessageFor } from '@/lib/useApiData';
+import { COLUMN_LABELS, PARAM_LABELS, labelFor } from '@/lib/labels';
 import styles from '@/components/ops.module.css';
 
 /**
@@ -89,7 +90,7 @@ export default function WalkForwardPage() {
   const columns = windows.length > 0 ? Object.keys(windows[0]) : [];
 
   return (
-    <AppShell activeKey="walk-forward" eyebrow="Xynn / Research" title="Walk-Forward">
+    <AppShell activeKey="walk-forward" eyebrow="Xynn / Riset" title="Walk-Forward">
       <div className={styles.wrap}>
         {list.error && <div className={styles.error}>{list.error}</div>}
 
@@ -115,7 +116,8 @@ export default function WalkForwardPage() {
               >
                 {experiments.map((x) => (
                   <option key={String(x.id)} value={String(x.id)}>
-                    {x.label || x.id} · {x.strategy_type ?? '?'} · {x.status ?? '?'}
+                    {x.label || x.id} · {labelFor(PARAM_LABELS, String(x.strategy_type ?? '?'))} ·{' '}
+                    {x.status ?? '?'}
                   </option>
                 ))}
               </select>
@@ -147,7 +149,9 @@ export default function WalkForwardPage() {
                 <thead>
                   <tr>
                     {columns.map((c) => (
-                      <th key={c}>{c.replace(/_/g, ' ')}</th>
+                      <th key={c} title={c}>
+                        {labelFor(COLUMN_LABELS, c)}
+                      </th>
                     ))}
                   </tr>
                 </thead>

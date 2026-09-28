@@ -10,6 +10,7 @@ import time
 from typing import Any, Optional
 
 import httpx
+
 from src.llm.base import ModelInfo
 
 logger = logging.getLogger(__name__)
@@ -144,9 +145,7 @@ class ModelRegistry:
             return "google/gemini-2.0-flash-lite:free"
         return "openai/gpt-4o-mini"
 
-    def calculate_cost(
-        self, model_name: str, prompt_tokens: int, completion_tokens: int
-    ) -> float:
+    def calculate_cost(self, model_name: str, prompt_tokens: int, completion_tokens: int) -> float:
         """Calculate estimated cost in USD for token usage."""
         model = self.get(model_name)
         if not model or model.is_free:
@@ -288,9 +287,7 @@ class ModelRegistry:
         api_key = router.api_key
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
-        response = httpx.get(
-            f"{base}/models", headers=headers, timeout=DISCOVERY_TIMEOUT_S
-        )
+        response = httpx.get(f"{base}/models", headers=headers, timeout=DISCOVERY_TIMEOUT_S)
         response.raise_for_status()
         payload = response.json()
         data = payload["data"] if isinstance(payload, dict) else payload

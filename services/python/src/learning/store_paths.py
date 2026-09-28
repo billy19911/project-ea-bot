@@ -34,9 +34,7 @@ ENGINE_V2_PATH_ENV = "ENGINE_V2_STORE_PATH"
 
 # ``store_paths.py`` lives at ``services/python/src/learning/store_paths.py``.
 # service_root = ``services/python``.
-_SERVICE_ROOT = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), os.pardir, os.pardir)
-)
+_SERVICE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 
 
 def service_root() -> str:

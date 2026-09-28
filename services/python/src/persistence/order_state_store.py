@@ -46,9 +46,7 @@ class OrderStateStore:
                     try:
                         entry = json.loads(line)
                     except json.JSONDecodeError:
-                        logger.warning(
-                            "Skipping corrupt order state line in %s", self.path
-                        )
+                        logger.warning("Skipping corrupt order state line in %s", self.path)
                         continue
                     if isinstance(entry, dict) and "intent_id" in entry:
                         self._orders[entry["intent_id"]] = entry
@@ -57,9 +55,7 @@ class OrderStateStore:
         except OSError as exc:
             logger.warning("Could not read order state store %s: %s", self.path, exc)
 
-    def set_order(
-        self, intent_id: str, state: str, extra: Optional[dict[str, Any]] = None
-    ) -> None:
+    def set_order(self, intent_id: str, state: str, extra: Optional[dict[str, Any]] = None) -> None:
         """Create or update an order record and persist it."""
         from datetime import datetime, timezone
 
@@ -176,9 +172,7 @@ class OrderStateStore:
             with open(self.path, "w", encoding="utf-8"):
                 pass
         except OSError as exc:
-            logger.warning(
-                "Could not truncate order state store %s: %s", self.path, exc
-            )
+            logger.warning("Could not truncate order state store %s: %s", self.path, exc)
 
     def _append_line(self, entry: dict[str, Any]) -> None:
         """Persist one entry; a write failure degrades to cache-only."""
@@ -188,9 +182,7 @@ class OrderStateStore:
                 if parent:
                     os.makedirs(parent, exist_ok=True)
                 with open(self.path, "a", encoding="utf-8") as handle:
-                    handle.write(
-                        json.dumps(entry, ensure_ascii=False, default=str) + "\n"
-                    )
+                    handle.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
             except OSError as exc:
                 logger.warning(
                     "Could not persist order state to %s (cache kept): %s",

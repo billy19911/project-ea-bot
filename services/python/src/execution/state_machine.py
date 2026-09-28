@@ -101,9 +101,7 @@ def get_order(intent_id: str) -> Dict:
     return _order_store[intent_id]
 
 
-def set_order(
-    intent_id: str, state: OrderState | str, extra: Dict | None = None
-) -> None:
+def set_order(intent_id: str, state: OrderState | str, extra: Dict | None = None) -> None:
     """Create or update an order record.
 
     ``extra`` can contain arbitrary metadata (e.g., timestamps, broker ticket).

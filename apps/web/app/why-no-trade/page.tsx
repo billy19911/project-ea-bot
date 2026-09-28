@@ -72,7 +72,7 @@ export default function WhyNoTradePage() {
   }, [nonExecuted]);
 
   return (
-    <AppShell activeKey="why-no-trade" eyebrow="Xynn / Ops" title="Why No Trade">
+    <AppShell activeKey="why-no-trade" eyebrow="Xynn / Operasional" title="Kenapa Tidak Trading">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
 

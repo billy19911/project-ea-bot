@@ -8,6 +8,7 @@ import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 import DailyReport from '../../components/DailyReport';
 import Pagination from '../../components/ui/pagination';
+import { EVENT_TYPE_LABELS, humanize, labelFor } from '../../lib/labels';
 
 // Client-side pagination hook for long server-returned lists. The full array
 // stays in memory; only the visible window is rendered. Page resets to 1 when
@@ -670,13 +671,13 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                   const errorRate = typeof a.errorRate === 'number' ? a.errorRate : null;
                   const signals = a.signalCounts && typeof a.signalCounts === 'object'
                     ? Object.entries(a.signalCounts as Record<string, number>)
-                        .map(([k, v]) => `${k}:${v}`)
+                        .map(([k, v]) => `${humanize(k)}:${v}`)
                         .join(' ')
                     : '';
                   return (
                     <tr key={a.name}>
                       <td><strong>{a.name}</strong></td>
-                      <td>{a.type}</td>
+                      <td>{humanize(String(a.type ?? ''))}</td>
                       <td><span className={`${s.badge} ${badgeClass(a.status, s)}`}>{a.status}</span></td>
                       <td>{a.invocations ?? 0}</td>
                       <td className={s.mono}>
@@ -730,7 +731,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
             {tasksPage.rows.map((t: any) => (
               <tr key={t.id}>
                 <td className={s.mono}>{t.id}</td>
-                <td>{t.type}</td>
+                <td>{humanize(String(t.type ?? ''))}</td>
                 <td>{t.assignee}</td>
                 <td><span className={`${s.badge} ${badgeClass(t.status, s)}`}>{t.status}</span></td>
                 <td>{t.priority}</td>
@@ -760,7 +761,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
               {decisionsPage.rows.map((d: any) => (
                 <tr key={d.decision_id ?? d.event_id}>
                   <td className={s.mono}>{d.decision_id ?? '—'}</td>
-                  <td>{d.event_type ?? '—'}</td>
+                  <td title={d.event_type ?? ''}>{d.event_type ? labelFor(EVENT_TYPE_LABELS, String(d.event_type)) : '—'}</td>
                   <td><span className={`${s.badge} ${badgeClass(d.decision, s)}`}>{d.decision ?? '—'}</span></td>
                   <td>{d.status ?? '—'}</td>
                   <td>{d.risk_approved ? <span className={`${s.badge} ${s.success}`}>APPROVED</span> : <span className={`${s.badge} ${s.muted}`}>{d.risk_reason || 'REJECTED'}</span>}</td>

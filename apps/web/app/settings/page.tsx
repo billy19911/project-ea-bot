@@ -26,6 +26,8 @@ import { apiFetch } from '../../lib/api';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 import Pagination from '../../components/ui/pagination';
+import InfoTooltip from '../../components/ui/info-tooltip';
+import { KNOB_LABELS, KNOB_HELP, RISK_LABELS, labelFor } from '../../lib/labels';
 
 type SourceState = 'live' | 'defaults' | 'unavailable';
 
@@ -52,17 +54,6 @@ type SettingsPayload = {
 };
 
 type Notice = { kind: 'ok' | 'error'; text: string } | null;
-
-// Label manusiawi untuk limit risiko (nama kunci datang dari RiskEngine).
-const RISK_LABELS: Record<string, string> = {
-  max_drawdown: 'Max drawdown (fraksi ekuitas)',
-  daily_loss_limit: 'Batas rugi harian (fraksi ekuitas)',
-  max_exposure: 'Max exposure (fraksi ekuitas)',
-  margin_threshold: 'Ambang margin',
-  max_positions: 'Max posisi terbuka',
-  max_spread_pips: 'Max spread (pips)',
-  min_rr: 'Min risk/reward',
-};
 
 // Quick presets for fractional knobs — a lot size is easier to pick from a
 // shortlist than to type, and avoids the spinner jumping past valid values.
@@ -116,6 +107,8 @@ function KnobNumberField({
   const valid = isKnobValid(value, knob);
   const presets = KNOB_PRESETS[knob.key] ?? [];
   const current = Number(value);
+  const label = labelFor(KNOB_LABELS, knob.key);
+  const help = KNOB_HELP[knob.key] || knob.description;
 
   // Stepper: clamp to [min, max] and round to a stable decimal count so the
   // value never drifts (e.g. 0.30000000000004).
@@ -126,12 +119,14 @@ function KnobNumberField({
 
   return (
     <label className={`${styles.field} ${valid ? '' : styles.fieldInvalid}`}>
-      <span>{knob.key}</span>
+      <span className={styles.fieldLabel}>
+        {label} <InfoTooltip text={help} label={`Penjelasan ${label}`} />
+      </span>
       <div className={styles.numberRow}>
         <button
           type="button"
           className={styles.stepBtn}
-          aria-label={`Kurangi ${knob.key}`}
+          aria-label={`Kurangi ${label}`}
           onClick={() => apply((Number.isFinite(current) ? current : knob.minimum) - step)}
         >
           −
@@ -154,7 +149,7 @@ function KnobNumberField({
         <button
           type="button"
           className={styles.stepBtn}
-          aria-label={`Tambah ${knob.key}`}
+          aria-label={`Tambah ${label}`}
           onClick={() => apply((Number.isFinite(current) ? current : knob.minimum) + step)}
         >
           +
@@ -180,8 +175,8 @@ function KnobNumberField({
         </small>
       )}
       <small className={styles.fieldHint}>
-        {knob.description} Rentang {knob.minimum}–{knob.maximum} · dipakai oleh{' '}
-        <code>{knob.applied_to}</code>
+        Rentang {knob.minimum}–{knob.maximum} · dipakai oleh <code>{knob.applied_to}</code> ·{' '}
+        <code>{knob.key}</code>
       </small>
     </label>
   );
@@ -286,14 +281,14 @@ export default function SettingsPage() {
         if (raw === undefined || raw === '') continue;
         const num = Number(raw);
         if (!Number.isFinite(num)) {
-          setNotice({ kind: 'error', text: `Nilai ${knob.key} bukan angka.` });
+          setNotice({ kind: 'error', text: `Nilai ${labelFor(KNOB_LABELS, knob.key)} bukan angka.` });
           setSaving(false);
           return;
         }
         if (num < knob.minimum || num > knob.maximum) {
           setNotice({
             kind: 'error',
-            text: `Nilai ${knob.key} harus antara ${knob.minimum} dan ${knob.maximum}.`,
+            text: `Nilai ${labelFor(KNOB_LABELS, knob.key)} harus antara ${knob.minimum} dan ${knob.maximum}.`,
           });
           setSaving(false);
           return;
@@ -347,7 +342,7 @@ export default function SettingsPage() {
         <title>EA Bot — Pengaturan</title>
         <meta name="description" content="Pengaturan runtime EA Bot" />
       </Head>
-      <AppShell activeKey="settings" eyebrow="Xynn / Settings" title="Pengaturan">
+      <AppShell activeKey="settings" eyebrow="Xynn / Pengaturan" title="Pengaturan">
         {notice && (
           <div className={notice.kind === 'error' ? styles.noticeError : styles.notice}>{notice.text}</div>
         )}
@@ -398,7 +393,7 @@ export default function SettingsPage() {
                     {payload.writable.map((knob) =>
                       knob.kind === 'bool' ? (
                         <label className={styles.field} key={knob.key}>
-                          <span>
+                          <span className={styles.fieldLabel}>
                             <input
                               type="checkbox"
                               checked={(draft[knob.key] ?? String(knob.value)) === '1'}
@@ -407,11 +402,15 @@ export default function SettingsPage() {
                                 setDraft((d) => ({ ...d, [knob.key]: e.target.checked ? '1' : '0' }));
                               }}
                             />{' '}
-                            {knob.key}
+                            {labelFor(KNOB_LABELS, knob.key)}{' '}
+                            <InfoTooltip
+                              text={KNOB_HELP[knob.key] || knob.description}
+                              label={`Penjelasan ${labelFor(KNOB_LABELS, knob.key)}`}
+                            />
                           </span>
                           <small className={styles.fieldHint}>
-                            {knob.description} Default {knob.default === 1 ? 'AKTIF' : 'NONAKTIF'} · dibaca oleh{' '}
-                            <code>{knob.applied_to}</code>
+                            Default {knob.default === 1 ? 'AKTIF' : 'NONAKTIF'} · dibaca oleh{' '}
+                            <code>{knob.applied_to}</code> · <code>{knob.key}</code>
                           </small>
                         </label>
                       ) : (

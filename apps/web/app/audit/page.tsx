@@ -50,7 +50,7 @@ export default function AuditPage() {
   const pageRows = slice(rows);
 
   return (
-    <AppShell activeKey="audit" eyebrow="Xynn / Audit" title="Audit Trail">
+    <AppShell activeKey="audit" eyebrow="Xynn / Audit" title="Jejak Audit">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
 

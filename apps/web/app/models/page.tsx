@@ -61,7 +61,7 @@ export default function ModelsPage() {
   const visible = records.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   return (
-    <AppShell activeKey="models" eyebrow="Xynn / AI" title="Models & LLM Observability">
+    <AppShell activeKey="models" eyebrow="Xynn / AI" title="Model & Observabilitas LLM">
       <div className={styles.wrap}>
         <p className={styles.cardHint}>
           Observability — hanya memantau; bukan pemilih model. Halaman ini tidak mengubah

@@ -26,6 +26,7 @@ import { apiFetch } from '../../lib/api';
 import { fmtDateTime } from '../../lib/useApiData';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
+import { PARAM_LABELS, labelFor } from '../../lib/labels';
 
 type Overview = {
   ok: boolean;
@@ -644,7 +645,7 @@ function ExperimentTable({ items, onSelect }: { items: ExperimentRow[]; onSelect
               </td>
               <td>
                 {Object.entries(item.parameters)
-                  .map(([k, v]) => `${k}=${v}`)
+                  .map(([k, v]) => `${labelFor(PARAM_LABELS, k)}=${v}`)
                   .join(', ') || '—'}
               </td>
               <td>

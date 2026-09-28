@@ -15,11 +15,11 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { logger, createChild } from './logger';
 import { getJson, postJson, putJson } from './pythonClient';
-import { authenticate, authorize, generateToken, AuthRequest } from './middleware/auth';
+import { authenticate, authorize, generateToken } from './middleware/auth';
 import { auditMiddleware, fetchAuditLogs } from './middleware/audit';
 import { validatePayload, sanitizeInput, securityHeaders, preventParameterPollution } from './middleware/security';
 import { generalLimiter, authLimiter } from './middleware/rateLimiter';
-import { validateSecrets, redactSecrets } from './middleware/secrets';
+import { validateSecrets } from './middleware/secrets';
 import {
   wsAuthHandler,
   setupWSConnection,

@@ -99,10 +99,7 @@ class HttpTelegramTransport:
                 response = self._client.post(url, json=payload, timeout=self._timeout)
             else:
                 response = httpx.post(url, json=payload, timeout=self._timeout)
-            if (
-                response.status_code == 400
-                and "message is not modified" in response.text.lower()
-            ):
+            if response.status_code == 400 and "message is not modified" in response.text.lower():
                 return True
             response.raise_for_status()
         except TelegramTransportError:

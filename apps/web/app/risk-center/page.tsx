@@ -2,6 +2,7 @@
 
 import AppShell from '@/components/AppShell';
 import { useApiData, fmtPct } from '@/lib/useApiData';
+import { RISK_LABELS, labelFor } from '@/lib/labels';
 import styles from '@/components/ops.module.css';
 
 /**
@@ -68,7 +69,7 @@ export default function RiskCenterPage() {
         : null;
 
   return (
-    <AppShell activeKey="risk-center" eyebrow="Xynn / Risk" title="Risk Center">
+    <AppShell activeKey="risk-center" eyebrow="Xynn / Risiko" title="Pusat Risiko">
       <div className={styles.wrap}>
         {breaker.error && <div className={styles.error}>{breaker.error}</div>}
         {capital.error && <div className={styles.error}>{capital.error}</div>}
@@ -154,7 +155,9 @@ export default function RiskCenterPage() {
               <div className={styles.kv}>
                 {Object.entries(riskLimits).map(([k, v]) => (
                   <span key={k} style={{ display: 'contents' }}>
-                    <span className={styles.kvKey}>{k.replace(/_/g, ' ')}</span>
+                    <span className={styles.kvKey} title={k}>
+                      {labelFor(RISK_LABELS, k)}
+                    </span>
                     <span className={`${styles.kvVal} ${styles.mono}`}>{String(v)}</span>
                   </span>
                 ))}

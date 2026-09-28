@@ -85,7 +85,7 @@ export default function OverviewPage() {
   const visible = trades.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   return (
-    <AppShell activeKey="overview" eyebrow="Xynn / Overview" title="Command Center">
+    <AppShell activeKey="overview" eyebrow="Xynn / Ikhtisar" title="Pusat Komando">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
         {loading && !data && <div className={styles.loading}>Loading overview…</div>}

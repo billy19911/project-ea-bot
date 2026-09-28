@@ -405,7 +405,7 @@ export default function MarketPage() {
   return (
     <AppShell
       activeKey="market"
-      eyebrow="Xynn / Market"
+      eyebrow="Xynn / Pasar"
       title="Pasar"
       actions={
         <>

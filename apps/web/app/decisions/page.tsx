@@ -68,7 +68,7 @@ export default function DecisionsPage() {
   const pageRows = slice(rows);
 
   return (
-    <AppShell activeKey="decisions" eyebrow="Xynn / Decisions" title="Decisions">
+    <AppShell activeKey="decisions" eyebrow="Xynn / Keputusan" title="Keputusan">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
 

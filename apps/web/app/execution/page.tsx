@@ -56,7 +56,7 @@ export default function ExecutionPage() {
   ];
 
   return (
-    <AppShell activeKey="execution" eyebrow="Xynn / Execution" title="Execution">
+    <AppShell activeKey="execution" eyebrow="Xynn / Eksekusi" title="Eksekusi">
       <div className={styles.wrap}>
         {q.error && <div className={styles.error}>{q.error}</div>}
         {d.error && <div className={styles.error}>{d.error}</div>}

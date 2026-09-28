@@ -165,17 +165,13 @@ class PostTradeReviewAgent(BaseAgent):
             priority=AgentPriority.LOW,  # post-trade, not time-critical
             permissions=["ANALYZE_TRADES"],
         )
-        self._lesson_store = (
-            lesson_store if lesson_store is not None else _default_lesson_store
-        )
+        self._lesson_store = lesson_store if lesson_store is not None else _default_lesson_store
 
     # ------------------------------------------------------------------
     # Routing
     # ------------------------------------------------------------------
 
-    def can_handle(
-        self, event_type: str, context: dict[str, Any] | None = None
-    ) -> bool:
+    def can_handle(self, event_type: str, context: dict[str, Any] | None = None) -> bool:
         """Accept trade-close review events only."""
         return event_type.startswith("TRADE_CLOSE") or event_type == "POST_TRADE_REVIEW"
 
@@ -240,16 +236,12 @@ class PostTradeReviewAgent(BaseAgent):
             entry = trade.get("entry_price")
             exit_price = trade.get("exit_price", trade.get("close_price"))
             direction = _normalize_direction(trade.get("side", trade.get("direction")))
-            if not (
-                _is_number(entry) and _is_number(exit_price) and direction is not None
-            ):
+            if not (_is_number(entry) and _is_number(exit_price) and direction is not None):
                 return data
 
             history = trade.get("price_history")
             prices = (
-                [float(p) for p in history if _is_number(p)]
-                if isinstance(history, list)
-                else []
+                [float(p) for p in history if _is_number(p)] if isinstance(history, list) else []
             )
             review = TradeReviewer().review_trade(
                 {
@@ -300,15 +292,11 @@ class PostTradeReviewAgent(BaseAgent):
     def analyze(self, context: dict[str, Any]) -> dict[str, Any]:
         """Review one closed trade; always returns a Supervisor-compatible dict."""
         if not isinstance(context, dict):
-            return self._unsupported(
-                "No closed trade data available for review (fail-closed)"
-            )
+            return self._unsupported("No closed trade data available for review (fail-closed)")
 
         trade = context.get("closed_trade")
         if not isinstance(trade, dict) or not trade:
-            return self._unsupported(
-                "No closed trade data available for review (fail-closed)"
-            )
+            return self._unsupported("No closed trade data available for review (fail-closed)")
 
         pnl = self._resolve_pnl(trade)
         outcome = self._resolve_outcome(trade, pnl)
@@ -349,9 +337,7 @@ class PostTradeReviewAgent(BaseAgent):
         try:
             self._lesson_store.add_lesson(lesson)
         except Exception as exc:  # fail-safe: persistence must never break review
-            logger.warning(
-                "Lesson store failed for %s (review continues): %s", trade_id, exc
-            )
+            logger.warning("Lesson store failed for %s (review continues): %s", trade_id, exc)
 
         confidence = _CONFIDENCE_BY_OUTCOME.get(outcome, 0.5)
         reasons = [

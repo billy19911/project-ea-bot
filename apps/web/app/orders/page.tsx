@@ -59,13 +59,13 @@ export default function OrdersPage() {
   useAutoRefresh(load);
 
   return (
-    <AppShell activeKey="orders" eyebrow="Xynn / Orders" title="Orders" actions={null}>
+    <AppShell activeKey="orders" eyebrow="Xynn / Order" title="Order" actions={null}>
       {error && <div style={{ marginBottom: 12, color: 'var(--danger)' }}>{error}</div>}
-      <Card title="Orders" description="Pending orders at the broker">
+      <Card title="Order" description="Order pending di broker">
         {loaded && rows.length === 0 && !error ? (
           <p className="text-center text-[var(--text-muted)] py-6">
-            No pending orders. Market entries execute immediately, so this list is
-            usually empty unless you placed pending (limit/stop) orders.
+            Tidak ada order pending. Entry pasar dieksekusi langsung, jadi daftar ini
+            biasanya kosong kecuali Anda memasang order pending (limit/stop).
           </p>
         ) : (
           <DataTable columns={columns} rows={rows} unitLabel="order" />

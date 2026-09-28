@@ -139,8 +139,8 @@ export default function OverviewPage() {
   return (
     <AppShell
       activeKey="overview"
-      eyebrow="Xynn / Overview"
-      title="Command Center"
+      eyebrow="Xynn / Ikhtisar"
+      title="Pusat Komando"
       actions={
         <label className="liveToggle" title="Streaming via WebSocket">
           <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} />

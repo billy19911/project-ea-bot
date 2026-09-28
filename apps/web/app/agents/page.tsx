@@ -334,7 +334,7 @@ export default function AgentsPage() {
       : selected === decisions[0]);
 
   return (
-    <AppShell activeKey="agents" eyebrow="Xynn / Agents" title="Ruang Komite">
+    <AppShell activeKey="agents" eyebrow="Xynn / Agen" title="Ruang Komite">
       <div className={styles.wrap}>
         <div className={styles.left}>
           {!loaded && <p className={styles.muted}>Memuat…</p>}

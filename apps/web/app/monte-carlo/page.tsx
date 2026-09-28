@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
 import { useApiData, fmtNum, fmtPct, errorMessageFor } from '@/lib/useApiData';
+import { PARAM_LABELS, labelFor } from '@/lib/labels';
 import styles from '@/components/ops.module.css';
 
 /**
@@ -82,7 +83,7 @@ export default function MonteCarloPage() {
   const hasMC = mc != null;
 
   return (
-    <AppShell activeKey="monte-carlo" eyebrow="Xynn / Research" title="Monte Carlo">
+    <AppShell activeKey="monte-carlo" eyebrow="Xynn / Riset" title="Monte Carlo">
       <div className={styles.wrap}>
         {list.error && <div className={styles.error}>{list.error}</div>}
 
@@ -108,7 +109,8 @@ export default function MonteCarloPage() {
               >
                 {experiments.map((x) => (
                   <option key={String(x.id)} value={String(x.id)}>
-                    {x.label || x.id} · {x.strategy_type ?? '?'} · {x.status ?? '?'}
+                    {x.label || x.id} · {labelFor(PARAM_LABELS, String(x.strategy_type ?? '?'))} ·{' '}
+                    {x.status ?? '?'}
                   </option>
                 ))}
               </select>

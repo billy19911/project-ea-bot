@@ -226,7 +226,7 @@ export default function BacktestPage() {
   const paramKeys = strategies.find((s) => s.id === strategyType)?.parameters ?? Object.keys(parameters);
 
   return (
-    <AppShell activeKey="backtest" eyebrow="Xynn / Backtest" title="Backtest Runner">
+    <AppShell activeKey="backtest" eyebrow="Xynn / Backtest" title="Backtest">
       <div className={styles.pageBody}>
         {error && <div className={styles.errorCard}>{error}</div>}
 

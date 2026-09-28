@@ -68,7 +68,7 @@ export default function SystemReadinessPage() {
   );
 
   return (
-    <AppShell activeKey="system-readiness" eyebrow="Xynn / System" title="System Readiness">
+    <AppShell activeKey="system-readiness" eyebrow="Xynn / Sistem" title="Kesiapan Sistem">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
 

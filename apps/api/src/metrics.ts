@@ -139,7 +139,7 @@ export interface LatencySnapshot {
  * Build a JSON-friendly summary of current metrics for the frontend.
  */
 export async function getMetricsSummary() {
-  const metricsText = await register.metrics();
+  await register.metrics();
 
   // Parse http request histogram for latency summary
   const httpMetrics = await httpRequestDuration.get();

@@ -185,7 +185,7 @@ export default function AIControlPage() {
   return (
     <AppShell
       activeKey="ai-control"
-      eyebrow="Xynn / AI Control"
+      eyebrow="Xynn / Kontrol AI"
       title="Pusat Kontrol AI"
       actions={<SourceBadge source={source} />}
     >

@@ -342,9 +342,7 @@ class SignalLifecycleTracker:
             if not symbol:
                 return False
 
-            levels = (
-                record.get("levels") if isinstance(record.get("levels"), dict) else {}
-            )
+            levels = record.get("levels") if isinstance(record.get("levels"), dict) else {}
             direction = str(levels.get("direction") or decision).upper()
             if direction not in ("BUY", "SELL"):
                 direction = decision
@@ -380,9 +378,7 @@ class SignalLifecycleTracker:
                 return True
 
             # Same direction → never a new message; edit ONLY on status change.
-            status_changed = (
-                existing.status != status or existing.status_detail != status_detail
-            )
+            status_changed = existing.status != status or existing.status_detail != status_detail
             if confidence > existing.confidence:
                 existing.confidence = confidence
             if status_changed:
@@ -452,11 +448,7 @@ class SignalLifecycleTracker:
         try:
             if not isinstance(record, dict):
                 return False
-            ref = (
-                str(record.get("trade_id") or record.get("ticket") or "")
-                .strip()
-                .lstrip("#")
-            )
+            ref = str(record.get("trade_id") or record.get("ticket") or "").strip().lstrip("#")
             target: Optional[str] = None
             if ref:
                 for sym, state in self._states.items():

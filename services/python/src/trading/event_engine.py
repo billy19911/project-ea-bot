@@ -175,9 +175,7 @@ class EventQueue:
                 return False
             priority = _event_priority(event)
             self._queue.append(
-                PrioritizedEvent(
-                    event=event, priority=priority, sequence=self._sequence
-                )
+                PrioritizedEvent(event=event, priority=priority, sequence=self._sequence)
             )
             self._sequence += 1
             return True
@@ -192,8 +190,7 @@ class EventQueue:
             for i in range(1, len(self._queue)):
                 cand = self._queue[i]
                 if (cand.priority.value > best.priority.value) or (
-                    cand.priority.value == best.priority.value
-                    and cand.sequence < best.sequence
+                    cand.priority.value == best.priority.value and cand.sequence < best.sequence
                 ):
                     best = cand
                     best_idx = i
@@ -287,9 +284,7 @@ class EventHistory:
                 break
         return results
 
-    def get_counts_by_type(
-        self, since: Optional[datetime] = None
-    ) -> dict[EventTypes, int]:
+    def get_counts_by_type(self, since: Optional[datetime] = None) -> dict[EventTypes, int]:
         """Count stored events by type, optionally filtered by time."""
         with self._lock:
             snapshot = list(self._history)

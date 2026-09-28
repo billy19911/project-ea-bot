@@ -85,9 +85,7 @@ class JsonlLessonStore:
             with open(self.path, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(lesson, ensure_ascii=False, default=str) + "\n")
         except OSError as exc:
-            logger.warning(
-                "Could not persist lesson to %s (cache kept): %s", self.path, exc
-            )
+            logger.warning("Could not persist lesson to %s (cache kept): %s", self.path, exc)
 
     def all_lessons(self) -> list[dict[str, Any]]:
         """Return a shallow copy of every stored lesson."""

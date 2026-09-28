@@ -193,9 +193,7 @@ class TradeReviewer:
 
         # Evidence attached to the decision (reasoning present) is a positive
         # process signal — independent of whether the trade won or lost.
-        has_reasoning = (
-            bool(reasoning) if not isinstance(reasoning, list) else len(reasoning) > 0
-        )
+        has_reasoning = bool(reasoning) if not isinstance(reasoning, list) else len(reasoning) > 0
         reasoning_bonus = 15.0 if has_reasoning else 0.0
 
         score = base_score + signal_bonus + reasoning_bonus
@@ -267,9 +265,7 @@ class TradeReviewer:
         outcome, pnl_val = self.analyze_win_loss(pnl)
 
         # MAE/MFE
-        mae, mfe = self.compute_mae_mfe(
-            entry_price, price_history, exit_price, direction
-        )
+        mae, mfe = self.compute_mae_mfe(entry_price, price_history, exit_price, direction)
 
         # Timing score
         timing_score = self.score_timing(entry_price, support, resistance, direction)

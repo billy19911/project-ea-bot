@@ -47,7 +47,7 @@ export default function EnvironmentPage() {
   useAutoRefresh(load);
 
   return (
-    <AppShell activeKey="environment" eyebrow="Xynn / Safety" title="Environment">
+    <AppShell activeKey="environment" eyebrow="Xynn / Keamanan" title="Lingkungan">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
 

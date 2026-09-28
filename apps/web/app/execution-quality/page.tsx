@@ -46,7 +46,7 @@ export default function ExecutionQualityPage() {
   ];
 
   return (
-    <AppShell activeKey="execution-quality" eyebrow="Xynn / Execution" title="Execution Quality">
+    <AppShell activeKey="execution-quality" eyebrow="Xynn / Eksekusi" title="Kualitas Eksekusi">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
 

@@ -3,6 +3,7 @@
 import AppShell from '@/components/AppShell';
 import Pagination, { usePagination } from '@/components/ui/pagination';
 import { useApiData } from '@/lib/useApiData';
+import { OUTCOME_LABELS, humanize } from '@/lib/labels';
 import styles from '@/components/ops.module.css';
 
 /**
@@ -38,6 +39,12 @@ function outcomePill(outcome: string): string {
   return `${styles.pill} ${styles.pillNeutral}`;
 }
 
+/** Label manusiawi untuk outcome (backend mengirim "WIN"/"LOSS"). */
+function outcomeLabel(outcome: string | undefined): string {
+  if (!outcome) return '—';
+  return OUTCOME_LABELS[outcome.toLowerCase()] ?? humanize(outcome);
+}
+
 export default function LearningPage() {
   const { data, error, loading, refresh } = useApiData<LearningBody>('/learning/analytics');
   // The store is append-only (oldest first), so reverse to show the NEWEST
@@ -50,7 +57,7 @@ export default function LearningPage() {
   const pageItems = slice(lessons);
 
   return (
-    <AppShell activeKey="learning" eyebrow="Xynn / Learning" title="Learning">
+    <AppShell activeKey="learning" eyebrow="Xynn / Pembelajaran" title="Pembelajaran">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
 
@@ -104,20 +111,20 @@ export default function LearningPage() {
                 <thead>
                   <tr>
                     <th>ID</th>
-                    <th>Category</th>
-                    <th>Outcome</th>
-                    <th>Symbol</th>
-                    <th>Lesson</th>
+                    <th>Kategori</th>
+                    <th>Hasil</th>
+                    <th>Simbol</th>
+                    <th>Pelajaran</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pageItems.map((l, i) => (
                     <tr key={`${String(l.id ?? 'lesson')}-${i}`}>
                       <td className={styles.mono}>{l.id ?? '—'}</td>
-                      <td>{l.category || '—'}</td>
+                      <td>{l.category ? humanize(l.category) : '—'}</td>
                       <td>
                         <span className={outcomePill(String(l.outcome ?? ''))}>
-                          {l.outcome || '—'}
+                          {outcomeLabel(l.outcome)}
                         </span>
                       </td>
                       <td>{l.symbol || '—'}</td>

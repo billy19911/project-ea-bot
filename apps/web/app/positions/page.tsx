@@ -76,15 +76,15 @@ export default function PositionsPage() {
   }, [loadInfo]);
 
   return (
-    <AppShell activeKey="positions" eyebrow="Xynn / Positions" title="Open Positions" actions={null}>
+    <AppShell activeKey="positions" eyebrow="Xynn / Posisi" title="Posisi Terbuka" actions={null}>
       {error && <div style={{ marginBottom: 12, color: 'var(--danger)' }}>{error}</div>}
       
-      <Card title="Position Info" description={`MT5 Mode: ${mode} • Live Data Status`} noPadding>
+      <Card title="Info Posisi" description={`Mode MT5: ${mode} • Status Data Live`} noPadding>
         <div className="px-4 py-2 text-sm">
           <div className="flex gap-3 text-[var(--text-muted)]">
             <span>Status:</span>
             <span className={mode === 'LIVE' ? 'trendUp' : 'mono'}>
-              {mode === 'LIVE' ? 'Live broker data attached' : 'Paper / simulated session'}
+              {mode === 'LIVE' ? 'Data broker live terpasang' : 'Sesi paper / simulasi'}
             </span>
           </div>
         </div>
@@ -92,15 +92,15 @@ export default function PositionsPage() {
 
       <br />
       
-      <Card title="Open Positions" description={`${rows.length} positions currently open`}>
+      <Card title="Posisi Terbuka" description={`${rows.length} posisi sedang terbuka`}>
         {loaded && rows.length === 0 && !error ? (
           <p className="text-center text-[var(--text-muted)] py-6">
             {mode === 'LIVE' 
-              ? 'No open positions right now — check the Broker tab or place a manual order.' 
-              : 'Paper account is in simulation mode; no real positions available.'}
+              ? 'Belum ada posisi terbuka — periksa tab Broker atau pasang order manual.' 
+              : 'Akun paper dalam mode simulasi; tidak ada posisi nyata.'}
           </p>
         ) : (
-          <DataTable columns={columns} rows={rows} unitLabel="position" />
+          <DataTable columns={columns} rows={rows} unitLabel="posisi" />
         )}
       </Card>
     </AppShell>

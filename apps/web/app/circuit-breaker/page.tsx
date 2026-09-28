@@ -6,6 +6,7 @@ import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
 import { fmtDateTime } from '@/lib/useApiData';
 import Pagination from '@/components/ui/pagination';
+import { BREAKER_LEVEL_LABELS, BREAKER_TRIGGER_LABELS, labelFor } from '@/lib/labels';
 import styles from '@/components/ops.module.css';
 
 type BreakerState = {
@@ -23,22 +24,22 @@ type BreakerState = {
 
 const LEVELS: Record<string, { label: string; cls: string }> = {
   normal: { label: 'NORMAL', cls: 'pillOk' },
-  caution: { label: 'CAUTION', cls: 'pillWarn' },
-  risk_reduced: { label: 'RISK REDUCED', cls: 'pillWarn' },
-  entry_blocked: { label: 'ENTRY BLOCKED', cls: 'pillDanger' },
-  emergency_flatten: { label: 'EMERGENCY FLATTEN', cls: 'pillDanger' },
-  halted: { label: 'HALTED', cls: 'pillDanger' },
+  caution: { label: 'WASPADA', cls: 'pillWarn' },
+  risk_reduced: { label: 'RISIKO DIKURANGI', cls: 'pillWarn' },
+  entry_blocked: { label: 'ENTRY DIBLOKIR', cls: 'pillDanger' },
+  emergency_flatten: { label: 'TUTUP DARURAT', cls: 'pillDanger' },
+  halted: { label: 'DIHENTIKAN', cls: 'pillDanger' },
 };
 
 const TRIGGERS: Array<{ key: string; label: string }> = [
-  { key: 'spread_spike', label: 'Spread spike' },
-  { key: 'feed_stale', label: 'Feed stale' },
-  { key: 'mt5_disconnected', label: 'MT5 disconnected' },
-  { key: 'daily_loss', label: 'Daily loss' },
+  { key: 'spread_spike', label: 'Lonjakan spread' },
+  { key: 'feed_stale', label: 'Feed data basi' },
+  { key: 'mt5_disconnected', label: 'MT5 terputus' },
+  { key: 'daily_loss', label: 'Rugi harian' },
   { key: 'drawdown', label: 'Drawdown' },
-  { key: 'reconciliation_mismatch', label: 'Reconciliation mismatch' },
-  { key: 'execution_rejection_spike', label: 'Execution rejection spike' },
-  { key: 'database_unavailable', label: 'Database unavailable' },
+  { key: 'reconciliation_mismatch', label: 'Rekonsiliasi tidak cocok' },
+  { key: 'execution_rejection_spike', label: 'Lonjakan penolakan eksekusi' },
+  { key: 'database_unavailable', label: 'Database tidak tersedia' },
 ];
 
 export default function CircuitBreakerPage() {
@@ -101,13 +102,13 @@ export default function CircuitBreakerPage() {
   const levelInfo = state ? LEVELS[state.level] ?? { label: state.level.toUpperCase(), cls: 'pillNeutral' } : null;
 
   return (
-    <AppShell activeKey="circuit-breaker" eyebrow="Xynn / Risk" title="Circuit Breaker">
+    <AppShell activeKey="circuit-breaker" eyebrow="Xynn / Risiko" title="Circuit Breaker">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
 
         <div className={styles.grid}>
           <div className={styles.card}>
-            <span className={styles.cardLabel}>Current Level</span>
+            <span className={styles.cardLabel}>Level saat ini</span>
             <span className={styles.cardValue}>
               {levelInfo ? (
                 <span className={`${styles.pill} ${styles[levelInfo.cls as keyof typeof styles]}`}>
@@ -117,33 +118,33 @@ export default function CircuitBreakerPage() {
                 '—'
               )}
             </span>
-            {state?.latched && <span className={styles.cardHint}>Latched — recovery required</span>}
+            {state?.latched && <span className={styles.cardHint}>Terkunci — butuh pemulihan</span>}
           </div>
           <div className={styles.card}>
-            <span className={styles.cardLabel}>New Entries</span>
+            <span className={styles.cardLabel}>Entry baru</span>
             <span className={styles.cardValue}>
               {state ? (
                 <span className={`${styles.pill} ${state.allows_new_entries ? styles.pillOk : styles.pillDanger}`}>
-                  {state.allows_new_entries ? 'ENABLED' : 'BLOCKED'}
+                  {state.allows_new_entries ? 'DIIZINKAN' : 'DIBLOKIR'}
                 </span>
               ) : (
                 '—'
               )}
             </span>
-            <span className={styles.cardHint}>Size multiplier: {state ? state.size_multiplier : '—'}</span>
+            <span className={styles.cardHint}>Pengali ukuran: {state ? state.size_multiplier : '—'}</span>
           </div>
           <div className={styles.card}>
-            <span className={styles.cardLabel}>Trigger</span>
-            <span className={`${styles.cardValue} ${styles.cardValueMd}`}>
-              {state?.trigger ?? '-'}
+            <span className={styles.cardLabel}>Pemicu</span>
+            <span className={`${styles.cardValue} ${styles.cardValueMd}`} title={state?.trigger ?? ''}>
+              {state?.trigger ? labelFor(BREAKER_TRIGGER_LABELS, state.trigger) : '-'}
             </span>
-            <span className={styles.cardHint}>{state?.reason || 'No active trigger'}</span>
+            <span className={styles.cardHint}>{state?.reason || 'Tidak ada pemicu aktif'}</span>
           </div>
         </div>
 
         <div className={styles.panel}>
           <div className={styles.panelHead}>
-            <span className={styles.panelTitle}>Simulate Trigger (deterministic)</span>
+            <span className={styles.panelTitle}>Simulasi Pemicu (deterministik)</span>
           </div>
           <div className={styles.panelBody}>
             <div className={styles.row}>
@@ -164,7 +165,7 @@ export default function CircuitBreakerPage() {
                 onClick={recover}
                 disabled={busy}
               >
-                Recover to NORMAL
+                Pulihkan ke NORMAL
               </button>
             </div>
           </div>
@@ -172,26 +173,26 @@ export default function CircuitBreakerPage() {
 
         <div className={styles.panel}>
           <div className={styles.panelHead}>
-            <span className={styles.panelTitle}>Recent Transitions</span>
+            <span className={styles.panelTitle}>Transisi Terbaru</span>
           </div>
           {state && state.recent.length > 0 ? (
             <>
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>From</th>
-                  <th>To</th>
-                  <th>Trigger</th>
-                  <th>Reason</th>
-                  <th>Timestamp</th>
+                  <th>Dari</th>
+                  <th>Ke</th>
+                  <th>Pemicu</th>
+                  <th>Alasan</th>
+                  <th>Waktu</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleTransitions.map((r, i) => (
                   <tr key={i}>
-                    <td>{r.from}</td>
-                    <td>{r.to}</td>
-                    <td>{r.trigger}</td>
+                    <td title={r.from}>{labelFor(BREAKER_LEVEL_LABELS, String(r.from ?? ''))}</td>
+                    <td title={r.to}>{labelFor(BREAKER_LEVEL_LABELS, String(r.to ?? ''))}</td>
+                    <td title={r.trigger}>{labelFor(BREAKER_TRIGGER_LABELS, String(r.trigger ?? ''))}</td>
                     <td>{r.reason}</td>
                     <td className={styles.mono}>{fmtDateTime(r.timestamp)}</td>
                   </tr>
@@ -204,11 +205,11 @@ export default function CircuitBreakerPage() {
               total={transitions.length}
               onPageChange={setPage}
               onPageSizeChange={setPageSize}
-              unitLabel="transitions"
+              unitLabel="transisi"
             />
             </>
           ) : (
-            <div className={styles.empty}>No transitions recorded.</div>
+            <div className={styles.empty}>Belum ada transisi tercatat.</div>
           )}
         </div>
       </div>

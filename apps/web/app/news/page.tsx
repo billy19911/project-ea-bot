@@ -139,7 +139,7 @@ export default function NewsPage() {
   const visible = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   return (
-    <AppShell activeKey="news" eyebrow="Xynn / News" title="Kalender Ekonomi USD">
+    <AppShell activeKey="news" eyebrow="Xynn / Berita" title="Kalender Ekonomi USD">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
 

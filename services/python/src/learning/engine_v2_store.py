@@ -43,9 +43,7 @@ class JsonlEngineV2Store:
     """
 
     def __init__(self, path: Optional[str] = None) -> None:
-        self.path = str(
-            path or resolve_store_path(_DEFAULT_FILENAME, ENGINE_V2_PATH_ENV)
-        )
+        self.path = str(path or resolve_store_path(_DEFAULT_FILENAME, ENGINE_V2_PATH_ENV))
         self._lessons: list[dict[str, Any]] = []
         self._load()
 
@@ -63,9 +61,7 @@ class JsonlEngineV2Store:
                     try:
                         lesson = json.loads(line)
                     except json.JSONDecodeError:
-                        logger.warning(
-                            "Skipping corrupt v2 lesson line in %s", self.path
-                        )
+                        logger.warning("Skipping corrupt v2 lesson line in %s", self.path)
                         continue
                     if isinstance(lesson, dict):
                         self._lessons.append(lesson)
@@ -92,9 +88,7 @@ class JsonlEngineV2Store:
             with open(self.path, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(lesson, ensure_ascii=False, default=str) + "\n")
         except OSError as exc:
-            logger.warning(
-                "Could not persist v2 lesson to %s (cache kept): %s", self.path, exc
-            )
+            logger.warning("Could not persist v2 lesson to %s (cache kept): %s", self.path, exc)
 
     def all_lessons(self) -> list[dict[str, Any]]:
         """Return a shallow copy of every stored lesson."""

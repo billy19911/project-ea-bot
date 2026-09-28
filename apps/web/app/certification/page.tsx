@@ -52,7 +52,7 @@ export default function CertificationPage() {
   useAutoRefresh(load);
 
   return (
-    <AppShell activeKey="certification" eyebrow="Xynn / System" title="Production Certification">
+    <AppShell activeKey="certification" eyebrow="Xynn / Sistem" title="Sertifikasi Produksi">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
 

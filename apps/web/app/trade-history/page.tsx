@@ -78,7 +78,7 @@ export default function TradeHistoryPage() {
   useAutoRefresh(load);
 
   return (
-    <AppShell activeKey="trade-history" eyebrow="Xynn / Trade History" title="Positions & Trades">
+    <AppShell activeKey="trade-history" eyebrow="Xynn / Transaksi" title="Posisi & Transaksi">
       {error && <div style={{ marginBottom: 12, color: 'var(--danger)' }}>{error}</div>}
       {loaded && rows.length === 0 && !error ? (
         <p className="text-center text-[var(--text-muted)] py-6">

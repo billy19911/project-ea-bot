@@ -6,7 +6,7 @@
 import { Request } from 'express';
 import { WebSocket, Server as WSServer } from 'ws';
 import jwt from 'jsonwebtoken';
-import { wsRateLimitCheck, wsConnectionOpen, wsConnectionClose } from './rateLimiter';
+import { wsConnectionOpen, wsConnectionClose } from './rateLimiter';
 import { AuthPayload, resolveJwtSecret } from './auth';
 
 // Audit: share the same production guard as the HTTP auth middleware
@@ -146,7 +146,7 @@ export function validateWSMessage(msg: any): { valid: boolean; error?: string } 
     return { valid: false, error: 'Message must be JSON object' };
   }
 
-  const { type, data } = msg;
+  const { type } = msg;
   if (typeof type !== 'string' || type.length === 0) {
     return { valid: false, error: 'Missing or invalid message type' };
   }

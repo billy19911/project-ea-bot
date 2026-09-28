@@ -74,7 +74,7 @@ export default function SystemHealthPage() {
   ];
 
   return (
-    <AppShell activeKey="system-health" eyebrow="Xynn / System" title="System Health">
+    <AppShell activeKey="system-health" eyebrow="Xynn / Sistem" title="Kesehatan Sistem">
       <div className={styles.wrap}>
         {env.error && <div className={styles.error}>{env.error}</div>}
         {health.error && <div className={styles.error}>{health.error}</div>}

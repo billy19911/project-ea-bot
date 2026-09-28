@@ -108,8 +108,8 @@ export default function RiskPage() {
   return (
     <AppShell
       activeKey="risk-center"
-      eyebrow="Xynn / Risk"
-      title="Risk Center"
+      eyebrow="Xynn / Risiko"
+      title="Pusat Risiko"
       actions={<RiskBadge level={breakerLevel} />}
     >
       <div className="grid gap-4">

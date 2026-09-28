@@ -6,6 +6,7 @@ import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
 import { fmtDateTime } from '@/lib/useApiData';
 import Pagination from '@/components/ui/pagination';
+import { BREAKER_TRIGGER_LABELS, labelFor } from '@/lib/labels';
 import styles from '@/components/ops.module.css';
 
 type Incident = {
@@ -73,7 +74,7 @@ export default function IncidentsPage() {
   const visible = incidents.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   return (
-    <AppShell activeKey="incidents" eyebrow="Xynn / Incidents" title="Incidents">
+    <AppShell activeKey="incidents" eyebrow="Xynn / Insiden" title="Insiden">
       <div className={styles.wrap}>
         <div className={styles.grid}>
           <div className={styles.card}>
@@ -135,7 +136,7 @@ export default function IncidentsPage() {
                       </span>
                     </td>
                     <td>{inc.component}</td>
-                    <td>{inc.trigger}</td>
+                    <td title={inc.trigger}>{labelFor(BREAKER_TRIGGER_LABELS, String(inc.trigger ?? ''))}</td>
                     <td>{inc.system_state || '—'}</td>
                     <td>{inc.action_taken || '—'}</td>
                     <td className={styles.mono}>

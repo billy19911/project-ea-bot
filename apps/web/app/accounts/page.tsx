@@ -66,7 +66,7 @@ export default function AccountsPage() {
   const attached = data?.attached_account ?? null;
 
   return (
-    <AppShell activeKey="accounts" eyebrow="Xynn / System" title="Accounts & Brokers">
+    <AppShell activeKey="accounts" eyebrow="Xynn / Sistem" title="Akun & Broker">
       <div className={styles.wrap}>
         {error && <div className={styles.error}>{error}</div>}
 
