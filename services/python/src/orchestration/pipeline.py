@@ -243,7 +243,10 @@ class TradingPipeline:
         reconciliation_guard: Optional[Any] = None,
         money_manager: Optional[Any] = None,
         default_risk_pct: float = DEFAULT_RISK_PCT,
-        max_lot_per_trade: float = 1.0,
+        # Safe default cap: a misconfigured/omitted value must NOT allow 1.0-lot
+        # orders. The runtime wires the operator's real cap from the store; this
+        # default is the fail-safe floor.
+        max_lot_per_trade: float = 0.05,
         force_risk_sizing: bool = False,
         single_entry_policy: bool = False,
         entry_magic: int = 70000,
@@ -1091,7 +1094,11 @@ class TradingPipeline:
                 except (TypeError, ValueError):
                     continue
         if entry <= 0:
-            return  # no price → cannot size deterministically
+            # No price → cannot size deterministically. Still apply the safety
+            # cap so a stale/foreign proposal size can never slip through
+            # uncapped (defence in depth).
+            self._cap_lot(proposal)
+            return
         proposal["entry_price"] = entry
 
         # --- Resolve ATR (for SL/TP) and point/contract values ----------
@@ -1123,7 +1130,19 @@ class TradingPipeline:
                     proposal["stop_loss"] = round(float(sl_price), 5)
                     sl = proposal["stop_loss"]
                 if tp <= 0:
-                    proposal["take_profit"] = round(float(tp_price), 5)
+                    # Place the order's TP at TPmax (3R) so the trade has room to
+                    # run the full ladder (TP1=1R, TP2=2R, TPmax=3R). The stop
+                    # ladder protects profit rung by rung and the runner trails
+                    # after TP2. TPmax = SL_distance × 3.
+                    risk_distance = abs(entry - sl) if sl > 0 else 0.0
+                    if risk_distance > 0:
+                        if direction == "BUY":
+                            tp = entry + 3.0 * risk_distance
+                        else:
+                            tp = entry - 3.0 * risk_distance
+                    else:
+                        tp = float(tp_price)
+                    proposal["take_profit"] = round(float(tp), 5)
                     tp = proposal["take_profit"]
             except Exception as exc:  # noqa: BLE001 - SL/TP is best-effort
                 logger.debug("SL/TP completion skipped: %s", exc)
@@ -1173,14 +1192,34 @@ class TradingPipeline:
                     logger.debug("Position sizing skipped: %s", exc)
 
         # Safety cap: never exceed the per-trade lot cap (fail-safe).
+        self._cap_lot(proposal)
+
+    def _cap_lot(self, proposal: dict[str, Any]) -> None:
+        """Clamp ``proposal['size']`` to the per-trade cap (fail-safe).
+
+        The cap is the last line of defence for money safety: it must run on
+        EVERY path that could carry a size, including early returns. If the cap
+        computation itself fails, we FAIL CLOSED by forcing the size to the cap
+        value — never leaving an uncapped order.
+        """
+        try:
+            raw_size = float(proposal.get("size") or 0.0)
+        except (TypeError, ValueError):
+            raw_size = 0.0
         try:
             capped = self.money_manager.cap_lot_size(
-                float(proposal.get("size") or 0.0),
+                raw_size,
                 max_lot_per_trade=self.max_lot_per_trade,
             )
             proposal["size"] = round(float(capped or 0.0), 2)
-        except Exception as exc:  # noqa: BLE001 - capping is best-effort
-            logger.debug("Lot cap skipped: %s", exc)
+        except Exception as exc:  # noqa: BLE001 - fail-CLOSED, never uncapped
+            logger.warning(
+                "Lot cap computation failed (%s) — forcing size to cap %.4f (fail-closed)",
+                exc,
+                self.max_lot_per_trade,
+            )
+            # A non-positive raw size stays 0; otherwise clamp hard to the cap.
+            proposal["size"] = round(min(raw_size, float(self.max_lot_per_trade)), 2)
 
     def _own_position_ticket(self, positions: Any) -> Optional[str]:
         """Return the ticket of one of OUR positions (matched by magic), else None.
@@ -1398,6 +1437,21 @@ class TradingPipeline:
                 except (TypeError, ValueError):
                     price = 0.0
 
+            # Initial stop-loss of THIS order — captured so the close path can
+            # compute the trade's R-multiple (risk = |entry - initial SL|).
+            # Prefer the completed proposal's stop_loss; fall back to the raw
+            # proposal. Never overridden by later trailing changes (that is the
+            # whole point: R is defined against the ORIGINAL risk).
+            try:
+                stop_loss = float(
+                    proposal.get("stop_loss")
+                    or proposal.get("sl")
+                    or (validation.get("proposal") or {}).get("stop_loss")
+                    or 0.0
+                )
+            except (TypeError, ValueError):
+                stop_loss = 0.0
+
             from review.entry_context import remember_entry_context
 
             remember_entry_context(
@@ -1409,6 +1463,7 @@ class TradingPipeline:
                     "news_events": news_events,
                     "regime": regime,
                     "entry_price": float(price),
+                    "stop_loss": float(stop_loss),
                     "ts": time.time(),
                 },
             )

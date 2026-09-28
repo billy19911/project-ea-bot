@@ -98,9 +98,7 @@ class PositionCloseDetector:
             "close_price": float(
                 position.get("price_current", position.get("price_open", 0.0)) or 0.0
             ),
-            "pnl": float(
-                position.get("profit", position.get("unrealized_pnl", 0.0)) or 0.0
-            ),
+            "pnl": float(position.get("profit", position.get("unrealized_pnl", 0.0)) or 0.0),
         }
         # T3b: attach the entry-time decision context (agent outputs / news
         # events / regime) registered when the entry was executed, so the
@@ -121,6 +119,14 @@ class PositionCloseDetector:
                 record["news_events"] = ctx["news_events"]
             if ctx.get("regime"):
                 record["regime"] = ctx["regime"]
+            # Carry the ORIGINAL stop-loss so the review can compute the trade's
+            # R-multiple (risk = |entry - initial SL|). The broker snapshot only
+            # shows the CURRENT SL (possibly trailed), so the entry context is
+            # the authoritative source for the initial risk.
+            if ctx.get("entry_price") and not record.get("entry_price"):
+                record["entry_price"] = float(ctx["entry_price"])
+            if ctx.get("stop_loss"):
+                record["stop_loss"] = float(ctx["stop_loss"])
         return record
 
     def _fire(self, record: dict[str, Any]) -> None:
@@ -129,6 +135,4 @@ class PositionCloseDetector:
         try:
             self._on_close(record)
         except Exception as exc:  # noqa: BLE001 - never break the caller's loop
-            logger.warning(
-                "Position-close hook failed for %s: %s", record.get("trade_id"), exc
-            )
+            logger.warning("Position-close hook failed for %s: %s", record.get("trade_id"), exc)

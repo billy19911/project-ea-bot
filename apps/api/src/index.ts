@@ -337,6 +337,11 @@ app.get('/observability/traces', async (req, res) => {
   await sendProxy(res, `/observability/traces?limit=${limit}`, undefined, req);
 });
 
+// Aggregated operational diagnostics — one actionable "what needs attention".
+app.get('/diagnostics', async (req, res) => {
+  await sendProxy(res, '/diagnostics', undefined, req);
+});
+
 // PRD §26/§27: trigger one autonomous pipeline cycle via the Python service.
 // Proxies POST /pipeline/run, forwarding the body and the X-Trace-Id header so
 // the dashboard can run a cycle and receive the Python trace_id.
@@ -822,6 +827,17 @@ app.get('/v2/performance-intelligence', async (req, res) => {
   await sendProxy(
     res,
     `/v2/performance-intelligence?dimension=${encodeURIComponent(dimension)}`,
+    undefined,
+    req,
+  );
+});
+
+// R-multiple performance aggregated by period (day/week/month).
+app.get('/v2/r-performance', async (req, res) => {
+  const period = String(req.query.period || 'day');
+  await sendProxy(
+    res,
+    `/v2/r-performance?period=${encodeURIComponent(period)}`,
     undefined,
     req,
   );

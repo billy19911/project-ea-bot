@@ -3,6 +3,54 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Fixed — startup: seeding SLTP gagal karena field settings di-rename
+- **Gejala:** log menampilkan `Gagal menerapkan runtime settings saat startup` (AttributeError) setiap boot → **seluruh** blok seed + `_apply_to_runtime` **dibatalkan**, sehingga cap lot/risiko & knob SLTP tidak pernah diterapkan saat startup.
+- **Sebab:** `main.py` masih membaca `settings.sltp_progressive_enabled` yang sudah di-rename menjadi `sltp_tp1_lock_enabled` saat SLTP diubah ke model ladder.
+- **Fix (`main.py`):** gunakan `getattr(...)` dengan default aman + key store yang benar (`sltp_progressive_enabled` ← `sltp_tp1_lock_enabled`), sehingga satu field hilang tak membatalkan seluruh seeding.
+
+### Fixed — Batas risiko: `max_position_size` ditampilkan padahal tidak dipakai gate
+- **`system/endpoints.py::_risk_limits_snapshot`**: `max_position_size` didefinisikan di `RiskEngine` tetapi **tidak pernah dipanggil** di `RiskGate` (`check_position_size` tak punya pemanggil di jalur order). Panel "Batas risiko" menampilkannya read-only → terkesan aktif padahal tidak. Kini **di-omit** dari snapshot agar UI jujur (hanya batas yang benar-benar ditegakkan yang tampil). Label web di `settings/page.tsx` juga dibersihkan.
+
+### Verifikasi (startup + limits)
+- Python **2539 passed** (+2 regresi: seed SLTP memakai atribut settings yang benar, dan snapshot meng-omit `max_position_size`). Log startup bersih (tak ada lagi `Gagal menerapkan`). Runtime live: `max_lot_per_trade=0.05`, SLTP semua ON. `black`/`isort`/`flake8` bersih; web `tsc`+lint bersih & di-rebuild.
+
+### Fixed — CRITICAL: cap lot `max_lot_per_trade` tidak bekerja (order 1.0 lot lolos cap 0.05)
+Gejala: order XAUUSD nyata bervolume **1.0** padahal `max_lot_per_trade` diset **0,05** di dashboard (akun IDR, equity besar).
+- **Akar masalah** — `TradingPipeline.max_lot_per_trade` selalu memakai **default kode `1.0`**: `orchestration/runtime.py::_build_pipeline` **tidak meneruskan** knob dari store ke constructor, dan satu-satunya koreksi (`_apply_to_runtime`) rapuh: ia berjalan **setelah** blok `trend_sample_interval` yang bisa melempar lebih dulu, lalu exception-nya ditelan senyap oleh `main.py`. Akibatnya cap tetap 1.0.
+- **`orchestration/runtime.py::_build_pipeline`** kini membaca `max_lot_per_trade` & `risk_per_trade_pct` dari settings store **saat construct** (+ clamp fail-safe ke (0,100]) dan meneruskannya ke `TradingPipeline`, plus `force_risk_sizing=True` (lot selalu dihitung ulang dari knob risiko lalu di-cap).
+- **`orchestration/pipeline.py`** — default `max_lot_per_trade` diubah dari `1.0` → **`0.05`** (fail-safe floor); cap diekstrak ke `_cap_lot()` dan **selalu** dijalankan, termasuk jalur `entry <= 0` (dulu `return` lebih awal melewati cap). Jika perhitungan cap gagal → **fail-closed** (paksa size = cap), bukan membiarkan order tak ter-cap.
+- **`system/endpoints.py::_apply_to_runtime`** — tiap knob kini di-apply dalam `try/except` **independen** (satu gagal tidak membatalkan yang lain); knob ukuran/risiko diproses **lebih awal**; kegagalan dilaporkan di `applied["_errors"]`.
+
+### Verifikasi (cap lot)
+- Python **2537 passed** (+3 regresi: satu knob gagal tidak membatalkan cap, `_build_pipeline` membaca cap dari store, dan size 25.0/1.0 di-cap ke 0.05 end-to-end). Runtime live terbukti `max_lot_per_trade = 0.05` (dulu 1.0). `black`/`isort`/`flake8` bersih.
+
+### Changed — SL Management jadi LADDER berbasis level TP (perbaikan "SL pindah terlalu awal")
+Keluhan: SL bergerak padahal harga belum mencapai level, sehingga "pindah sebelum waktunya".
+- **`execution/sltp_manager.py` — ditulis ulang**: model lama men-trailing dari profit pertama (`progress_r > 0`) → SL bergerak terlalu dini. Model baru = **ladder diskret**:
+  1. **Entry** → SL + TP tetap; **tidak ada trailing sebelum TP1**.
+  2. **Harga capai TP1 (1R)** → SL pindah ke **BEP + buffer** (`bep_buffer_r`, default 0.1R) — trade anti-rugi.
+  3. **Harga capai TP2 (2R)** → SL naik ke **level TP1 (1R)**, profit terkunci.
+  4. **Lewat TP2 → TPmax** → **trailing runner** (ATR) tetapi **tidak pernah di bawah TP1**.
+  Monotonik & anti-churn tetap terjaga. Konfigurasi baru: `bep_buffer_r`, `tp1_lock_enabled`, `tp1_lock_r`, `tp2_trigger_r`.
+- **TP order saat entry = TPmax (3R)** — `agents/synthesis.py` (`TP_ATR_MULT = SL_ATR_MULT × 3 = 4.5×ATR`) dan `orchestration/pipeline.py` (TP dihitung dari `entry ± 3×|entry−SL|`). Sebelumnya TP = 2R, kini 3R agar trade punya ruang menjalankan ladder penuh.
+- **R ladder di-anchor ke SL AWAL** — `monitoring/trade_manager.py` kini membaca stop-loss AWAL dari `review/entry_context.py` (hook `initial_sl_reader`), bukan SL yang sudah bergeser, sehingga level TP1/TP2 tidak melenceng saat SL bergerak.
+- **Config/env**: `SLTP_BEP_BUFFER_R`, `SLTP_TP1_LOCK_ENABLED` menggantikan `SLTP_BEP_TRIGGER_R`/`SLTP_BEP_LOCK_R`/`SLTP_TP1_LOCK_R`; knob dashboard `sltp_progressive_enabled` kini berarti "kunci profit di TP2". `settings_store.py` + `.env.runtime` diperbarui.
+
+### Verifikasi (SL ladder)
+- Python **2534 passed** (`test_sltp_manager.py` dirombak ke model ladder; +regresi TPmax di `test_synthesis.py`, `test_risk_gate_spread_fix.py`); `black`/`isort`/`flake8` bersih. Simulasi ladder (BUY 2000/R10) terbukti: SL diam sebelum TP1, BEP di TP1, TP1-lock di TP2, trail setelah TP2.
+
+### Added — SL/TP Konsisten + R-Multiple Learning (per hari/minggu/bulan)
+Menjawab dua keluhan nyata: TP antar-entry "beda", dan learning belum bisa membaca R.
+- **Fix inkonsistensi SL/TP** — `agents/synthesis.py` memakai `2.0×ATR`/`4.0×ATR` sementara `risk/money_management.py` dan `trading/level_plan.py` memakai `1.5×ATR`/`3.0×ATR`. Karena pipeline hanya mengisi yang kosong, satu order bisa memakai SL dari satu sumber dan TP dari sumber lain (RR tidak sesuai). Kini `synthesis.py` memakai konstanta tunggal `SL_ATR_MULT=1.5` / `TP_ATR_MULT=3.0` — satusumber kebenaran, RR 2:1 eksak.
+- **`review/r_multiple.py` (BARU)** — helper murni `compute_r_multiple()` (R dari *harga*: `(exit-entry)/|entry-SL|`, tidak butuh contract-size), `r_bucket_from_trades()`, dan `aggregate_r_by_period()` (harian/mingguan/bulanan). Degenerate input → `None` (tidak pernah angka palsu).
+- **Jembatan SL ke jalur close** — `orchestration/pipeline.py._remember_entry_context()` kini menyimpan **stop-loss AWAL** order ke `review/entry_context.py`; `review/close_detector.py` membawanya ke close record. `review/auto_trigger.py` menghitung `r_multiple` (field + `closed_at`) di setiap `ReviewRecord` dan meneruskannya lewat `trade_result`.
+- **Learning baca R** — `system/v2_endpoints.py._closed_trade_rows()` kini mengisi `TradeRow.r_multiple` (sebelumnya selalu `0.0`), sehingga `avg_r`/`total_r` di Performance Intelligence benar-benar terisi.
+- **Endpoint baru** `GET /v2/r-performance?period=day|week|month` (Python + proxy Node) — avg/total R, win rate, dan profit factor per periode + ringkasan keseluruhan.
+- **Web — Performance page**: kartu "Avg R"/"Total R" + tabel "R-multiple by period" dengan pemilih day/week/month.
+
+### Verifikasi (SL/TP + R)
+- Python **2526 passed** (+17 `test_r_multiple.py`, +integrasi di `test_review_auto_trigger.py`/`test_position_close_detector.py`/`test_v2_endpoints.py`); `black`/`isort`/`flake8` bersih. Node API **61 passed**; Web `tsc`+lint bersih.
+
 ### Added — Dynamic Stop-Loss Management (BEP / Progressive TP1 / Trailing)
 Fitur yang sebelumnya hanya "kode mati" kini berfungsi penuh dan tersambung ke broker.
 - **`execution/sltp_manager.py` (BARU)** — logika keputusan murni `decide_stop_loss()`: **break-even** (geser SL ke entry setelah profit N R), **progressive/TP1 lock** (kunci profit saat TP1), dan **trailing** (jarak `ATR × faktor`). Monotonik (hanya mengetatkan risiko, tidak pernah melebarkan), anti-churn via `min_move_r`. Konfigurasi `SLTPConfig`.

@@ -280,3 +280,23 @@ def test_learning_analytics_lesson_ids_are_unique() -> None:
     ids = [item["id"] for item in resp.json()["lessons"]]
     assert len(ids) == 2
     assert len(set(ids)) == len(ids), "lesson ids must be unique"
+
+
+# ---------------------------------------------------------------------------
+# Aggregated diagnostics
+# ---------------------------------------------------------------------------
+
+
+def test_diagnostics_reports_all_areas() -> None:
+    """The diagnostics report must cover feed / sltp / r_tracking / execution."""
+    resp = client.get("/diagnostics")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["overall"] in ("OK", "ATTENTION", "CRITICAL")
+    areas = {c["area"] for c in data["checks"]}
+    assert {"feed", "sltp", "r_tracking", "execution"} <= areas
+    for check in data["checks"]:
+        assert "ok" in check
+        assert "severity" in check
+        assert "detail" in check
+    assert data["counts"]["total"] == len(data["checks"])

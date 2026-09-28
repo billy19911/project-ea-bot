@@ -16,6 +16,7 @@ import logging
 import threading
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from .advanced_review import RootCauseClassification, classify_root_cause
@@ -64,14 +65,32 @@ def _is_closed(trade_result: Any) -> bool:
     return close_price is not None
 
 
+def _compute_r(record: dict[str, Any]) -> Optional[float]:
+    """Compute the trade's R-multiple from a normalized review record.
+
+    Fail-safe: returns ``None`` when the record lacks a usable stop-loss /
+    prices, so a missing R never breaks the close path.
+    """
+    try:
+        from .r_multiple import compute_r_multiple
+
+        return compute_r_multiple(
+            direction=record.get("direction", ""),
+            entry_price=record.get("entry_price", 0.0),
+            exit_price=record.get("exit_price", 0.0),
+            stop_loss=record.get("stop_loss", 0.0),
+        )
+    except Exception as exc:  # noqa: BLE001 - R is advisory only
+        logger.warning("R-multiple computation failed: %s", exc)
+        return None
+
+
 def _to_review_record(trade_result: Any) -> dict[str, Any]:
     """Normalize an arbitrary trade/close record into a review record dict."""
     close_price = _get(trade_result, "close_price", None)
     if close_price is None:
         close_price = _get(trade_result, "exit_price", None)
-    entry_price = _get(
-        trade_result, "entry_price", _get(trade_result, "open_price", 0.0)
-    )
+    entry_price = _get(trade_result, "entry_price", _get(trade_result, "open_price", 0.0))
 
     direction = _get(trade_result, "direction", None)
     if direction is None:
@@ -83,9 +102,7 @@ def _to_review_record(trade_result: Any) -> dict[str, Any]:
             order_type = str(_get(trade_result, "order_type", "") or "").upper()
             direction = "SELL" if "SELL" in order_type else "BUY"
 
-    trade_id = _get(trade_result, "trade_id", None) or _get(
-        trade_result, "ticket", None
-    )
+    trade_id = _get(trade_result, "trade_id", None) or _get(trade_result, "ticket", None)
     return {
         "trade_id": str(trade_id) if trade_id is not None else "UNKNOWN",
         "symbol": str(_get(trade_result, "symbol", "") or ""),
@@ -93,11 +110,11 @@ def _to_review_record(trade_result: Any) -> dict[str, Any]:
         "exit_price": float(close_price or 0.0),
         "direction": str(direction or "BUY"),
         "pnl": float(_get(trade_result, "pnl", 0.0) or 0.0),
+        "stop_loss": float(_get(trade_result, "stop_loss", _get(trade_result, "sl", 0.0)) or 0.0),
         "agent_outputs": _get(trade_result, "agent_outputs", {}) or {},
         "retries": int(_get(trade_result, "retries", 0) or 0),
         "slippage": float(
-            _get(trade_result, "slippage", _get(trade_result, "slippage_applied", 0.0))
-            or 0.0
+            _get(trade_result, "slippage", _get(trade_result, "slippage_applied", 0.0)) or 0.0
         ),
         "price_history": list(_get(trade_result, "price_history", []) or []),
         "regime_at_entry": _get(trade_result, "regime_at_entry", None)
@@ -120,6 +137,12 @@ class ReviewRecord:
     trade_result: dict[str, Any] = field(default_factory=dict)
     agent_outputs: dict[str, Any] = field(default_factory=dict)
     news_events: list[Any] = field(default_factory=list)
+    # R-multiple of this trade (result in units of initial risk). ``None`` when
+    # it cannot be computed (e.g. missing stop-loss). Used by the R-based
+    # performance views (per day / week / month).
+    r_multiple: Optional[float] = None
+    # When the review (i.e. the close) happened — used to bucket R by period.
+    closed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the record to a plain dict."""
@@ -127,6 +150,8 @@ class ReviewRecord:
             "trade_id": self.trade_id,
             "outcome": self.review.outcome,
             "pnl": self.review.pnl,
+            "r_multiple": self.r_multiple,
+            "closed_at": self.closed_at.isoformat(),
             "timing_score": self.review.timing_score,
             "decision_quality_score": self.review.decision_quality_score,
             "execution_quality_score": self.review.execution_quality_score,
@@ -223,6 +248,7 @@ class ReviewAutoTrigger:
                 "direction": record.get("direction", ""),
                 "entry_price": record.get("entry_price", 0.0),
                 "exit_price": record.get("exit_price", 0.0),
+                "stop_loss": record.get("stop_loss", 0.0),
                 "pnl": record.get("pnl", 0.0),
                 "regime": record.get("regime_at_entry") or "unknown",
             },
@@ -236,6 +262,7 @@ class ReviewAutoTrigger:
                 if isinstance(record.get("news_events"), (list, tuple))
                 else []
             ),
+            r_multiple=_compute_r(record),
         )
         with self._lock:
             self._stats["reviewed"] += 1
@@ -245,9 +272,7 @@ class ReviewAutoTrigger:
             try:
                 self._on_review(review_record)
             except Exception as exc:  # fail-safe
-                logger.warning(
-                    "on_review callback failed for %s: %s", record["trade_id"], exc
-                )
+                logger.warning("on_review callback failed for %s: %s", record["trade_id"], exc)
 
         logger.info(
             "Auto-review complete for trade %s: %s (%s)",

@@ -86,12 +86,25 @@ class TradeManager:
         tick_reader: Optional[Callable[[str], Any]] = None,
         atr_reader: Optional[Callable[[str], float]] = None,
         apply_sltp: Optional[Callable[[int, str, float, Optional[float]], dict]] = None,
+        enabled_reader: Optional[Callable[[], bool]] = None,
+        config_reader: Optional[Callable[[], Optional[SLTPConfig]]] = None,
+        initial_sl_reader: Optional[Callable[[Any], float]] = None,
     ) -> None:
         self.config = config or SLTPConfig()
         self._position_reader = position_reader
         self._tick_reader = tick_reader
         self._atr_reader = atr_reader
         self._apply_sltp = apply_sltp
+        # Live master switch + config readers. When provided they are consulted
+        # on every :meth:`manage` call so the operator can toggle the feature
+        # from the dashboard without a restart. Absent readers fall back to the
+        # injected ``config`` (static behaviour, used by tests).
+        self._enabled_reader = enabled_reader
+        self._config_reader = config_reader
+        # Reads a position's ORIGINAL stop-loss (by ticket) so the ladder's R is
+        # anchored to the initial risk, not the already-moved stop. Defaults to
+        # the entry-context registry when absent.
+        self._initial_sl_reader = initial_sl_reader
         self._recent: deque[dict[str, Any]] = deque(maxlen=50)
         self._counts: dict[str, int] = {
             "evaluated": 0,
@@ -135,6 +148,27 @@ class TradeManager:
         except Exception:  # noqa: BLE001 - fail-safe
             return 0.0
 
+    def _initial_sl(self, ticket: Any) -> float:
+        """Return the position's ORIGINAL stop-loss from the entry context.
+
+        The broker snapshot only exposes the *current* SL (which may already
+        have been moved up the ladder). The ladder's R must be anchored to the
+        INITIAL stop, so we read it from the entry-context registry. Returns
+        ``0.0`` when unavailable (caller falls back to the current SL).
+        """
+        if self._initial_sl_reader is not None:
+            try:
+                return float(self._initial_sl_reader(ticket) or 0.0)
+            except Exception:  # noqa: BLE001 - fail-safe
+                return 0.0
+        try:
+            from review.entry_context import get_entry_context
+
+            ctx = get_entry_context(ticket)
+            return float(ctx.get("stop_loss") or 0.0)
+        except Exception:  # noqa: BLE001 - entry context is best-effort
+            return 0.0
+
     def _apply(self, ticket: int, symbol: str, sl: float, tp: Optional[float]) -> dict:
         if self._apply_sltp is not None:
             return self._apply_sltp(ticket, symbol, sl, tp) or {}
@@ -148,13 +182,36 @@ class TradeManager:
     # ------------------------------------------------------------------
     # Main entry
     # ------------------------------------------------------------------
+    def _live_config(self) -> SLTPConfig:
+        """Return the config to use for this call (live when a reader exists)."""
+        if self._config_reader is not None:
+            try:
+                live = self._config_reader()
+                if live is not None:
+                    return live
+            except Exception as exc:  # noqa: BLE001 - fall back to static config
+                logger.warning("Trade manager config read failed: %s", exc)
+        return self.config
+
+    def _is_enabled(self) -> bool:
+        """Return the master switch for this call (live when a reader exists)."""
+        if self._enabled_reader is not None:
+            try:
+                return bool(self._enabled_reader())
+            except Exception as exc:  # noqa: BLE001 - fail-closed to static config
+                logger.warning("Trade manager enabled read failed: %s", exc)
+        return bool(self.config.enabled)
+
     def manage(self) -> list[dict[str, Any]]:
         """Evaluate every open position and apply warranted stop changes.
 
         Returns the list of modifications applied this call (empty when none).
-        Never raises.
+        Never raises. When the master switch is OFF this is a no-op: nothing is
+        sent to the broker and existing stops are left untouched.
         """
         applied: list[dict[str, Any]] = []
+        if not self._is_enabled():
+            return applied
         try:
             positions = self._positions()
         except Exception as exc:  # noqa: BLE001 - fail-safe
@@ -202,6 +259,18 @@ class TradeManager:
 
         atr = self._atr(symbol)
 
+        # R (initial risk) must be the ORIGINAL distance |entry - initial SL|,
+        # NOT the current (possibly already-moved) SL — otherwise the ladder
+        # levels drift as the stop moves. Prefer the entry-context's stored
+        # initial SL; fall back to the position's current SL only when unknown.
+        initial_sl = self._initial_sl(ticket)
+        if not initial_sl:
+            initial_sl = current_sl
+        try:
+            initial_risk = abs(float(entry) - float(initial_sl)) if initial_sl else None
+        except (TypeError, ValueError):
+            initial_risk = None
+
         self._counts["evaluated"] += 1
         decision = decide_stop_loss(
             direction=side,
@@ -209,8 +278,8 @@ class TradeManager:
             current_sl=current_sl,
             current_price=price,
             atr=atr,
-            initial_risk=None,
-            config=self.config,
+            initial_risk=initial_risk,
+            config=self._live_config(),
         )
         if decision is None:
             self._counts["skipped"] += 1
@@ -250,8 +319,12 @@ class TradeManager:
     # ------------------------------------------------------------------
     def snapshot(self) -> dict[str, Any]:
         """Return counters + recent modifications for the dashboard."""
+        cfg = self._live_config()
         return {
-            "enabled": self.config.enabled,
+            "enabled": self._is_enabled(),
+            "breakeven_enabled": cfg.breakeven_enabled,
+            "tp1_lock_enabled": cfg.tp1_lock_enabled,
+            "trailing_enabled": cfg.trailing_enabled,
             "counts": dict(self._counts),
             "recent": list(self._recent),
         }

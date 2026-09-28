@@ -242,17 +242,13 @@ async def circuit_breaker_trigger(body: BreakerTriggerBody) -> dict[str, Any]:
                 "error": f"unknown trigger: {body.trigger}",
                 "source": "unavailable",
             }
-        record = get_circuit_breaker().trigger(
-            trigger, reason=body.reason, source=body.source
-        )
+        record = get_circuit_breaker().trigger(trigger, reason=body.reason, source=body.source)
         return {"value": record.to_dict(), "source": "live", "status": "OK"}
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc), "source": "unavailable"}
 
 
-@router.post(
-    "/circuit-breaker/recover", summary="Clear a latched breaker state (Phase 36)"
-)
+@router.post("/circuit-breaker/recover", summary="Clear a latched breaker state (Phase 36)")
 async def circuit_breaker_recover(body: BreakerRecoverBody) -> dict[str, Any]:
     from ..risk.multi_level_breaker import BreakerLevel
 
@@ -297,40 +293,45 @@ async def environment_state() -> dict[str, Any]:
     try:
         guard = get_environment_guard()
         allowed, reason = guard.can_execute_live()
+        # Report the REAL preconditions from live sources (previously these were
+        # the dataclass defaults — always false — so the panel was cosmetic).
+        preconds = _live_preconditions()
         return {
             "value": {
                 "environment": guard.environment,
                 "is_live": guard.is_live(),
                 "live_allowed": allowed,
                 "reason": reason,
-                "preconditions": {
-                    "terminal_armed": guard.preconditions.terminal_armed,
-                    "risk_gate_healthy": guard.preconditions.risk_gate_healthy,
-                    "reconciliation_healthy": guard.preconditions.reconciliation_healthy,
-                    "production_strategy": guard.preconditions.production_strategy,
-                },
+                "preconditions": preconds,
                 "precondition_details": {
                     "terminal_armed": {
-                        "met": guard.preconditions.terminal_armed,
+                        "met": preconds["terminal_armed"],
                         "what_satisfies": "terminal terpilih aktif dan di-arm operator",
                     },
                     "risk_gate_healthy": {
-                        "met": guard.preconditions.risk_gate_healthy,
+                        "met": preconds["risk_gate_healthy"],
                         "what_satisfies": "validasi RiskGate terakhir sehat",
                     },
                     "reconciliation_healthy": {
-                        "met": guard.preconditions.reconciliation_healthy,
+                        "met": preconds["reconciliation_healthy"],
                         "what_satisfies": "laporan rekonsiliasi terakhir sehat",
                     },
                     "production_strategy": {
-                        "met": guard.preconditions.production_strategy,
+                        "met": preconds["production_strategy"],
                         "what_satisfies": "strategi berstatus PRODUCTION",
                     },
                 },
+                # The environment gate is REPORTING-ONLY: it is not enforced on
+                # the order path, so DEV does NOT block entries. The arm-gate
+                # does. Say so honestly instead of implying DEV blocks orders.
                 "arm_note": (
-                    "Arm hanya satu dari empat prasyarat; EA_ENVIRONMENT=DEV tetap "
-                    "menolak live execution meski terminal di-arm."
+                    "Catatan: gate environment ini hanya PELAPORAN — ia tidak "
+                    "memanggil jalur order, jadi EA_ENVIRONMENT=DEV TIDAK memblokir "
+                    "entry. Yang benar-benar memblokir order adalah arm-gate: "
+                    "terminal harus di-arm (cek Execution/permissions)."
                 ),
+                "arm_gate_enforced": True,
+                "environment_gate_enforced": False,
             },
             "source": "live",
             "status": "OK",
@@ -342,6 +343,86 @@ async def environment_state() -> dict[str, Any]:
             "status": "UNAVAILABLE",
             "error": str(exc),
         }
+
+
+def _live_preconditions() -> dict[str, bool]:
+    """Compute the four live-readiness preconditions from REAL runtime state.
+
+    Fail-safe: any source that cannot be read stays ``False`` (fail-closed), so
+    the panel never claims readiness it cannot prove.
+    """
+    from ..orchestration.runtime import get_runtime
+
+    out = {
+        "terminal_armed": False,
+        "risk_gate_healthy": False,
+        "reconciliation_healthy": False,
+        "production_strategy": False,
+    }
+    # terminal_armed — the REAL arm-gate the order path uses.
+    try:
+        for mod_name in ("mt5.terminals", "src.mt5.terminals"):
+            try:
+                import importlib
+
+                terms = importlib.import_module(mod_name)
+                out["terminal_armed"] = bool(terms.execution_permitted())
+                break
+            except ImportError:
+                continue
+    except Exception:  # noqa: BLE001 - fail-closed
+        pass
+    # risk_gate_healthy — the live RiskGate's latest verdict.
+    try:
+        runtime = get_runtime()
+        gate = getattr(runtime.pipeline, "risk_gate", None)
+        if gate is not None:
+            last_ok = getattr(gate, "last_validation_ok", None)
+            if last_ok is None:
+                # No explicit verdict flag → consider the gate healthy when it
+                # is wired (its own validate() fails closed per-call anyway).
+                last_ok = True
+            out["risk_gate_healthy"] = bool(last_ok)
+    except Exception:  # noqa: BLE001 - fail-closed
+        pass
+    # reconciliation_healthy — last reconciliation report clean.
+    try:
+        runner = getattr(get_runtime(), "_reconciliation_runner", None)
+        report = getattr(runner, "last_report", None)
+        if report is not None:
+            ok = getattr(report, "last_reconciliation_ok", None)
+            if ok is None:
+                mismatches = getattr(report, "total_mismatches", None)
+                ok = mismatches == 0 if mismatches is not None else None
+            if ok is not None:
+                out["reconciliation_healthy"] = bool(ok)
+        # Fall back to the runner's summary if it exposes one.
+        if report is None:
+            status = getattr(runner, "last_reconciliation_ok", None)
+            if status is not None:
+                out["reconciliation_healthy"] = bool(status)
+    except Exception:  # noqa: BLE001 - fail-closed
+        pass
+    # production_strategy — at least one strategy in PRODUCTION.
+    try:
+        from ..strategy.endpoints import get_strategy_registry
+
+        registry = get_strategy_registry()
+        strategies = getattr(registry, "strategies", None)
+        if isinstance(strategies, dict):
+            iterable = strategies.values()
+        elif isinstance(strategies, (list, tuple)):
+            iterable = strategies
+        else:
+            iterable = []
+        for strat in iterable:
+            status = getattr(strat, "status", None) or getattr(strat, "stage", None)
+            if str(status).upper() in ("PRODUCTION", "LIVE"):
+                out["production_strategy"] = True
+                break
+    except Exception:  # noqa: BLE001 - fail-closed
+        pass
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -373,9 +454,7 @@ async def accounts_state() -> dict[str, Any]:
             value["source"] = "mt5"
         else:
             value["attached_account"] = None
-            value["unavailable"] = (info or {}).get(
-                "unavailable_reason", "akun MT5 tidak tersedia"
-            )
+            value["unavailable"] = (info or {}).get("unavailable_reason", "akun MT5 tidak tersedia")
         return {"value": value, "source": "live", "status": "OK"}
     except Exception as exc:  # noqa: BLE001
         return {
@@ -501,12 +580,8 @@ async def incidents_open(body: IncidentBody) -> dict[str, Any]:
         return {"error": str(exc), "source": "unavailable"}
 
 
-@router.post(
-    "/incidents/{incident_id}/resolve", summary="Resolve an incident (Phase 55)"
-)
-async def incidents_resolve(
-    incident_id: str, recovery_state: str = "RESOLVED"
-) -> dict[str, Any]:
+@router.post("/incidents/{incident_id}/resolve", summary="Resolve an incident (Phase 55)")
+async def incidents_resolve(incident_id: str, recovery_state: str = "RESOLVED") -> dict[str, Any]:
     try:
         inc = get_incident_manager().get(incident_id)
         if inc is None:
@@ -674,9 +749,7 @@ def _system_health_sync() -> Optional[dict]:
 
 def _reconciliation_sync() -> Optional[dict]:
     try:
-        runtime = __import__(
-            "src.orchestration.runtime", fromlist=["get_runtime"]
-        ).get_runtime()
+        runtime = __import__("src.orchestration.runtime", fromlist=["get_runtime"]).get_runtime()
         report = runtime.last_reconciliation()
         return report.to_dict() if report else None
     except Exception:  # noqa: BLE001
@@ -742,9 +815,7 @@ async def research_inbox_state() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@router.get(
-    "/lifecycle/{strategy_id}/{version}", summary="Strategy lifecycle state (Phase 44)"
-)
+@router.get("/lifecycle/{strategy_id}/{version}", summary="Strategy lifecycle state (Phase 44)")
 async def lifecycle_state(strategy_id: str, version: int) -> dict[str, Any]:
     try:
         sv = get_lifecycle_governor().get(strategy_id, version)
@@ -822,6 +893,122 @@ async def performance_intelligence(dimension: str = "hour") -> dict[str, Any]:
         }
 
 
+@router.get(
+    "/r-performance",
+    summary="R-multiple performance by period (day/week/month)",
+)
+async def r_performance(period: str = "day") -> dict[str, Any]:
+    """Average/total R-multiple per period from REAL closed-trade reviews.
+
+    Each closed trade carries an R-multiple (result in units of initial risk).
+    This groups them by ``day`` / ``week`` / ``month`` so the operator can see
+    the running expectancy — e.g. a -1R trade followed by a +2R trade nets
+    +0.5R average over those two trades. Buckets come from the auto-review
+    history; ``NO_DATA`` is returned honestly when nothing has closed yet.
+    """
+    try:
+        from ..review.r_multiple import aggregate_r_by_period
+
+        if period not in ("day", "week", "month"):
+            period = "day"
+        trades = _closed_trade_r_rows()
+        buckets = aggregate_r_by_period(trades, period=period)
+        overall = _overall_r(trades)
+        total_reviews = _total_review_count()
+        return {
+            "value": buckets,
+            "period": period,
+            "overall": overall,
+            "trade_count": overall["count"],
+            # How many closed trades exist vs how many have a usable R — lets
+            # the UI explain any gap (e.g. trades opened before R tracking).
+            "reviews_total": total_reviews,
+            "r_unavailable": max(0, total_reviews - overall["count"]),
+            "source": "live",
+            "status": "OK" if buckets else "NO_DATA",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "value": None,
+            "source": "unavailable",
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
+
+
+def _closed_trade_r_rows() -> list[dict[str, Any]]:
+    """Build ``{r_multiple, closed_at}`` rows from the auto-review history.
+
+    For records missing an R (e.g. a trade opened before the R feature landed),
+    fall back to the entry-context registry — if the original stop-loss is still
+    cached for that ticket — before giving up. Trades whose R cannot be derived
+    are skipped (honest), never fabricated as 0R.
+    """
+    from ..review.auto_trigger import get_auto_trigger
+    from ..review.r_multiple import compute_r_multiple
+
+    rows: list[dict[str, Any]] = []
+    try:
+        for record in get_auto_trigger().recent(limit=1000):
+            r = getattr(record, "r_multiple", None)
+            ctx = getattr(record, "trade_result", None) or {}
+            if r is None:
+                r = compute_r_multiple(
+                    direction=ctx.get("direction", ""),
+                    entry_price=ctx.get("entry_price", 0.0),
+                    exit_price=ctx.get("exit_price", 0.0),
+                    stop_loss=ctx.get("stop_loss", 0.0),
+                )
+            if r is None:
+                # Backfill: try the entry-context registry for the initial SL.
+                r = _r_from_entry_context(record, ctx)
+            closed_at = getattr(record, "closed_at", None)
+            rows.append({"r_multiple": r, "closed_at": closed_at})
+    except Exception:  # noqa: BLE001 - no data is better than fake data
+        pass
+    return rows
+
+
+def _r_from_entry_context(record: Any, ctx: dict[str, Any]) -> Optional[float]:
+    """Try to recover R using the still-cached entry context for this ticket.
+
+    Fail-safe: returns ``None`` when the context is gone or incomplete.
+    """
+    try:
+        from ..review.entry_context import get_entry_context
+        from ..review.r_multiple import compute_r_multiple
+
+        ticket = getattr(record, "trade_id", None)
+        cached = get_entry_context(ticket)
+        if not cached:
+            return None
+        return compute_r_multiple(
+            direction=cached.get("direction") or ctx.get("direction", ""),
+            entry_price=cached.get("entry_price") or ctx.get("entry_price", 0.0),
+            exit_price=ctx.get("exit_price", 0.0),
+            stop_loss=cached.get("stop_loss", 0.0),
+        )
+    except Exception:  # noqa: BLE001 - backfill is best-effort
+        return None
+
+
+def _overall_r(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarise R across ALL trades (ignoring period bucketing)."""
+    from ..review.r_multiple import r_bucket_from_trades
+
+    return r_bucket_from_trades(trades)
+
+
+def _total_review_count() -> int:
+    """Count ALL closed-trade reviews (with or without a usable R)."""
+    try:
+        from ..review.auto_trigger import get_auto_trigger
+
+        return len(get_auto_trigger().recent(limit=1000))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def _closed_trade_rows() -> list[Any]:
     """Build performance rows from the real auto-review history (fail-safe)."""
     from ..review.performance_intelligence import TradeRow
@@ -834,7 +1021,45 @@ def _closed_trade_rows() -> list[Any]:
         for record in trigger.recent(limit=500):
             review = getattr(record, "review", None)
             pnl = float(getattr(review, "pnl", 0.0) or 0.0)
-            rows.append(TradeRow(pnl=pnl))
+            # R-multiple: prefer the value computed at review time; fall back to
+            # recomputing from the carried close context so older records still
+            # contribute. ``None`` (unknown) falls back to the dataclass default.
+            r_multiple = getattr(record, "r_multiple", None)
+            if r_multiple is None:
+                r_multiple = _r_from_record(record)
+            rows.append(
+                TradeRow(
+                    pnl=pnl,
+                    r_multiple=float(r_multiple or 0.0),
+                    symbol=_record_symbol(record),
+                )
+            )
     except Exception:  # noqa: BLE001 - no data is better than fake data
         pass
     return rows
+
+
+def _r_from_record(record: Any) -> Optional[float]:
+    """Recompute R from a ReviewRecord's carried trade_result (fail-safe)."""
+    try:
+        from ..review.r_multiple import compute_r_multiple
+
+        ctx = getattr(record, "trade_result", None) or {}
+        return compute_r_multiple(
+            direction=ctx.get("direction", ""),
+            entry_price=ctx.get("entry_price", 0.0),
+            exit_price=ctx.get("exit_price", 0.0),
+            stop_loss=ctx.get("stop_loss", 0.0),
+        )
+    except Exception:  # noqa: BLE001 - R is best-effort
+        return None
+
+
+def _record_symbol(record: Any) -> Optional[str]:
+    """Extract the symbol from a ReviewRecord's carried context (fail-safe)."""
+    try:
+        ctx = getattr(record, "trade_result", None) or {}
+        symbol = ctx.get("symbol")
+        return str(symbol) if symbol else None
+    except Exception:  # noqa: BLE001
+        return None

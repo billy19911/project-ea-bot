@@ -14,6 +14,24 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+# SL/TP ATR multipliers — SINGLE SOURCE OF TRUTH for the entry SL/TP.
+#
+# SL = 1.5 x ATR (risk R). The order's TP is placed at **TPmax = 3R** so the
+# position has room to run through the full ladder (TP1=1R, TP2=2R, TPmax=3R);
+# the stop-ladder (``execution.sltp_manager``) protects profit rung by rung and
+# the runner is trailed after TP2. TPmax = 3R = 4.5 x ATR.
+#
+# These MUST stay in sync with ``risk.money_management.MoneyManager``
+# ( ``sl_multiplier=1.5`` ) and ``trading.level_plan`` ( ``SL_ATR_MULT=1.5`` /
+# ``TPMAX_R=3.0`` ). Previously this module used 2.0/4.0 while the completion
+# path used 1.5/3.0, so a trade whose SL came from synthesis and whose TP was
+# filled by the completion path ended up with mismatched distances (the "TP
+# terlihat beda" bug).
+SL_ATR_MULT: float = 1.5
+# Take-profit target = TPmax (3R) expressed in ATR: SL_ATR_MULT * 3R = 4.5 ATR.
+TPMAX_R: float = 3.0
+TP_ATR_MULT: float = SL_ATR_MULT * TPMAX_R  # 4.5 — TP placed at the runner target
+
 
 class TradeDirection(str, Enum):
     """Trade direction enumeration."""
@@ -350,11 +368,11 @@ class AgentSynthesizer:
             atr = market_state.get("atr")
             if close and atr and atr > 0:
                 if direction == TradeDirection.BUY:
-                    target_sl = round(close - atr * 2.0, 5)
-                    target_tp = round(close + atr * 4.0, 5)  # 2:1 R:R
+                    target_sl = round(close - atr * SL_ATR_MULT, 5)
+                    target_tp = round(close + atr * TP_ATR_MULT, 5)  # 2:1 R:R
                 elif direction == TradeDirection.SELL:
-                    target_sl = round(close + atr * 2.0, 5)
-                    target_tp = round(close - atr * 4.0, 5)
+                    target_sl = round(close + atr * SL_ATR_MULT, 5)
+                    target_tp = round(close - atr * TP_ATR_MULT, 5)
 
         # Determine escalation
         requires_escalation = self.check_escalation(

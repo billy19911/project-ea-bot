@@ -135,6 +135,36 @@ def test_on_review_callback_failure_is_swallowed():
 
 
 # ---------------------------------------------------------------------------
+# R-multiple
+# ---------------------------------------------------------------------------
+
+
+def test_r_multiple_computed_from_stop_loss():
+    trigger = ReviewAutoTrigger()
+    trade = _closed_trade("T-R", pnl=200.0)
+    trade.update({"entry_price": 2000.0, "close_price": 2020.0, "stop_loss": 1990.0})
+    record = trigger.on_position_closed(trade)
+    assert record is not None
+    assert record.r_multiple == 2.0
+    assert record.trade_result["stop_loss"] == 1990.0
+
+
+def test_r_multiple_none_without_stop_loss():
+    trigger = ReviewAutoTrigger()
+    record = trigger.on_position_closed(_closed_trade("T-NO-R"))
+    assert record is not None
+    assert record.r_multiple is None
+
+
+def test_review_record_carries_closed_at():
+    trigger = ReviewAutoTrigger()
+    record = trigger.on_position_closed(_closed_trade("T-TS"))
+    assert record is not None
+    assert record.closed_at is not None
+    assert "closed_at" in record.to_dict()
+
+
+# ---------------------------------------------------------------------------
 # Default trigger management
 # ---------------------------------------------------------------------------
 

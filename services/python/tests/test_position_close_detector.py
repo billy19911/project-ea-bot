@@ -116,6 +116,38 @@ def test_detector_fires_review_auto_trigger() -> None:
     assert records[0].trade_id == "42"
 
 
+def test_close_record_carries_original_stop_loss() -> None:
+    """The entry context's ORIGINAL stop-loss is bridged into the close record
+    so the review can compute an honest R-multiple."""
+    from review.auto_trigger import ReviewAutoTrigger
+    from review.entry_context import clear_entry_contexts, remember_entry_context
+
+    clear_entry_contexts()
+    try:
+        records: list = []
+        trigger = ReviewAutoTrigger(on_review=lambda rec: records.append(rec))
+        detector = PositionCloseDetector(on_close=trigger.on_position_closed)
+
+        # Entry registers the original SL keyed by ticket.
+        remember_entry_context(
+            99,
+            {
+                "symbol": "XAUUSD",
+                "entry_price": 2000.0,
+                "stop_loss": 1990.0,
+            },
+        )
+        detector.observe([{"ticket": 99, "symbol": "XAUUSD", "side": "BUY", "price_open": 2000.0}])
+        closed = detector.observe([])
+
+        assert closed[0]["stop_loss"] == 1990.0
+        assert len(records) == 1
+        # close_price falls back to price_open (2000) → exit == entry → 0R.
+        assert records[0].r_multiple == 0.0
+    finally:
+        clear_entry_contexts()
+
+
 if __name__ == "__main__":  # pragma: no cover
     import pytest
 

@@ -106,8 +106,10 @@ def test_generate_sell_proposal_calculates_atr_targets():
 
     assert result.proposal is not None
     assert result.proposal.direction == TradeDirection.SELL
-    assert result.proposal.target_sl == 1.22
-    assert result.proposal.target_tp == 1.16
+    # SL = close + 1.5×ATR = 1.2 + 0.015 = 1.215
+    assert result.proposal.target_sl == 1.215
+    # TP = close - 4.5×ATR (TPmax = 3R, R = 1.5×ATR) = 1.2 - 0.045 = 1.155
+    assert result.proposal.target_tp == 1.155
 
 
 def test_generate_hold_proposal_for_tied_directional_signals():

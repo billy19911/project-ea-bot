@@ -60,13 +60,9 @@ class _ApproveGate:
     def __init__(self) -> None:
         self.seen = None
 
-    def validate_proposal(
-        self, proposal, account_state, current_positions, market_info
-    ):
+    def validate_proposal(self, proposal, account_state, current_positions, market_info):
         self.seen = proposal
-        return GateDecision(
-            approved=True, reason="ok", checks_passed={}, metrics_snapshot={}
-        )
+        return GateDecision(approved=True, reason="ok", checks_passed={}, metrics_snapshot={})
 
 
 class _RecordingEngine:
@@ -148,7 +144,11 @@ def test_force_risk_sizing_respects_lot_cap() -> None:
 
 
 def test_default_mode_never_overrides_provided_size() -> None:
-    pipeline, gate, _ = _pipeline(force_risk_sizing=False, default_risk_pct=1.0)
+    # A high explicit cap so this test isolates "sizing does not recompute a
+    # provided size" from the per-trade cap (which is tested separately).
+    pipeline, gate, _ = _pipeline(
+        force_risk_sizing=False, default_risk_pct=1.0, max_lot_per_trade=10.0
+    )
     pipeline.run({"event_type": "BREAKOUT", "symbol": "EURUSD"}, _context())
 
     assert gate.seen is not None
@@ -160,9 +160,7 @@ def test_default_mode_never_overrides_provided_size() -> None:
 # ---------------------------------------------------------------------------
 def test_single_entry_blocks_when_own_position_open() -> None:
     pipeline, _, engine = _pipeline(single_entry_policy=True, entry_magic=70000)
-    context = _context(
-        current_positions=[{"ticket": 555, "symbol": "EURUSD", "magic": 70000}]
-    )
+    context = _context(current_positions=[{"ticket": 555, "symbol": "EURUSD", "magic": 70000}])
 
     result = pipeline.run({"event_type": "BREAKOUT", "symbol": "EURUSD"}, context)
 
@@ -177,9 +175,7 @@ def test_single_entry_blocks_when_own_position_open() -> None:
 
 def test_single_entry_allows_foreign_magic() -> None:
     pipeline, _, engine = _pipeline(single_entry_policy=True, entry_magic=70000)
-    context = _context(
-        current_positions=[{"ticket": 777, "symbol": "EURUSD", "magic": 999999}]
-    )
+    context = _context(current_positions=[{"ticket": 777, "symbol": "EURUSD", "magic": 999999}])
 
     result = pipeline.run({"event_type": "BREAKOUT", "symbol": "EURUSD"}, context)
 
@@ -189,9 +185,7 @@ def test_single_entry_allows_foreign_magic() -> None:
 
 def test_single_entry_off_executes_normally() -> None:
     pipeline, _, engine = _pipeline(single_entry_policy=False, entry_magic=70000)
-    context = _context(
-        current_positions=[{"ticket": 555, "symbol": "EURUSD", "magic": 70000}]
-    )
+    context = _context(current_positions=[{"ticket": 555, "symbol": "EURUSD", "magic": 70000}])
 
     result = pipeline.run({"event_type": "BREAKOUT", "symbol": "EURUSD"}, context)
 
@@ -216,9 +210,7 @@ def test_apply_to_runtime_pushes_risk_and_lot_knobs() -> None:
     original_risk = runtime.pipeline.default_risk_pct
     original_lot = runtime.pipeline.max_lot_per_trade
     try:
-        pushed = _apply_to_runtime(
-            {"risk_per_trade_pct": 2.0, "max_lot_per_trade": 0.2}
-        )
+        pushed = _apply_to_runtime({"risk_per_trade_pct": 2.0, "max_lot_per_trade": 0.2})
         assert pushed["risk_per_trade_pct"] == 2.0
         assert pushed["max_lot_per_trade"] == 0.2
         assert runtime.pipeline.default_risk_pct == 2.0
@@ -226,6 +218,63 @@ def test_apply_to_runtime_pushes_risk_and_lot_knobs() -> None:
     finally:
         runtime.pipeline.default_risk_pct = original_risk
         runtime.pipeline.max_lot_per_trade = original_lot
+
+
+def test_one_failing_knob_does_not_abort_the_rest(monkeypatch) -> None:
+    """A failure applying one knob must NOT skip the money-safety caps.
+
+    Regression: `_apply_to_runtime` used to bail on the first exception, so a
+    trend-sampler failure left `max_lot_per_trade` at its unsafe default →
+    a real 1.0-lot order slipped past a 0.05 cap.
+    """
+    from src.orchestration.runtime import get_runtime
+    from src.system import endpoints
+
+    runtime = get_runtime()
+    original_lot = runtime.pipeline.max_lot_per_trade
+    try:
+        # Force the trend sampler block to explode.
+        def _boom():
+            raise RuntimeError("sampler down")
+
+        monkeypatch.setattr(endpoints, "get_trend_sampler", _boom)
+        pushed = endpoints._apply_to_runtime(
+            {
+                "trend_sample_interval": 30.0,  # will fail
+                "max_lot_per_trade": 0.05,  # must still apply
+            }
+        )
+        assert runtime.pipeline.max_lot_per_trade == 0.05
+        assert pushed["max_lot_per_trade"] == 0.05
+        assert "trend_sample_interval" in pushed.get("_errors", {})
+    finally:
+        runtime.pipeline.max_lot_per_trade = original_lot
+
+
+def test_build_pipeline_reads_cap_from_store(monkeypatch) -> None:
+    """The production pipeline must be constructed with the store's cap.
+
+    Regression: `_build_pipeline` used to ignore the store and use the code
+    default (1.0), so the operator's 0.05 cap never took effect.
+    """
+    from src.orchestration.runtime import OrchestrationRuntime
+    from src.system.settings_store import get_settings_store
+
+    pipeline = OrchestrationRuntime._build_pipeline()
+    # The store currently holds a small cap; the pipeline must match it (not 1.0).
+    store_cap = float(get_settings_store().snapshot().values.get("max_lot_per_trade", 0.0))
+    assert pipeline.max_lot_per_trade == store_cap
+    assert pipeline.max_lot_per_trade <= 0.05 + 1e-9
+
+
+def test_oversized_size_is_capped_end_to_end() -> None:
+    """A proposal carrying a huge size is clamped to the pipeline cap."""
+    pipeline, _, _ = _pipeline()
+    pipeline.max_lot_per_trade = 0.05
+    # Force a huge size then run the cap (the money-manager path).
+    proposal = {"size": 25.0}
+    pipeline._cap_lot(proposal)
+    assert proposal["size"] == 0.05
 
 
 # ---------------------------------------------------------------------------
@@ -236,9 +285,7 @@ def test_agent_results_surface_on_result() -> None:
     result = pipeline.run({"event_type": "BREAKOUT", "symbol": "EURUSD"}, _context())
 
     payload = result.to_dict()
-    assert payload["agent_results"] == {
-        "technical": {"signal": "BUY", "confidence": 0.9}
-    }
+    assert payload["agent_results"] == {"technical": {"signal": "BUY", "confidence": 0.9}}
     assert payload["supervisor_summary"] == "committee agrees"
 
 

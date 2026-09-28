@@ -323,6 +323,28 @@ async def lifespan(app: FastAPI):
         from .system.endpoints import _apply_to_runtime
         from .system.settings_store import get_settings_store
 
+        # Seed the SLTP knobs from the SLTP_* environment so the very first run
+        # (no runtime_settings.json yet) honours the operator's .env, while a
+        # value the operator saved from the dashboard always wins afterwards.
+        # getattr guards against a missing/renamed field: a single absent attr
+        # must NOT abort seeding (and the later _apply_to_runtime) entirely.
+        store = get_settings_store()
+        seeded = {
+            "sltp_management_enabled": (
+                1.0 if getattr(settings, "sltp_management_enabled", False) else 0.0
+            ),
+            "sltp_breakeven_enabled": (
+                1.0 if getattr(settings, "sltp_breakeven_enabled", True) else 0.0
+            ),
+            "sltp_progressive_enabled": (
+                1.0 if getattr(settings, "sltp_tp1_lock_enabled", True) else 0.0
+            ),
+            "sltp_trailing_enabled": (
+                1.0 if getattr(settings, "sltp_trailing_enabled", True) else 0.0
+            ),
+        }
+        store.seed_missing(seeded)
+
         stored = get_settings_store().snapshot().values
         pushed = _apply_to_runtime(stored)
         logger.info("Runtime settings applied at startup: %s", pushed)
@@ -497,6 +519,20 @@ async def lifespan(app: FastAPI):
             if restored:
                 logger.info("Re-attached to saved terminal: %s", restored)
             terminal_manager.sync_selection_from_attached()
+
+            # Arm-state is IN-MEMORY and always starts OFF after a restart. Make
+            # this loud so an operator who just restarted is not left wondering
+            # why orders/SL modifications are "stuck" (fail-closed 403s). This
+            # is the single most common post-restart gotcha.
+            try:
+                if not terminal_manager.is_execution_armed():
+                    logger.warning(
+                        "EXECUTION IS DISARMED after startup — no orders or SL/TP "
+                        "modifications will reach the broker until a terminal is "
+                        "armed in the dashboard (Execution/Accounts → Arm)."
+                    )
+            except Exception:  # noqa: BLE001 - warning is best-effort
+                pass
         logger.info("MT5 live data mode startup: %s", live_data_started)
 
     yield

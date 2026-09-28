@@ -200,33 +200,39 @@ def _build_position_monitor(
 
 
 def _build_trade_manager() -> Optional[Any]:
-    """Build the dynamic SL/TP trade manager from settings (fail-safe).
+    """Build the dynamic SL/TP trade manager (fail-safe).
 
-    Returns ``None`` when ``SLTP_MANAGEMENT_ENABLED`` is false (the default), so
-    the runtime performs no stop management until explicitly opted in. The ATR
-    reader pulls the same feed-loop ATR the entry used, and the apply hook uses
-    the execution engine's arm-gated ``modify_position_sltp``.
+    The manager is always constructed so the operator can toggle dynamic SL
+    management from the dashboard (Settings → ``sltp_*`` knobs) without a
+    restart. The master switch (``sltp_management_enabled``) is read LIVE on
+    every cycle; when OFF, :meth:`TradeManager.manage` is a no-op and nothing is
+    sent to the broker. The ``SLTP_*`` environment values seed the store
+    defaults at startup (see ``main`` lifespan) and remain the fallback when the
+    store is unavailable.
+
+    Returns ``None`` only when wiring itself fails (e.g. imports unavailable).
     """
     try:
         from config import settings
         from execution.sltp_manager import SLTPConfig
         from monitoring.trade_manager import TradeManager
 
-        if not getattr(settings, "sltp_management_enabled", False):
-            return None
+        def _env_config() -> SLTPConfig:
+            return SLTPConfig(
+                enabled=bool(getattr(settings, "sltp_management_enabled", False)),
+                breakeven_enabled=bool(getattr(settings, "sltp_breakeven_enabled", True)),
+                bep_buffer_r=float(getattr(settings, "sltp_bep_buffer_r", 0.1)),
+                tp1_lock_enabled=bool(getattr(settings, "sltp_tp1_lock_enabled", True)),
+                tp1_trigger_r=1.0,
+                tp1_lock_r=1.0,
+                trailing_enabled=bool(getattr(settings, "sltp_trailing_enabled", True)),
+                tp2_trigger_r=2.0,
+                trail_atr_factor=float(getattr(settings, "sltp_trail_atr_factor", 1.5)),
+                min_move_r=float(getattr(settings, "sltp_min_move_r", 0.05)),
+            )
 
-        cfg = SLTPConfig(
-            enabled=True,
-            breakeven_enabled=bool(getattr(settings, "sltp_breakeven_enabled", True)),
-            bep_trigger_r=float(getattr(settings, "sltp_bep_trigger_r", 1.0)),
-            bep_lock_r=float(getattr(settings, "sltp_bep_lock_r", 0.0)),
-            progressive_enabled=bool(getattr(settings, "sltp_progressive_enabled", True)),
-            tp1_trigger_r=1.0,
-            tp1_lock_r=float(getattr(settings, "sltp_tp1_lock_r", 0.5)),
-            trailing_enabled=bool(getattr(settings, "sltp_trailing_enabled", True)),
-            trail_atr_factor=float(getattr(settings, "sltp_trail_atr_factor", 1.5)),
-            min_move_r=float(getattr(settings, "sltp_min_move_r", 0.05)),
-        )
+        # Static config from env is the fallback (store unavailable / tests).
+        base = _env_config()
 
         def _atr_reader(symbol: str) -> float:
             """Return the feed-loop ATR for the symbol (0.0 when unavailable)."""
@@ -247,10 +253,51 @@ def _build_trade_manager() -> Optional[Any]:
 
             return ExecutionEngine().modify_position_sltp(ticket, symbol, sl, tp)
 
+        def _store_values() -> Optional[dict[str, float]]:
+            """Read the runtime settings store (None when unavailable)."""
+            try:
+                from system.settings_store import get_settings_store
+
+                return get_settings_store().snapshot().values
+            except Exception as exc:  # noqa: BLE001 - live knob is best-effort
+                logger.warning("SLTP settings store unavailable: %s", exc)
+                return None
+
+        def _enabled_reader() -> bool:
+            values = _store_values()
+            if values is None:
+                return bool(base.enabled)
+            return bool(values.get("sltp_management_enabled", 1.0 if base.enabled else 0.0))
+
+        def _config_reader() -> Optional[SLTPConfig]:
+            values = _store_values()
+            if values is None:
+                return base
+            return SLTPConfig(
+                enabled=True,
+                breakeven_enabled=bool(
+                    values.get("sltp_breakeven_enabled", 1.0 if base.breakeven_enabled else 0.0)
+                ),
+                bep_buffer_r=base.bep_buffer_r,
+                tp1_lock_enabled=bool(
+                    values.get("sltp_progressive_enabled", 1.0 if base.tp1_lock_enabled else 0.0)
+                ),
+                tp1_trigger_r=base.tp1_trigger_r,
+                tp1_lock_r=base.tp1_lock_r,
+                trailing_enabled=bool(
+                    values.get("sltp_trailing_enabled", 1.0 if base.trailing_enabled else 0.0)
+                ),
+                tp2_trigger_r=base.tp2_trigger_r,
+                trail_atr_factor=base.trail_atr_factor,
+                min_move_r=base.min_move_r,
+            )
+
         return TradeManager(
-            config=cfg,
+            config=base,
             atr_reader=_atr_reader,
             apply_sltp=_apply,
+            enabled_reader=_enabled_reader,
+            config_reader=_config_reader,
         )
     except Exception as exc:  # noqa: BLE001 - management must never block wiring
         logger.warning("Trade manager not wired: %s", exc)
@@ -435,9 +482,12 @@ class OrchestrationRuntime:
             scheduler=self.scheduler,
         )
         # Dynamic stop-loss management (BEP / progressive / trailing) applied to
-        # open positions once per cycle. Opt-in via SLTP_MANAGEMENT_ENABLED;
-        # disabled by default so behaviour is unchanged. The manager is
-        # arm-gated/fail-closed inside the execution engine.
+        # open positions once per cycle. Always wired; the master switch is read
+        # LIVE from the runtime settings store each cycle (Settings →
+        # sltp_management_enabled), so the operator can toggle it from the
+        # dashboard without a restart. When OFF it is a no-op. The manager is
+        # arm-gated/fail-closed inside the execution engine, so an unarmed
+        # terminal never reaches the broker.
         self.trade_manager = _build_trade_manager()
 
     @property
@@ -604,6 +654,35 @@ class OrchestrationRuntime:
             htf_min_strength = float(getattr(_settings, "multi_timeframe_min_strength", 0.0) or 0.0)
         except Exception:  # noqa: BLE001 - filter stays off on any error
             htf_filter_enabled = False
+
+        # Risk/size knobs — read from the runtime settings store at CONSTRUCT
+        # time so the pipeline is correct even if the later `_apply_to_runtime`
+        # push is skipped (that path is best-effort and can bail early). The
+        # store is the operator's source of truth; env/defaults are the fallback.
+        # Getting this wrong is how a 1.0-lot order slipped past a 0.05 cap.
+        default_risk_pct = 1.0
+        max_lot_per_trade = 0.05
+        try:
+            from system.settings_store import get_settings_store
+
+            values = get_settings_store().snapshot().values
+            default_risk_pct = float(
+                values.get("risk_per_trade_pct", default_risk_pct) or default_risk_pct
+            )
+            max_lot_per_trade = float(
+                values.get("max_lot_per_trade", max_lot_per_trade) or max_lot_per_trade
+            )
+        except Exception as exc:  # noqa: BLE001 - fall back to safe defaults
+            logger.warning("Pipeline size knobs not read from store: %s", exc)
+        # Absolute safety floor: a non-positive/absurd cap must never disable the
+        # cap. Clamp to (0, 100].
+        if not (0 < max_lot_per_trade <= 100):
+            logger.warning(
+                "Invalid max_lot_per_trade=%s from store — using safe default 0.05",
+                max_lot_per_trade,
+            )
+            max_lot_per_trade = 0.05
+
         return TradingPipeline(
             supervisor=supervisor,
             risk_gate=risk_gate,
@@ -621,6 +700,11 @@ class OrchestrationRuntime:
             htf_min_strength=htf_min_strength,
             signal_registry=get_signal_registry(),
             strategy_config_provider=_strategy_config_provider,
+            default_risk_pct=default_risk_pct,
+            max_lot_per_trade=max_lot_per_trade,
+            # Always recompute the lot from the operator's risk knob (the lot is
+            # then capped) so a stale/foreign proposal size can never win.
+            force_risk_sizing=True,
         )
 
     def run_cycle(

@@ -372,48 +372,98 @@ class SettingsPatch(BaseModel):
     llm_advisor_enabled: bool | None = None
     risk_per_trade_pct: float | None = None
     max_lot_per_trade: float | None = None
+    sltp_management_enabled: bool | None = None
+    sltp_breakeven_enabled: bool | None = None
+    sltp_progressive_enabled: bool | None = None
+    sltp_trailing_enabled: bool | None = None
 
 
 def _apply_to_runtime(values: dict[str, float]) -> dict[str, Any]:
     """Push stored values into the live objects. Returns what was applied.
 
-    Both targets are plain mutable attributes on already-constructed objects:
-      * ``runtime.pipeline.supervisor.token_budget``
-      * ``runtime.scheduler.poll_interval``
-    A failure here is reported, never silently swallowed.
+    Every knob is applied in its OWN try/except so a failure in one never
+    aborts the rest — a silent early bail here once let ``max_lot_per_trade``
+    keep its unsafe default (a real 1.0-lot order slipped past a 0.05 cap).
+    Failures are logged and reported under ``_errors`` rather than swallowed.
     """
     applied: dict[str, Any] = {}
+    errors: dict[str, str] = {}
     runtime = get_runtime()
-    if "supervisor_token_budget" in values:
-        supervisor = getattr(runtime.pipeline, "supervisor", None)
-        if supervisor is not None and hasattr(supervisor, "token_budget"):
-            supervisor.token_budget = int(values["supervisor_token_budget"])
-            applied["supervisor_token_budget"] = supervisor.token_budget
-    if "scheduler_poll_interval" in values:
-        scheduler = getattr(runtime, "scheduler", None)
-        if scheduler is not None and hasattr(scheduler, "poll_interval"):
-            scheduler.poll_interval = max(0.001, float(values["scheduler_poll_interval"]))
-            applied["scheduler_poll_interval"] = scheduler.poll_interval
-    if "trend_sample_interval" in values:
-        sampler = get_trend_sampler()
-        sampler.interval = float(values["trend_sample_interval"])
-        applied["trend_sample_interval"] = sampler.interval
-    if "risk_per_trade_pct" in values:
-        pipeline = getattr(runtime, "pipeline", None)
-        if pipeline is not None and hasattr(pipeline, "default_risk_pct"):
-            pipeline.default_risk_pct = float(values["risk_per_trade_pct"])
-            applied["risk_per_trade_pct"] = pipeline.default_risk_pct
+
+    def _push(key: str, fn: Any) -> None:
+        try:
+            result = fn()
+            if result is not None:
+                applied[key] = result
+        except Exception as exc:  # noqa: BLE001 - one knob never blocks others
+            errors[key] = str(exc)
+            logger.warning("Could not apply setting %s: %s", key, exc)
+
+    def _pipeline() -> Any:
+        return getattr(runtime, "pipeline", None)
+
+    def _set_attr(obj: Any, attr: str, value: Any) -> Any:
+        if obj is not None and hasattr(obj, attr):
+            setattr(obj, attr, value)
+            return value
+        return None
+
+    # Size/risk knobs FIRST — these are the money-safety caps.
     if "max_lot_per_trade" in values:
-        pipeline = getattr(runtime, "pipeline", None)
-        if pipeline is not None and hasattr(pipeline, "max_lot_per_trade"):
-            pipeline.max_lot_per_trade = float(values["max_lot_per_trade"])
-            applied["max_lot_per_trade"] = pipeline.max_lot_per_trade
+        cap = float(values["max_lot_per_trade"])
+        if not (0 < cap <= 100):
+            cap = 0.05  # fail-safe floor
+        _push("max_lot_per_trade", lambda: _set_attr(_pipeline(), "max_lot_per_trade", cap))
+    if "risk_per_trade_pct" in values:
+        _push(
+            "risk_per_trade_pct",
+            lambda: _set_attr(_pipeline(), "default_risk_pct", float(values["risk_per_trade_pct"])),
+        )
+    if "supervisor_token_budget" in values:
+        _push(
+            "supervisor_token_budget",
+            lambda: _set_attr(
+                getattr(_pipeline(), "supervisor", None),
+                "token_budget",
+                int(values["supervisor_token_budget"]),
+            ),
+        )
+    if "scheduler_poll_interval" in values:
+        _push(
+            "scheduler_poll_interval",
+            lambda: _set_attr(
+                getattr(runtime, "scheduler", None),
+                "poll_interval",
+                max(0.001, float(values["scheduler_poll_interval"])),
+            ),
+        )
+    if "trend_sample_interval" in values:
+        _push(
+            "trend_sample_interval",
+            lambda: setattr(get_trend_sampler(), "interval", float(values["trend_sample_interval"]))
+            or get_trend_sampler().interval,
+        )
     if "llm_advisor_enabled" in values:
         # The advisor reads the store directly on every call, so the value is
-        # already live; report it so the UI can confirm what was applied.
-        from ..llm.advisor import get_llm_advisor
-
-        applied["llm_advisor_enabled"] = get_llm_advisor().status()["enabled"]
+        # already live; report it so the UI can confirm.
+        _push(
+            "llm_advisor_enabled",
+            lambda: __import__("src.llm.advisor", fromlist=["get_llm_advisor"])
+            .get_llm_advisor()
+            .status()["enabled"],
+        )
+    # SLTP knobs: the trade manager reads the store live each cycle, so the
+    # value is already in effect; report it so the UI can confirm.
+    for sltp_key in (
+        "sltp_management_enabled",
+        "sltp_breakeven_enabled",
+        "sltp_progressive_enabled",
+        "sltp_trailing_enabled",
+    ):
+        if sltp_key in values:
+            applied[sltp_key] = bool(values[sltp_key])
+    if errors:
+        applied["_errors"] = errors
     return applied
 
 
@@ -438,13 +488,22 @@ def _risk_limits_snapshot() -> dict[str, Any]:
     engine = getattr(gate, "_engine", None)
     thresholds = getattr(engine, "_thresholds", None)
     if isinstance(thresholds, dict):
+        # ``max_position_size`` is defined on RiskEngine but NEVER enforced by
+        # the gate (``check_position_size`` has no caller on the order path).
+        # Showing it read-only implies it is active — it is not — so we omit it
+        # to keep the "Batas risiko" panel honest. Only limits the gate really
+        # checks are shown.
+        _not_enforced = {"max_position_size"}
         for key, value in thresholds.items():
             # RiskThreshold.MAX_DRAWDOWN -> "max_drawdown"
             name = getattr(key, "name", None)
             if name is None:
                 name = getattr(key, "value", None)
             if isinstance(name, str):
-                limits[name.lower()] = value
+                lowered = name.lower()
+                if lowered in _not_enforced:
+                    continue
+                limits[lowered] = value
 
     return {"available": True, "limits": limits}
 
@@ -637,4 +696,214 @@ async def observability_trend(limit: int = 0) -> dict[str, Any]:
         "interval_s": sampler.interval,
         "sampling": sampler.running,
         "source": "live",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics — one actionable "what needs attention" report
+# ---------------------------------------------------------------------------
+
+
+@router.get("/diagnostics", summary="Aggregated operational diagnostics")
+async def diagnostics() -> dict[str, Any]:
+    """Aggregate REAL health signals into a single actionable report.
+
+    Answers "apa yang perlu diperhatikan?" in one call, instead of the operator
+    having to visit many endpoints. Every check is read-only and fail-safe: a
+    source that cannot be read is reported as ``unknown`` (never a fake OK).
+
+    Checks:
+      * feed       — market data health (tick/bar freshness) for key symbols.
+      * sltp       — dynamic SL manager errors (e.g. ARM-gate 403s).
+      * r_tracking — closed trades vs trades with a usable R-multiple.
+      * execution  — terminal arm state (the REAL order gate).
+      * environment — DEV/LIVE reporting gate (informational only).
+    """
+    checks: list[dict[str, Any]] = []
+    runtime = get_runtime()
+
+    # 1) Market feed health for the configured symbols.
+    try:
+        from ..config import settings
+
+        symbols = [
+            s.strip()
+            for s in str(getattr(settings, "market_feed_symbols", "XAUUSD") or "XAUUSD").split(",")
+            if s.strip()
+        ]
+        from ..market.health import compute_market_data_health
+
+        for sym in symbols or ["XAUUSD"]:
+            h = compute_market_data_health(sym)
+            status = str(h.get("status", "UNKNOWN"))
+            checks.append(
+                {
+                    "area": "feed",
+                    "target": sym,
+                    "status": status,
+                    "ok": status in ("HEALTHY", "STALE"),
+                    "severity": "info" if status == "HEALTHY" else "warning",
+                    "detail": (
+                        f"tick_age={h.get('tick_age_ms')}ms bar_age={h.get('bar_age_ms')}ms"
+                    ),
+                }
+            )
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never raise
+        checks.append(
+            {
+                "area": "feed",
+                "target": "?",
+                "status": "UNKNOWN",
+                "ok": False,
+                "severity": "warning",
+                "detail": f"tidak bisa dibaca: {exc}",
+            }
+        )
+
+    # 2) Dynamic SL manager errors (ARM-gate 403, etc.).
+    try:
+        manager = getattr(runtime, "trade_manager", None)
+        if manager is not None:
+            snap = manager.snapshot()
+            counts = snap.get("counts", {})
+            errors = int(counts.get("errors", 0) or 0)
+            modified = int(counts.get("modified", 0) or 0)
+            enabled = bool(snap.get("enabled"))
+            if not enabled:
+                checks.append(
+                    {
+                        "area": "sltp",
+                        "target": "trade_manager",
+                        "status": "DISABLED",
+                        "ok": True,
+                        "severity": "info",
+                        "detail": "manajemen SL dinamis OFF (tidak ada modifikasi dikirim).",
+                    }
+                )
+            elif errors > 0 and modified == 0:
+                last = (snap.get("recent") or [{}])[0]
+                checks.append(
+                    {
+                        "area": "sltp",
+                        "target": "trade_manager",
+                        "status": "BLOCKED",
+                        "ok": False,
+                        "severity": "warning",
+                        "detail": (
+                            f"{errors} error, 0 berhasil — kemungkinan terminal belum "
+                            f"di-ARM ({last.get('message', '')})."
+                        ),
+                    }
+                )
+            else:
+                checks.append(
+                    {
+                        "area": "sltp",
+                        "target": "trade_manager",
+                        "status": "OK" if errors == 0 else "PARTIAL",
+                        "ok": True,
+                        "severity": "info" if errors == 0 else "warning",
+                        "detail": f"modified={modified} errors={errors}",
+                    }
+                )
+    except Exception as exc:  # noqa: BLE001
+        checks.append(
+            {
+                "area": "sltp",
+                "target": "trade_manager",
+                "status": "UNKNOWN",
+                "ok": False,
+                "severity": "warning",
+                "detail": str(exc),
+            }
+        )
+
+    # 3) R tracking coverage.
+    try:
+        from .v2_endpoints import _closed_trade_r_rows, _total_review_count
+
+        total = _total_review_count()
+        with_r = sum(1 for row in _closed_trade_r_rows() if row.get("r_multiple") is not None)
+        gap = max(0, total - with_r)
+        checks.append(
+            {
+                "area": "r_tracking",
+                "target": "closed_trades",
+                "status": "OK" if gap == 0 else "PARTIAL",
+                "ok": gap == 0,
+                "severity": "info" if gap == 0 else "warning",
+                "detail": (
+                    f"{with_r}/{total} trade punya R"
+                    + (f" — {gap} tidak (dibuka sebelum fitur R aktif)." if gap else ".")
+                ),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        checks.append(
+            {
+                "area": "r_tracking",
+                "target": "closed_trades",
+                "status": "UNKNOWN",
+                "ok": False,
+                "severity": "warning",
+                "detail": str(exc),
+            }
+        )
+
+    # 4) Execution arm state (the REAL order gate).
+    try:
+        armed = False
+        for mod_name in ("mt5.terminals", "src.mt5.terminals"):
+            try:
+                import importlib
+
+                terms = importlib.import_module(mod_name)
+                armed = bool(terms.execution_permitted())
+                break
+            except ImportError:
+                continue
+        checks.append(
+            {
+                "area": "execution",
+                "target": "terminal_arm",
+                "status": "ARMED" if armed else "NOT_ARMED",
+                "ok": armed,
+                "severity": "info" if armed else "warning",
+                "detail": (
+                    "terminal ter-arm; order & modifikasi SL dapat dikirim."
+                    if armed
+                    else "terminal belum di-arm; order nyata DIBLOKIR (fail-closed)."
+                ),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        checks.append(
+            {
+                "area": "execution",
+                "target": "terminal_arm",
+                "status": "UNKNOWN",
+                "ok": False,
+                "severity": "warning",
+                "detail": str(exc),
+            }
+        )
+
+    # Summary: worst severity present.
+    severities = {c.get("severity") for c in checks}
+    if "critical" in severities:
+        overall = "CRITICAL"
+    elif "warning" in severities:
+        overall = "ATTENTION"
+    else:
+        overall = "OK"
+    return {
+        "overall": overall,
+        "counts": {
+            "total": len(checks),
+            "ok": sum(1 for c in checks if c.get("ok")),
+            "attention": sum(1 for c in checks if not c.get("ok")),
+        },
+        "checks": checks,
+        "source": "live",
+        "status": "OK",
     }

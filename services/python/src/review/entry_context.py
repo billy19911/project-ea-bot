@@ -47,6 +47,8 @@ def remember_entry_context(ticket: Any, context: dict[str, Any]) -> None:
             - news_events (list): news events framing the trade.
             - regime (str): market regime at entry.
             - entry_price (float): entry price level.
+            - stop_loss (float): the ORIGINAL stop-loss price of this order,
+              used by the close path to compute the trade's R-multiple.
             - ts (float): Unix timestamp of entry.
 
     Fail-safe: errors are swallowed silently.

@@ -89,6 +89,60 @@ class TestKnobValidation:
         assert described["scheduler_poll_interval"]["minimum"] == 0.1
 
 
+class TestSltpKnobs:
+    """The SLTP master + sub switches are real bool knobs (dashboard toggles)."""
+
+    SLTP_KEYS = {
+        "sltp_management_enabled",
+        "sltp_breakeven_enabled",
+        "sltp_progressive_enabled",
+        "sltp_trailing_enabled",
+    }
+
+    def test_sltp_knobs_present_and_bool(self, store: RuntimeSettingsStore) -> None:
+        described = {d["key"]: d for d in store.describe()}
+        assert self.SLTP_KEYS <= set(described)
+        for key in self.SLTP_KEYS:
+            assert described[key]["kind"] == "bool"
+
+    def test_master_defaults_off_others_on(self, store: RuntimeSettingsStore) -> None:
+        values = store.snapshot().values
+        assert values["sltp_management_enabled"] == 0.0
+        assert values["sltp_breakeven_enabled"] == 1.0
+        assert values["sltp_progressive_enabled"] == 1.0
+        assert values["sltp_trailing_enabled"] == 1.0
+
+    def test_toggle_master_on_and_off(self, store: RuntimeSettingsStore) -> None:
+        applied, errors = store.update({"sltp_management_enabled": True})
+        assert errors == []
+        assert applied["sltp_management_enabled"] == 1.0
+        applied, errors = store.update({"sltp_management_enabled": False})
+        assert errors == []
+        assert applied["sltp_management_enabled"] == 0.0
+
+    def test_seed_missing_sets_env_defaults_without_clobbering(
+        self, store: RuntimeSettingsStore
+    ) -> None:
+        # Operator already turned trailing off → seed must NOT overwrite it.
+        store.update({"sltp_trailing_enabled": False})
+        store.seed_missing(
+            {
+                "sltp_management_enabled": 1.0,
+                "sltp_trailing_enabled": 1.0,
+            }
+        )
+        values = store.snapshot().values
+        assert values["sltp_management_enabled"] == 1.0  # seeded (was absent)
+        assert values["sltp_trailing_enabled"] == 0.0  # preserved
+
+    def test_seeded_values_persist(self, tmp_path: Path) -> None:
+        path = str(tmp_path / "runtime_settings.json")
+        store = RuntimeSettingsStore(path=path)
+        store.seed_missing({"sltp_management_enabled": 1.0})
+        fresh = RuntimeSettingsStore(path=path)
+        assert fresh.snapshot().values["sltp_management_enabled"] == 1.0
+
+
 class TestSafetyLimitsAreNotWritable:
     """The whole point of the allowlist: safety values must not be editable."""
 
@@ -147,6 +201,18 @@ class TestApplyToRuntime:
         assert snap["limits"]["daily_loss_limit"] is not None
         assert snap["limits"]["max_spread_pips"] is not None
 
+    def test_risk_limits_snapshot_omits_unenforced_limits(self) -> None:
+        """Only limits the gate really enforces are shown.
+
+        ``max_position_size`` is defined on RiskEngine but never checked on the
+        order path — displaying it read-only implied it was active. It must be
+        omitted so the panel is honest.
+        """
+        from src.system.endpoints import _risk_limits_snapshot
+
+        snap = _risk_limits_snapshot()
+        assert "max_position_size" not in snap["limits"]
+
 
 class TestSettingsEndpoint:
     """Endpoint-level behaviour via the FastAPI test client."""
@@ -193,6 +259,18 @@ class TestSettingsEndpoint:
         body = r.json()
         assert body["ok"] is False
         assert body["errors"]
+
+    def test_put_toggles_sltp_master(self, client) -> None:
+        r = client.put("/settings", json={"sltp_management_enabled": True})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["applied"]["sltp_management_enabled"] is True
+
+        # Reflected back on the next GET, persisted in the store.
+        r = client.get("/settings")
+        values = r.json()["values"]
+        assert values["sltp_management_enabled"] == 1.0
 
     def test_get_does_not_mutate_runtime(self, client) -> None:
         """A GET must never push values — startup/PUT own that."""

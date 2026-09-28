@@ -29,9 +29,17 @@ _BAR_STALE_MS = 3000
 _SPREAD_STALE_MS = 2000
 
 
-def _now() -> datetime.datetime:
-    """Return current UTC time (timezone‑aware)."""
-    return datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
+def _now_naive_local() -> datetime.datetime:
+    """Return current time as a *naive local* datetime.
+
+    The MT5 connector builds tick/bar timestamps with
+    ``datetime.fromtimestamp(...)`` (see ``mt5/connector.py``), i.e. **naive
+    local** datetimes — not UTC. Comparing them against a UTC "now" produced a
+    constant negative age (the WIB-vs-UTC bug that forced every symbol to
+    DISCONNECTED). We therefore compare like-for-like: naive local vs naive
+    local.
+    """
+    return datetime.datetime.now()
 
 
 def compute_market_data_health(symbol: str) -> Dict[str, Any]:
@@ -48,7 +56,7 @@ def compute_market_data_health(symbol: str) -> Dict[str, Any]:
     try:
         tick = get_tick(symbol)
         ohlc = get_ohlc(symbol)
-        now = _now()
+        now = _now_naive_local()
         if not tick or not ohlc:
             return {
                 "symbol": symbol,
@@ -59,22 +67,31 @@ def compute_market_data_health(symbol: str) -> Dict[str, Any]:
                 "last_successful_update": "",
                 "status": "DISCONNECTED",
             }
-        # Tick and OHLC have ``time`` attribute (datetime)
+        # ``get_ohlc`` returns a LIST of bars (oldest → newest); the freshest
+        # bar is the LAST element. Treating the list itself as an OHLC object
+        # (``ohlc.time``) was the original typing bug that made every symbol
+        # report DISCONNECTED.
+        last_bar = ohlc[-1] if isinstance(ohlc, (list, tuple)) else ohlc
         tick_time = getattr(tick, "time", None)
-        bar_time = getattr(ohlc, "time", None)
+        bar_time = getattr(last_bar, "time", None)
         # Guard against None
         if not isinstance(tick_time, datetime.datetime) or not isinstance(
             bar_time, datetime.datetime
         ):
             raise ValueError("Invalid time fields")
-        # Ensure timezone‑aware for subtraction
-        if tick_time.tzinfo is None:
-            tick_time = tick_time.replace(tzinfo=datetime.timezone.utc)
-        if bar_time.tzinfo is None:
-            bar_time = bar_time.replace(tzinfo=datetime.timezone.utc)
+        # Connector times are naive LOCAL datetimes → compare like-for-like.
+        if tick_time.tzinfo is not None:
+            tick_time = tick_time.astimezone().replace(tzinfo=None)
+        if bar_time.tzinfo is not None:
+            bar_time = bar_time.astimezone().replace(tzinfo=None)
         tick_age = int((now - tick_time).total_seconds() * 1000)
         bar_age = int((now - bar_time).total_seconds() * 1000)
         spread_age = tick_age  # spread derived from tick spread; reuse tick age
+        # Negative age means the data clock is ahead of us (clock skew) — clamp
+        # to 0 rather than reporting a nonsensical negative freshness.
+        tick_age = max(0, tick_age)
+        bar_age = max(0, bar_age)
+        spread_age = max(0, spread_age)
         # Determine status
         if tick_age > _TICK_STALE_MS or bar_age > _BAR_STALE_MS or spread_age > _SPREAD_STALE_MS:
             status = "STALE"

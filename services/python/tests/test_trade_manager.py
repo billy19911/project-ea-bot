@@ -25,7 +25,7 @@ def _manager(positions, ticks, atr=10.0, applied=None, config=None):
             config=config
             or SLTPConfig(
                 breakeven_enabled=True,
-                progressive_enabled=True,
+                tp1_lock_enabled=True,
                 trailing_enabled=True,
             ),
             position_reader=lambda: positions,
@@ -119,7 +119,7 @@ def test_manage_handles_multiple_positions_independently():
     mgr = TradeManager(
         config=SLTPConfig(
             breakeven_enabled=True,
-            progressive_enabled=True,
+            tp1_lock_enabled=True,
             trailing_enabled=True,
         ),
         position_reader=lambda: positions,
@@ -183,5 +183,109 @@ def test_manage_survives_position_read_error():
 def test_snapshot_shape():
     mgr, _ = _manager([], {})
     snap = mgr.snapshot()
-    assert set(snap.keys()) == {"enabled", "counts", "recent"}
+    assert set(snap.keys()) == {
+        "enabled",
+        "breakeven_enabled",
+        "tp1_lock_enabled",
+        "trailing_enabled",
+        "counts",
+        "recent",
+    }
     assert "evaluated" in snap["counts"]
+
+
+# ---------------------------------------------------------------------------
+# Live master switch / config (dashboard toggles, no restart)
+# ---------------------------------------------------------------------------
+def _toggle_manager(positions, ticks, enabled, config=None):
+    calls = []
+
+    def apply(ticket, symbol, sl, tp):
+        calls.append({"ticket": ticket, "sl": sl})
+        return {"success": True, "error_code": 0, "message": "ok"}
+
+    mgr = TradeManager(
+        config=config or SLTPConfig(),
+        position_reader=lambda: positions,
+        tick_reader=lambda sym: ticks.get(sym),
+        atr_reader=lambda sym: 10.0,
+        apply_sltp=apply,
+        enabled_reader=lambda: enabled[0],
+        config_reader=lambda: config,
+    )
+    return mgr, calls
+
+
+def test_master_switch_off_is_noop():
+    positions = [
+        {
+            "ticket": 111,
+            "symbol": "XAUUSD",
+            "side": "buy",
+            "volume": 0.1,
+            "entry_price": 2000.0,
+            "sl": 1990.0,
+            "tp": 2030.0,
+        }
+    ]
+    ticks = {"XAUUSD": _Tick(bid=2012.0, ask=2012.2)}
+    enabled = [False]
+    mgr, calls = _toggle_manager(positions, ticks, enabled)
+
+    assert mgr.manage() == []
+    assert calls == []
+    assert mgr.snapshot()["enabled"] is False
+
+
+def test_master_switch_toggles_live():
+    positions = [
+        {
+            "ticket": 111,
+            "symbol": "XAUUSD",
+            "side": "buy",
+            "volume": 0.1,
+            "entry_price": 2000.0,
+            "sl": 1990.0,
+            "tp": 2030.0,
+        }
+    ]
+    ticks = {"XAUUSD": _Tick(bid=2012.0, ask=2012.2)}
+    enabled = [False]
+    mgr, calls = _toggle_manager(positions, ticks, enabled)
+
+    # OFF → no-op; flipping the switch ON (same instance) starts managing.
+    assert mgr.manage() == []
+    enabled[0] = True
+    applied = mgr.manage()
+    assert len(applied) == 1
+    assert calls[0]["sl"] > 1990.0
+
+
+def test_enabled_reader_error_falls_back_to_static_config():
+    def boom():
+        raise RuntimeError("store down")
+
+    positions = [
+        {
+            "ticket": 111,
+            "symbol": "XAUUSD",
+            "side": "buy",
+            "volume": 0.1,
+            "entry_price": 2000.0,
+            "sl": 1990.0,
+            "tp": 2030.0,
+        }
+    ]
+    ticks = {"XAUUSD": _Tick(bid=2012.0, ask=2012.2)}
+    calls = []
+    mgr = TradeManager(
+        config=SLTPConfig(enabled=True),
+        position_reader=lambda: positions,
+        tick_reader=lambda sym: ticks.get(sym),
+        atr_reader=lambda sym: 10.0,
+        apply_sltp=lambda *a: (calls.append(a) or {"success": True, "error_code": 0}),
+        enabled_reader=boom,
+    )
+    # Static config says enabled → still manages despite the broken reader.
+    assert len(mgr.manage()) == 1
+    assert len(calls) == 1

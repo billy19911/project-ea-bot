@@ -17,6 +17,11 @@ Wired knobs
   (``observability.sampler.TrendSampler``). Clamped to 2–300s.
 * ``llm_advisor_enabled`` — opt-in switch for the LLM advisor
   (``llm.advisor.LLMAdvisor``). Default OFF; no tokens are spent until enabled.
+* ``sltp_management_enabled`` (+ ``sltp_breakeven_enabled`` /
+  ``sltp_progressive_enabled`` / ``sltp_trailing_enabled``) — master + per-rule
+  switches for dynamic SL management on OPEN positions
+  (``monitoring.trade_manager.TradeManager``). When the master is OFF nothing is
+  sent to the broker; existing stops are left as-is. Read live each cycle.
 
 Deliberately NOT here
 ---------------------
@@ -81,9 +86,7 @@ class Knob:
         if value != value:  # NaN
             raise ValueError(f"{self.key}: bukan angka")
         if value < self.minimum or value > self.maximum:
-            raise ValueError(
-                f"{self.key}: di luar rentang {self.minimum}–{self.maximum}"
-            )
+            raise ValueError(f"{self.key}: di luar rentang {self.minimum}–{self.maximum}")
         return value
 
 
@@ -147,6 +150,46 @@ KNOBS: tuple[Knob, ...] = (
         description="Batas maksimum lot per entry (cap keamanan).",
         applied_to="TradingPipeline.max_lot_per_trade",
     ),
+    Knob(
+        key="sltp_management_enabled",
+        kind="bool",
+        minimum=0,
+        maximum=1,
+        default=0,
+        description=(
+            "Master switch manajemen SL dinamis (ladder: TP1→BEP, TP2→TP1, "
+            "trailing setelah TP2). Default OFF — saat OFF tidak ada "
+            "modifikasi SL yang dikirim ke broker (SL terakhir tetap)."
+        ),
+        applied_to="TradeManager.enabled",
+    ),
+    Knob(
+        key="sltp_breakeven_enabled",
+        kind="bool",
+        minimum=0,
+        maximum=1,
+        default=1,
+        description="Geser SL ke break-even (+buffer) saat harga mencapai TP1 (1R).",
+        applied_to="SLTPConfig.breakeven_enabled",
+    ),
+    Knob(
+        key="sltp_progressive_enabled",
+        kind="bool",
+        minimum=0,
+        maximum=1,
+        default=1,
+        description="Kunci profit: saat harga mencapai TP2 (2R), geser SL naik ke level TP1 (1R).",
+        applied_to="SLTPConfig.tp1_lock_enabled",
+    ),
+    Knob(
+        key="sltp_trailing_enabled",
+        kind="bool",
+        minimum=0,
+        maximum=1,
+        default=1,
+        description="Trailing stop berbasis ATR — HANYA setelah harga melewati TP2 (runner).",
+        applied_to="SLTPConfig.trailing_enabled",
+    ),
 )
 
 _BY_KEY = {k.key: k for k in KNOBS}
@@ -173,12 +216,12 @@ class RuntimeSettingsStore:
         self._lock = threading.Lock()
         if path is None:
             base = os.path.dirname(os.path.abspath(__file__))
-            path = os.path.normpath(
-                os.path.join(base, "..", "..", "runtime_settings.json")
-            )
+            path = os.path.normpath(os.path.join(base, "..", "..", "runtime_settings.json"))
         self._path = path
         self._values: dict[str, float] = {k.key: k.default for k in KNOBS}
         self._loaded = False
+        # Keys actually present on disk (so seed_missing never clobbers them).
+        self._present: set[str] = set()
 
     # -- persistence -------------------------------------------------------
 
@@ -186,15 +229,14 @@ class RuntimeSettingsStore:
         """Load from disk; invalid entries fall back to defaults (never raise)."""
         with self._lock:
             self._loaded = True
+            self._present: set[str] = set()
             if not os.path.exists(self._path):
                 return
             try:
                 with open(self._path, encoding="utf-8") as fh:
                     raw = json.load(fh)
             except (OSError, ValueError) as exc:
-                logger.warning(
-                    "runtime_settings: file tidak terbaca (%s) — pakai default", exc
-                )
+                logger.warning("runtime_settings: file tidak terbaca (%s) — pakai default", exc)
                 return
             if not isinstance(raw, dict):
                 return
@@ -204,8 +246,34 @@ class RuntimeSettingsStore:
                     continue
                 try:
                     self._values[key] = knob.coerce(value)
+                    self._present.add(key)
                 except ValueError as exc:
                     logger.warning("runtime_settings: abaikan %s", exc)
+
+    def seed_missing(self, seeds: dict[str, Any]) -> None:
+        """Persist ``seeds`` only for keys not already set on disk.
+
+        Used at startup to honour environment defaults (e.g. ``SLTP_*``) on a
+        fresh install, while never clobbering a value the operator explicitly
+        saved from the dashboard. Invalid/unknown keys are ignored.
+        """
+        if not self._loaded:
+            self.load()
+        staged: dict[str, float] = {}
+        with self._lock:
+            for key, raw in seeds.items():
+                knob = _BY_KEY.get(key)
+                if knob is None or key in getattr(self, "_present", set()):
+                    continue
+                try:
+                    staged[key] = knob.coerce(raw)
+                except ValueError as exc:
+                    logger.warning("runtime_settings: seed %s diabaikan", exc)
+            if not staged:
+                return
+            self._values.update(staged)
+            self._present.update(staged.keys())
+            self._write_locked()
 
     def _write_locked(self) -> None:
         tmp = self._path + ".tmp"
@@ -271,6 +339,7 @@ class RuntimeSettingsStore:
             self.load()
         with self._lock:
             self._values.update(staged)
+            self._present.update(staged.keys())
             self._write_locked()
             applied = {k: self._values[k] for k in staged}
         return applied, []

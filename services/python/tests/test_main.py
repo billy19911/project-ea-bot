@@ -39,3 +39,37 @@ def test_root_endpoint():
     data = response.json()
     assert "service" in data
     assert data["version"] == "0.1.0"
+
+
+def test_sltp_seed_reads_real_settings_attrs():
+    """The startup SLTP seeding must reference settings fields that EXIST.
+
+    Regression: a settings field rename (``sltp_progressive_enabled`` →
+    ``sltp_tp1_lock_enabled``) left `main.py` reading a non-existent attribute,
+    so the whole runtime-settings seed/apply block raised AttributeError and was
+    silently swallowed — meaning caps/SLTP were never applied at startup.
+    """
+    from src.config import settings
+    from src.system.settings_store import get_settings_store
+
+    # This mirrors main.py's lifespan seed exactly; it must not raise.
+    seeded = {
+        "sltp_management_enabled": (
+            1.0 if getattr(settings, "sltp_management_enabled", False) else 0.0
+        ),
+        "sltp_breakeven_enabled": (
+            1.0 if getattr(settings, "sltp_breakeven_enabled", True) else 0.0
+        ),
+        "sltp_progressive_enabled": (
+            1.0 if getattr(settings, "sltp_tp1_lock_enabled", True) else 0.0
+        ),
+        "sltp_trailing_enabled": (1.0 if getattr(settings, "sltp_trailing_enabled", True) else 0.0),
+    }
+    # Every referenced attribute exists (no MISSING sentinel).
+    assert hasattr(settings, "sltp_tp1_lock_enabled")
+    assert not hasattr(settings, "sltp_progressive_enabled")
+
+    store = get_settings_store()
+    store.seed_missing(seeded)  # must not raise
+    values = store.snapshot().values
+    assert "sltp_progressive_enabled" in values

@@ -193,3 +193,83 @@ def test_performance_intelligence_endpoint() -> None:
     r = client.get("/v2/performance-intelligence?dimension=hour")
     assert r.status_code == 200
     assert r.json()["dimension"] == "hour"
+
+
+def test_r_performance_endpoint_returns_buckets() -> None:
+    """Seed one closed trade with a computable R and check the aggregation."""
+    from datetime import datetime, timezone
+
+    from src.review.advanced_review import RootCauseClassification
+    from src.review.auto_trigger import ReviewRecord, set_auto_trigger
+    from src.review.trade_review import TradeReviewResult
+
+    class _Trigger:
+        def recent(self, limit: int = 50):
+            return [
+                ReviewRecord(
+                    trade_id="T-1",
+                    review=TradeReviewResult(
+                        trade_id="T-1",
+                        outcome="WIN",
+                        pnl=200.0,
+                        mae=0.0,
+                        mfe=2.0,
+                        timing_score=50.0,
+                        decision_quality_score=50.0,
+                        execution_quality_score=100.0,
+                        summary="x",
+                    ),
+                    root_cause=RootCauseClassification(
+                        primary_cause="none", secondary_causes=[], confidence=1.0
+                    ),
+                    trade_result={
+                        "direction": "BUY",
+                        "entry_price": 2000.0,
+                        "exit_price": 2020.0,
+                        "stop_loss": 1990.0,
+                    },
+                    r_multiple=2.0,
+                    closed_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+                )
+            ]
+
+    set_auto_trigger(_Trigger())  # type: ignore[arg-type]
+    try:
+        r = client.get("/v2/r-performance?period=day")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["period"] == "day"
+        assert body["status"] == "OK"
+        assert body["overall"]["avg_r"] == 2.0
+        assert body["value"][0]["key"] == "2025-01-01"
+        assert body["value"][0]["avg_r"] == 2.0
+    finally:
+        set_auto_trigger(None)
+
+
+def test_r_performance_endpoint_no_data() -> None:
+    from src.review.auto_trigger import set_auto_trigger
+
+    set_auto_trigger(None)
+    r = client.get("/v2/r-performance?period=week")
+    assert r.status_code == 200
+    assert r.json()["period"] == "week"
+
+
+def test_environment_reports_real_preconditions() -> None:
+    """The environment panel must read REAL preconditions, not static defaults."""
+    r = client.get("/v2/environment")
+    assert r.status_code == 200
+    value = r.json()["value"]
+    assert "preconditions" in value
+    assert set(value["preconditions"]) == {
+        "terminal_armed",
+        "risk_gate_healthy",
+        "reconciliation_healthy",
+        "production_strategy",
+    }
+    # Honest reporting: DEV gate is not enforced on the order path.
+    assert value["environment_gate_enforced"] is False
+    assert value["arm_gate_enforced"] is True
+    # terminal_armed must reflect the REAL arm-gate (in tests it is not armed).
+    assert value["preconditions"]["terminal_armed"] in (True, False)

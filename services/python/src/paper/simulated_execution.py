@@ -65,9 +65,7 @@ class SlippageModel:
     volatility_factor: float = 0.5  # How much volatility affects slippage
     max_slippage: float = 0.001  # Max 10 pips
 
-    def calculate_slippage(
-        self, price: float, volatility: float, is_buy: bool
-    ) -> float:
+    def calculate_slippage(self, price: float, volatility: float, is_buy: bool) -> float:
         """Calculate slippage amount based on volatility.
 
         Slippage is always adverse to the trader:
@@ -168,9 +166,7 @@ class SimulatedExecutionEngine:
         else:
             return base_price - half_spread
 
-    def apply_slippage(
-        self, price: float, volatility: float, is_buy: bool = True
-    ) -> float:
+    def apply_slippage(self, price: float, volatility: float, is_buy: bool = True) -> float:
         """Apply random slippage to price based on volatility.
 
         Args:
@@ -479,6 +475,14 @@ class SimulatedExecutionEngine:
             for key in ("agent_outputs", "news_events", "regime"):
                 if key in entry_ctx and key not in trade_result:
                     trade_result[key] = entry_ctx[key]
+            # Carry the ORIGINAL stop-loss so the review can compute the trade's
+            # R-multiple. Prefer the entry context (initial risk), fall back to
+            # the position's current stop.
+            stop_loss = entry_ctx.get("stop_loss") if isinstance(entry_ctx, dict) else None
+            if not stop_loss:
+                stop_loss = getattr(position, "stop_loss", 0.0)
+            if stop_loss:
+                trade_result["stop_loss"] = float(stop_loss)
             if "ticket" not in trade_result and ticket is not None:
                 trade_result["ticket"] = ticket
 

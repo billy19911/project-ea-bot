@@ -193,7 +193,9 @@ class TestPipelineSpreadWiring:
         ), "market_info['spread_price'] harus diteruskan apa adanya"
         # BUY: SL/TP dihitung dari ask-side (entry 68000 + spread 40)
         assert inputs["proposal"]["stop_loss"] == pytest.approx(67924.95, rel=1e-5)
-        assert inputs["proposal"]["take_profit"] == pytest.approx(68270.1, rel=1e-5)
+        # TP ditempatkan di TPmax (3R), di-anchor ke entry terekam (68000):
+        # risk = |68000 - 67924.95| = 75.05 → TP = 68000 + 3*75.05 = 68225.15
+        assert inputs["proposal"]["take_profit"] == pytest.approx(68225.15, rel=1e-5)
 
 
 class TestAccountContextSpreadPips:

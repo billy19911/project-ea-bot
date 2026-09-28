@@ -1,7 +1,27 @@
 """Application configuration from environment variables."""
 
+# Load the runtime env (.env.runtime) BEFORE Settings() is constructed below.
+# Settings() is evaluated at import time, so any env filled later (e.g. in the
+# FastAPI lifespan) is too late — the singleton would already hold defaults.
+# This mirrors the Node ``apps/api/src/loadEnv.ts`` pattern: explicit process
+# env always wins; ``.env.runtime`` only fills missing keys. Fail-safe: a
+# missing/unreadable file is a no-op.
+#
+# Skipped under pytest (same guard as main.py) so the test suite keeps its
+# hermetic, unauthenticated TestClient — loading a real PYTHON_API_KEY would
+# make every request 401.
+import sys as _sys
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
+if "pytest" not in _sys.modules:  # pragma: no cover - import-time side effect
+    try:
+        from .env_bootstrap import load_runtime_env
+
+        load_runtime_env()
+    except Exception:  # noqa: BLE001 - config import must never crash on this
+        pass
 
 
 class Settings(BaseSettings):
@@ -88,20 +108,18 @@ class Settings(BaseSettings):
     max_daily_loss: float = Field(default=500.0, alias="MAX_DAILY_LOSS")
     risk_per_trade: float = Field(default=0.02, alias="RISK_PER_TRADE")
 
-    # Dynamic stop-loss management (BEP / progressive TP1 lock / trailing).
-    # Applied per cycle by the trade manager to OPEN positions (arm-gated,
-    # fail-closed). Default OFF so behaviour is unchanged until opted in.
+    # Dynamic stop-loss management — LEVEL LADDER (TP1 → BEP+buffer, TP2 → TP1,
+    # then trail the runner until TPmax). Applied per cycle by the trade manager
+    # to OPEN positions (arm-gated, fail-closed). Default OFF.
     sltp_management_enabled: bool = Field(default=False, alias="SLTP_MANAGEMENT_ENABLED")
+    # At TP1 (1R): move the stop to break-even + this buffer (R). Keeps the trade
+    # non-losing even after spread/slippage.
     sltp_breakeven_enabled: bool = Field(default=True, alias="SLTP_BREAKEVEN_ENABLED")
-    # Move to break-even once the position is up by this many R.
-    sltp_bep_trigger_r: float = Field(default=1.0, alias="SLTP_BEP_TRIGGER_R")
-    # Extra R locked beyond entry at break-even (0 = pure entry).
-    sltp_bep_lock_r: float = Field(default=0.0, alias="SLTP_BEP_LOCK_R")
-    sltp_progressive_enabled: bool = Field(default=True, alias="SLTP_PROGRESSIVE_ENABLED")
-    # Reaching TP1 (this many R) locks this many R of profit.
-    sltp_tp1_lock_r: float = Field(default=0.5, alias="SLTP_TP1_LOCK_R")
+    sltp_bep_buffer_r: float = Field(default=0.1, alias="SLTP_BEP_BUFFER_R")
+    # At TP2 (2R): move the stop up to the TP1 level (locks 1R).
+    sltp_tp1_lock_enabled: bool = Field(default=True, alias="SLTP_TP1_LOCK_ENABLED")
+    # Trailing AFTER TP2 (runner): distance = ATR * factor, never below TP1.
     sltp_trailing_enabled: bool = Field(default=True, alias="SLTP_TRAILING_ENABLED")
-    # Trailing distance = ATR * factor.
     sltp_trail_atr_factor: float = Field(default=1.5, alias="SLTP_TRAIL_ATR_FACTOR")
     # Minimum stop move (in R) before a modification is sent (anti-churn).
     sltp_min_move_r: float = Field(default=0.05, alias="SLTP_MIN_MOVE_R")

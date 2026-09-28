@@ -60,7 +60,6 @@ const RISK_LABELS: Record<string, string> = {
   max_exposure: 'Max exposure (fraksi ekuitas)',
   margin_threshold: 'Ambang margin',
   max_positions: 'Max posisi terbuka',
-  max_position_size: 'Max ukuran posisi (fraksi)',
   max_spread_pips: 'Max spread (pips)',
   min_rr: 'Min risk/reward',
 };

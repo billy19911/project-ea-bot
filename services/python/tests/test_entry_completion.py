@@ -15,6 +15,7 @@ from __future__ import annotations
 import sys
 
 import pytest
+
 from execution.engine import ExecutionEngine, OrderRequest
 from orchestration.pipeline import TradingPipeline
 
@@ -43,9 +44,7 @@ class _ApproveGate:
     def __init__(self):
         self.seen = None
 
-    def validate_proposal(
-        self, proposal, account_state, current_positions, market_info
-    ):
+    def validate_proposal(self, proposal, account_state, current_positions, market_info):
         from risk.gate import GateDecision
 
         self.seen = proposal
@@ -130,7 +129,10 @@ def test_completion_never_overrides_provided_values():
             }
 
     pipeline = TradingPipeline(
-        supervisor=FullSupervisor(), risk_gate=gate, execution_engine=None
+        supervisor=FullSupervisor(),
+        risk_gate=gate,
+        execution_engine=None,
+        max_lot_per_trade=10.0,  # high cap to isolate "completion never overrides"
     )
     pipeline.run({"event_type": "TREND_BULLISH", "symbol": "EURUSD"}, _context())
 
@@ -143,18 +145,14 @@ def test_completion_never_overrides_provided_values():
 def test_entry_reaches_execution_when_no_terminal(monkeypatch):
     """Full command-entry path reaches a (simulated) execution end to end."""
     monkeypatch.setitem(sys.modules, "MetaTrader5", None)
-    engine = ExecutionEngine(
-        mt5_connector=None, simulation_mode=True, require_approval=True
-    )
+    engine = ExecutionEngine(mt5_connector=None, simulation_mode=True, require_approval=True)
     pipeline = TradingPipeline(
         supervisor=_bearish_supervisor(),
         risk_gate=_ApproveGate(),
         execution_engine=engine,
     )
 
-    result = pipeline.run(
-        {"event_type": "TREND_BULLISH", "symbol": "XAUUSD"}, _context()
-    )
+    result = pipeline.run({"event_type": "TREND_BULLISH", "symbol": "XAUUSD"}, _context())
 
     assert result.status == "EXECUTED", result.error
     assert result.executed is True
@@ -241,9 +239,7 @@ def test_run_validation_uses_merged_snapshot_evidence():
 
     assert gate.seen is not None
     assert gate.seen["entry_price"] > 0
-    assert (
-        gate.seen["stop_loss"] > 0
-    ), "snapshot ATR must complete SL via the gate inputs"
+    assert gate.seen["stop_loss"] > 0, "snapshot ATR must complete SL via the gate inputs"
 
 
 # ---------------------------------------------------------------------------
@@ -254,9 +250,7 @@ def test_native_send_requires_armed_terminal():
     # Ensure the real MetaTrader5 is importable (Windows); skip otherwise.
     pytest.importorskip("MetaTrader5")
 
-    engine = ExecutionEngine(
-        mt5_connector=None, simulation_mode=True, require_approval=True
-    )
+    engine = ExecutionEngine(mt5_connector=None, simulation_mode=True, require_approval=True)
     req = OrderRequest(
         symbol="EURUSD",
         order_type="BUY",
