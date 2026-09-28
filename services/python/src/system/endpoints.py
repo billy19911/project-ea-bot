@@ -376,6 +376,8 @@ class SettingsPatch(BaseModel):
     sltp_breakeven_enabled: bool | None = None
     sltp_progressive_enabled: bool | None = None
     sltp_trailing_enabled: bool | None = None
+    fanout_enabled: bool | None = None
+    zone_entry_enabled: bool | None = None
 
 
 def _apply_to_runtime(values: dict[str, float]) -> dict[str, Any]:
@@ -462,6 +464,12 @@ def _apply_to_runtime(values: dict[str, float]) -> dict[str, Any]:
     ):
         if sltp_key in values:
             applied[sltp_key] = bool(values[sltp_key])
+    # Fan-out / zone-entry toggles: the pipeline reads the store LIVE each cycle
+    # (via a provider), so the value is already in effect; report it so the UI
+    # can confirm without a restart.
+    for toggle_key in ("fanout_enabled", "zone_entry_enabled"):
+        if toggle_key in values:
+            applied[toggle_key] = bool(values[toggle_key])
     if errors:
         applied["_errors"] = errors
     return applied

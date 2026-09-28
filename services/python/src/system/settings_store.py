@@ -190,6 +190,32 @@ KNOBS: tuple[Knob, ...] = (
         description="Trailing stop berbasis ATR — HANYA setelah harga melewati TP2 (runner).",
         applied_to="SLTPConfig.trailing_enabled",
     ),
+    Knob(
+        key="fanout_enabled",
+        kind="bool",
+        minimum=0,
+        maximum=1,
+        default=0,
+        description=(
+            "Fan-out multi-terminal: SATU analisa dikirim ke SEMUA terminal MT5 "
+            "yang running + execution:true + di-arm. Default NONAKTIF. Aktifkan "
+            "hanya setelah terminal di-arm (uji di DEMO dulu)."
+        ),
+        applied_to="TradingPipeline.fanout_enabled",
+    ),
+    Knob(
+        key="zone_entry_enabled",
+        kind="bool",
+        minimum=0,
+        maximum=1,
+        default=0,
+        description=(
+            "Entry OB/FVG (watch-and-fire): entry MENUNGGU harga masuk zona Order "
+            "Block / Fair Value Gap searah bias (M30/H1 → zona M5) sebelum order "
+            "dikirim. Default NONAKTIF."
+        ),
+        applied_to="TradingPipeline.zone_entry_enabled",
+    ),
 )
 
 _BY_KEY = {k.key: k for k in KNOBS}

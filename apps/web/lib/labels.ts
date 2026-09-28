@@ -42,6 +42,8 @@ export const KNOB_LABELS: Record<string, string> = {
   sltp_breakeven_enabled: 'Geser SL ke break-even saat TP1',
   sltp_progressive_enabled: 'Kunci profit saat TP2',
   sltp_trailing_enabled: 'Trailing stop setelah TP2',
+  fanout_enabled: 'Fan-out ke banyak terminal MT5',
+  zone_entry_enabled: 'Entry tunggu zona OB/FVG',
 };
 
 /** Bantuan singkat (ditampilkan dalam tooltip) untuk knob runtime. */
@@ -67,6 +69,12 @@ export const KNOB_HELP: Record<string, string> = {
     'Saat harga mencapai TP2 (2R), SL dinaikkan ke level TP1 (profit terkunci).',
   sltp_trailing_enabled:
     'Trailing stop berbasis ATR — hanya aktif setelah harga melewati TP2.',
+  fanout_enabled:
+    'Satu analisa dikirim ke SEMUA terminal MT5 yang running + execution:true + di-arm. ' +
+    'Default NONAKTIF. Uji di DEMO dulu sebelum dipakai di akun LIVE.',
+  zone_entry_enabled:
+    'Entry menunggu harga masuk zona Order Block / Fair Value Gap searah bias ' +
+    '(M30/H1 untuk bias, M5 untuk zona) sebelum order dikirim. Default NONAKTIF.',
 };
 
 // ---------------------------------------------------------------------------

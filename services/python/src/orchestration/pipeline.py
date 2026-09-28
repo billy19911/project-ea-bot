@@ -204,6 +204,30 @@ def _coerce_confidence(value: Any) -> float:
         return 0.0
 
 
+def _as_toggle(value: Any, default: bool = False) -> Callable[[], bool]:
+    """Normalise a bool-or-callable toggle into a zero-arg callable.
+
+    Accepts:
+    * a bool → returns a callable yielding it,
+    * a callable → returned as-is (evaluated LIVE, so a dashboard toggle
+      applies without restarting the process).
+
+    Fail-safe: a callable that raises yields ``default``.
+    """
+    if callable(value):
+
+        def _call() -> bool:
+            try:
+                return bool(value())
+            except Exception:  # noqa: BLE001 - a broken provider must not break a cycle
+                return default
+
+        return _call
+
+    fixed = bool(value)
+    return lambda: fixed
+
+
 class _FanoutExecutionAdapter:
     """Present a fan-out result with the single-order ExecutionResult shape.
 
@@ -307,22 +331,23 @@ class TradingPipeline:
         signal_registry: Optional[Any] = None,
         pending_signal_guard: bool = True,
         strategy_config_provider: Optional[Callable[[], Optional[dict[str, Any]]]] = None,
-        fanout_enabled: bool = False,
-        zone_entry_enabled: bool = False,
+        fanout_enabled: Any = False,
+        zone_entry_enabled: Any = False,
         zone_entry_gate: Optional[Any] = None,
     ) -> None:
         self.supervisor = supervisor
         self.risk_gate = risk_gate
         self.execution_engine = execution_engine
-        # Fan-out (F1): when True and the engine supports it, ONE decision is
+        # Fan-out (F1): when enabled and the engine supports it, ONE decision is
         # dispatched to every armed fan-out terminal (each sized from its own
         # account). Default False preserves the historic single-terminal path
-        # (tests, paper, sim). The runtime opts in explicitly.
-        self.fanout_enabled = bool(fanout_enabled)
+        # (tests, paper, sim). May be a bool OR a zero-arg callable (so a
+        # dashboard toggle applies LIVE without a restart).
+        self._fanout_enabled_provider = _as_toggle(fanout_enabled, default=False)
         # Zone entry (F2): when enabled and a gate is supplied, an approved entry
-        # waits until price reaches the OB/FVG zone (watch-and-fire) instead of
-        # firing at market. Default OFF (safe, historic behaviour).
-        self.zone_entry_enabled = bool(zone_entry_enabled)
+        # waits until price reaches the OB/FVG zone (watch-and-fire). Bool OR
+        # zero-arg callable (live dashboard toggle).
+        self._zone_entry_enabled_provider = _as_toggle(zone_entry_enabled, default=False)
         self.zone_entry_gate = zone_entry_gate
         self.order_builder = order_builder if order_builder is not None else OrderBuilder()
         self.strategy_version = strategy_version
@@ -403,6 +428,16 @@ class TradingPipeline:
         if self._signal_registry is None:
             self._signal_registry = get_signal_registry()
         return self._signal_registry
+
+    @property
+    def fanout_enabled(self) -> bool:
+        """Whether multi-terminal fan-out is enabled RIGHT NOW (live toggle)."""
+        return self._fanout_enabled_provider()
+
+    @property
+    def zone_entry_enabled(self) -> bool:
+        """Whether OB/FVG watch-and-fire entry is enabled RIGHT NOW (live)."""
+        return self._zone_entry_enabled_provider()
 
     # ------------------------------------------------------------------
     # Public API

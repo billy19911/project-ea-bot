@@ -353,6 +353,23 @@ async def lifespan(app: FastAPI):
                 1.0 if getattr(settings, "sltp_trailing_enabled", True) else 0.0
             ),
         }
+        # F1/F2 toggles: seed from the environment (FANOUT_ENABLED /
+        # ZONE_ENTRY_ENABLED) on a fresh install so the dashboard shows the
+        # operator's intended default; a dashboard change always wins afterwards.
+        import os as _os
+
+        seeded["fanout_enabled"] = (
+            1.0
+            if (_os.getenv("FANOUT_ENABLED") or "false").strip().lower()
+            in {"1", "true", "yes", "on"}
+            else 0.0
+        )
+        seeded["zone_entry_enabled"] = (
+            1.0
+            if (_os.getenv("ZONE_ENTRY_ENABLED") or "false").strip().lower()
+            in {"1", "true", "yes", "on"}
+            else 0.0
+        )
         store.seed_missing(seeded)
 
         stored = get_settings_store().snapshot().values

@@ -120,6 +120,25 @@ class TestSltpKnobs:
         assert errors == []
         assert applied["sltp_management_enabled"] == 0.0
 
+    def test_fanout_zone_knobs_present_bool_default_off(self, store: RuntimeSettingsStore) -> None:
+        described = {d["key"]: d for d in store.describe()}
+        for key in ("fanout_enabled", "zone_entry_enabled"):
+            assert key in described
+            assert described[key]["kind"] == "bool"
+            assert described[key]["default"] == 0
+        values = store.snapshot().values
+        assert values["fanout_enabled"] == 0.0
+        assert values["zone_entry_enabled"] == 0.0
+
+    def test_fanout_zone_toggle_roundtrip(self, store: RuntimeSettingsStore) -> None:
+        applied, errors = store.update({"fanout_enabled": True, "zone_entry_enabled": True})
+        assert errors == []
+        assert applied["fanout_enabled"] == 1.0
+        assert applied["zone_entry_enabled"] == 1.0
+        applied, errors = store.update({"fanout_enabled": False})
+        assert errors == []
+        assert applied["fanout_enabled"] == 0.0
+
     def test_seed_missing_sets_env_defaults_without_clobbering(
         self, store: RuntimeSettingsStore
     ) -> None:

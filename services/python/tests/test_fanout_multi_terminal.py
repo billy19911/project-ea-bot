@@ -300,3 +300,45 @@ def test_fanout_restores_binding(monkeypatch):
     engine.execute_order_fanout(_request(), targets=targets, risk_price=1.0, tp_price=3.0)
     # After fan-out the binding is restored to the original terminal.
     assert mt5.attached == r"C:\mt\ORIGINAL\terminal64.exe"
+
+
+# ---------------------------------------------------------------------------
+# Pipeline live toggle (dashboard settings → no restart)
+# ---------------------------------------------------------------------------
+def _pipeline(**kwargs):
+    pipeline_mod = importlib.import_module("orchestration.pipeline")
+    return pipeline_mod.TradingPipeline(
+        supervisor=types.SimpleNamespace(analyze=lambda ctx: {}),
+        risk_gate=types.SimpleNamespace(),
+        **kwargs,
+    )
+
+
+def test_pipeline_fanout_toggle_is_live_callable():
+    state = {"on": False}
+    pipe = _pipeline(fanout_enabled=lambda: state["on"])
+    assert pipe.fanout_enabled is False
+    state["on"] = True
+    # Read again → reflects the live value without recreating the pipeline.
+    assert pipe.fanout_enabled is True
+
+
+def test_pipeline_zone_toggle_is_live_callable():
+    state = {"on": False}
+    pipe = _pipeline(zone_entry_enabled=lambda: state["on"])
+    assert pipe.zone_entry_enabled is False
+    state["on"] = True
+    assert pipe.zone_entry_enabled is True
+
+
+def test_pipeline_toggle_bool_still_supported():
+    assert _pipeline(fanout_enabled=True).fanout_enabled is True
+    assert _pipeline(fanout_enabled=False).fanout_enabled is False
+
+
+def test_pipeline_toggle_provider_failure_is_failsafe():
+    def boom():
+        raise RuntimeError("store down")
+
+    # A broken provider never breaks a cycle — it fails safe to False.
+    assert _pipeline(fanout_enabled=boom).fanout_enabled is False

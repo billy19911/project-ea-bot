@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from agents.registry import agent_registry
 from agents.supervisor import SupervisorAgent
@@ -109,6 +109,32 @@ def _zone_entry_enabled() -> bool:
 
     raw = (_os.getenv("ZONE_ENTRY_ENABLED") or "false").strip().lower()
     return raw in {"1", "true", "yes", "on"}
+
+
+def _toggle_provider(key: str, env_fallback: "Callable[[], bool]") -> "Callable[[], bool]":
+    """Return a live provider for a boolean settings knob.
+
+    Reads the runtime settings store each call (so a dashboard toggle applies
+    immediately); when the store is unavailable the env-based fallback is used.
+    Fail-safe: any error yields the env fallback's value.
+    """
+
+    def _read() -> bool:
+        try:
+            from system.settings_store import get_settings_store
+
+            values = get_settings_store().snapshot().values
+            if key in values:
+                return bool(values.get(key))
+        except Exception:  # noqa: BLE001 - store optional, fall through to env
+            pass
+        # Store had no value for this key → fall back to the env flag.
+        try:
+            return bool(env_fallback())
+        except Exception:  # noqa: BLE001
+            return False
+
+    return _read
 
 
 def _build_zone_entry_gate() -> Optional[Any]:
@@ -739,12 +765,15 @@ class OrchestrationRuntime:
             # Always recompute the lot from the operator's risk knob (the lot is
             # then capped) so a stale/foreign proposal size can never win.
             force_risk_sizing=True,
-            # F1: fan-out ONE decision to every armed terminal when enabled.
-            # Default OFF (safe) — the operator opts in via FANOUT_ENABLED=true.
-            fanout_enabled=_fanout_enabled(),
-            # F2: OB/FVG watch-and-fire entry gate (opt-in via ZONE_ENTRY_ENABLED).
-            zone_entry_enabled=_zone_entry_enabled(),
-            zone_entry_gate=(_build_zone_entry_gate() if _zone_entry_enabled() else None),
+            # F1: fan-out ONE decision to every armed terminal. Read LIVE from
+            # the settings store (dashboard toggle, no restart); env is the
+            # fallback default. Default OFF (safe).
+            fanout_enabled=_toggle_provider("fanout_enabled", _fanout_enabled),
+            # F2: OB/FVG watch-and-fire entry gate. Read LIVE from the settings
+            # store; env is the fallback. Gate is always built so it can be
+            # switched on from the dashboard without a restart.
+            zone_entry_enabled=_toggle_provider("zone_entry_enabled", _zone_entry_enabled),
+            zone_entry_gate=_build_zone_entry_gate(),
         )
 
     def run_cycle(
