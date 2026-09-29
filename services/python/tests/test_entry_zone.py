@@ -141,7 +141,48 @@ def test_plan_requires_inside_zone_when_requested():
 # ---------------------------------------------------------------------------
 # ZoneEntryGate (watch-and-fire)
 # ---------------------------------------------------------------------------
-def test_gate_waits_outside_then_fires_inside():
+def test_plan_fires_when_price_near_zone_within_trigger_window():
+    """Relaxed firing: price within entry_trigger_atr of the zone fires an entry
+    (market entry at current price; SL anchored below the demand zone)."""
+    highs = [2000.0 + i * 0.3 for i in range(60)]
+    lows = [1995.0 + i * 0.3 for i in range(60)]
+    opens = [h - 0.1 for h in highs]
+    price = highs[-1]  # ~2017.7, well above the demand band
+    plan = build_entry_plan(
+        htf_closes=_rising(120),
+        zone_highs=highs,
+        zone_lows=lows,
+        zone_opens=opens,
+        trigger_price=price,
+        atr=5.0,
+        require_inside_zone=True,
+    )
+    assert plan is not None
+    assert plan.direction == "BUY"
+    # Market entry == current price (not the far zone edge).
+    assert abs(plan.entry - price) < 1e-6
+    # SL anchored at/below the zone bottom.
+    assert plan.stop_loss <= plan.zone_bottom + 1e-6
+    assert plan.take_profit > plan.entry
+
+
+def test_plan_waits_when_price_too_far_from_zone():
+    """Beyond entry_trigger_atr the plan stays None (watch-and-fire waits)."""
+    highs = [2000.0 + i * 0.3 for i in range(60)]
+    lows = [1995.0 + i * 0.3 for i in range(60)]
+    opens = [h - 0.1 for h in highs]
+    price = highs[-1] + 100.0  # very far above the demand zone
+    plan = build_entry_plan(
+        htf_closes=_rising(120),
+        zone_highs=highs,
+        zone_lows=lows,
+        zone_opens=opens,
+        trigger_price=price,
+        atr=5.0,
+        require_inside_zone=True,
+    )
+    assert plan is None
+
     gate = ZoneEntryGate()
     highs = [100.0 + i * 0.1 for i in range(20)]
     lows = [99.0 + i * 0.1 for i in range(20)]

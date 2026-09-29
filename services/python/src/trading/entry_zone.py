@@ -39,6 +39,8 @@ __all__ = [
     "find_fair_value_gaps",
     "compute_bias",
     "build_entry_plan",
+    "pick_zone",
+    "zone_distance",
 ]
 
 # Default reward/risk target for the take-profit (2R). The operator can lower
@@ -46,6 +48,14 @@ __all__ = [
 DEFAULT_RR = 2.0
 # Reject stops wider than this many ATRs (protects against absurd zones).
 DEFAULT_MAX_RISK_ATR = 2.5
+# Treat price within this many ATRs of a zone band as "at the zone" (avoids the
+# too-strict exact-band requirement that produced no entries).
+DEFAULT_ZONE_TOLERANCE_ATR = 0.25
+# Reject a zone farther than this many ATRs from price (unreachable in practice).
+DEFAULT_ZONE_PROXIMITY_ATR = 4.0
+# Practical firing distance: price within this many ATRs of the band fires the
+# entry (a normal retracement), so signals actually execute in a trend.
+DEFAULT_ENTRY_TRIGGER_ATR = 2.0
 
 
 @dataclass(frozen=True)
@@ -125,42 +135,79 @@ def compute_bias(
 
 
 def find_order_blocks(
-    highs: list[float], lows: list[float], lookback: int = 20
+    highs: list[float],
+    lows: list[float],
+    opens: list[float] | None = None,
+    lookback: int = 20,
 ) -> list[dict[str, Any]]:
     """Return recent order-block bands: ``{type, top, bottom, mid}``.
 
-    A bullish OB is the last down-candle before an up-move (approximated here by
-    the highest high / lowest low of the recent pivot clusters). Kept simple and
-    deterministic: we surface the recent swing-high band (bearish OB) and
-    swing-low band (bullish OB).
+    When candle **opens** are provided we use the classic SMC definition: the
+    last opposite-colour candle before the impulse (a down-candle below price ⇒
+    bullish OB / demand; an up-candle above price ⇒ bearish OB / supply). The
+    band is that candle's high/low — anchored near price, so an entry is
+    achievable in a trend.
+
+    Without opens we fall back to the recent swing-low / swing-high bands (the
+    older behaviour), kept tight so the derived stop is not absurdly wide.
     """
     obs: list[dict[str, Any]] = []
-    if len(highs) < lookback or len(lows) < lookback:
+    n = len(highs)
+    if n < max(5, lookback // 2) or len(lows) < max(5, lookback // 2):
         return obs
-    recent_high = max(highs[-lookback:])
-    recent_low = min(lows[-lookback:])
-    # Bearish OB: a band just under the recent swing high (supply).
-    if recent_high > 0:
-        band = (recent_high - recent_low) * 0.1 or recent_high * 0.0005
-        obs.append(
-            {
-                "type": "bearish",
-                "top": recent_high,
-                "bottom": recent_high - band,
-                "mid": recent_high - band / 2.0,
-            }
-        )
-    # Bullish OB: a band just above the recent swing low (demand).
-    if recent_low > 0:
-        band = (recent_high - recent_low) * 0.1 or recent_low * 0.0005
-        obs.append(
-            {
-                "type": "bullish",
-                "top": recent_low + band,
-                "bottom": recent_low,
-                "mid": recent_low + band / 2.0,
-            }
-        )
+
+    window = min(lookback, n)
+    recent_high = max(highs[-window:])
+    recent_low = min(lows[-window:])
+    rng = (recent_high - recent_low) or (recent_low * 0.001 if recent_low else 1.0)
+    band = max(rng * 0.1, 1e-9)
+
+    opens = opens or []
+    used_body = False
+    if len(opens) == n:
+        price = highs[-1]
+        bullish_band = None
+        bearish_band = None
+        for i in range(n - 2, max(-1, n - window - 1), -1):
+            o = _num(opens[i])
+            h = _num(highs[i])
+            low = _num(lows[i])
+            # Approximate this candle's close with the NEXT candle's open.
+            close = _num(opens[i + 1]) if i + 1 < n else o
+            if o > close and h <= price and bullish_band is None:
+                bullish_band = (low, h)  # down-candle = demand
+            if o < close and low >= price and bearish_band is None:
+                bearish_band = (low, h)  # up-candle = supply
+            if bullish_band and bearish_band:
+                break
+        if bullish_band:
+            lo, hi = bullish_band
+            obs.append({"type": "bullish", "top": hi, "bottom": lo, "mid": (hi + lo) / 2.0})
+            used_body = True
+        if bearish_band:
+            lo, hi = bearish_band
+            obs.append({"type": "bearish", "top": hi, "bottom": lo, "mid": (hi + lo) / 2.0})
+            used_body = True
+
+    if not used_body:
+        if recent_high > 0:
+            obs.append(
+                {
+                    "type": "bearish",
+                    "top": recent_high,
+                    "bottom": recent_high - band,
+                    "mid": recent_high - band / 2.0,
+                }
+            )
+        if recent_low > 0:
+            obs.append(
+                {
+                    "type": "bullish",
+                    "top": recent_low + band,
+                    "bottom": recent_low,
+                    "mid": recent_low + band / 2.0,
+                }
+            )
     return obs
 
 
@@ -196,20 +243,35 @@ def find_fair_value_gaps(
     return fvgs[-5:]
 
 
+def _zone_distance(zone: dict[str, Any], price: float) -> float:
+    """Distance from ``price`` to the zone band (0 when inside the band)."""
+    top = _num(zone.get("top"))
+    bottom = _num(zone.get("bottom"))
+    if bottom <= price <= top:
+        return 0.0
+    if price > top:
+        return price - top
+    return bottom - price
+
+
 def _pick_zone(zones: list[dict[str, Any]], want: str, price: float) -> Optional[dict[str, Any]]:
-    """Pick the zone of the wanted side closest to (and on the correct side of) price."""
+    """Pick the wanted-side zone CLOSEST to price.
+
+    Previously a bullish demand zone had to sit strictly BELOW price, so in an
+    uptrend (price above every demand zone) no zone was ever accepted and no
+    entry fired. Now we pick the nearest wanted-side zone regardless of side and
+    let the caller's proximity/tolerance guards decide — this is far less
+    restrictive while still directional.
+    """
     candidates = [z for z in zones if z.get("type") == want]
     if not candidates:
         return None
-    if want == "bullish":
-        # Demand must sit BELOW the current price (price retraces down into it).
-        below = [z for z in candidates if z["top"] <= price]
-        pool = below or candidates
-        return max(pool, key=lambda z: z["top"])
-    # Bearish supply must sit ABOVE the current price (price retraces up into it).
-    above = [z for z in candidates if z["bottom"] >= price]
-    pool = above or candidates
-    return min(pool, key=lambda z: z["bottom"])
+    return min(candidates, key=lambda z: _zone_distance(z, price))
+
+
+# Public aliases (used by the pipeline's diagnostics).
+pick_zone = _pick_zone
+zone_distance = _zone_distance
 
 
 def build_entry_plan(
@@ -223,6 +285,10 @@ def build_entry_plan(
     max_risk_atr: float = DEFAULT_MAX_RISK_ATR,
     min_bias_strength: float = 0.0,
     require_inside_zone: bool = True,
+    zone_opens: list[float] | None = None,
+    zone_tolerance_atr: float = DEFAULT_ZONE_TOLERANCE_ATR,
+    zone_proximity_atr: float = DEFAULT_ZONE_PROXIMITY_ATR,
+    entry_trigger_atr: float = DEFAULT_ENTRY_TRIGGER_ATR,
 ) -> Optional[EntryPlan]:
     """Build an OB/FVG entry plan from MTF inputs (F2).
 
@@ -235,8 +301,16 @@ def build_entry_plan(
         max_risk_atr: reject stops wider than this many ATRs.
         min_bias_strength: minimum bias strength to allow an entry.
         require_inside_zone: when True (watch-and-fire), the trigger price must
-            be inside the zone; when False the plan is returned regardless (so
-            the caller can store it as a PENDING signal and wait).
+            be inside the zone OR within ``zone_tolerance_atr`` of it; when
+            False the plan is returned regardless (caller stores it as PENDING).
+        zone_opens: candle opens for the zone timeframe (sharper OB detection).
+        zone_tolerance_atr: treat price within this many ATRs of the band as
+            "at the zone" (prevents the too-strict exact-band requirement).
+        zone_proximity_atr: reject a zone farther than this many ATRs from price
+            (avoids waiting for an unreachable zone; 0 disables the guard).
+        entry_trigger_atr: price within this many ATRs of the zone band counts
+            as "at the zone" — the practical firing distance (larger = more
+            permissive; the entry still fills at the band edge).
 
     Returns:
         :class:`EntryPlan` or ``None`` when no valid setup exists.
@@ -250,7 +324,9 @@ def build_entry_plan(
         return None
 
     want = "bullish" if direction == "BULLISH" else "bearish"
-    zones = find_fair_value_gaps(zone_highs, zone_lows) + find_order_blocks(zone_highs, zone_lows)
+    zones = find_fair_value_gaps(zone_highs, zone_lows) + find_order_blocks(
+        zone_highs, zone_lows, zone_opens
+    )
     zone = _pick_zone(zones, want, price)
     if zone is None:
         return None
@@ -260,27 +336,42 @@ def build_entry_plan(
     if top <= 0 or bottom <= 0 or top <= bottom:
         return None
 
-    # Entry at the near edge of the zone (closest edge to the current price).
+    # Proximity guard: skip zones too far from price (unreachable in practice).
+    distance = _zone_distance(zone, price)
+    if atr > 0 and zone_proximity_atr > 0:
+        if distance > zone_proximity_atr * atr:
+            return None
+
+    # Watch-and-fire uses a MARKET order, so the entry is the CURRENT price
+    # (not the zone edge — that would be a limit order). The zone anchors the
+    # STOP: SL just beyond the far edge of the demand/supply band.
+    entry = price
     if direction == "BULLISH":
-        entry = top if price > top else (bottom if price < bottom else price)
         stop_loss = bottom
     else:
-        entry = bottom if price < bottom else (top if price > top else price)
         stop_loss = top
 
     risk = abs(entry - stop_loss)
     if risk <= 0:
         return None
-    # Reject absurdly wide stops (e.g. zone spans the whole range).
+    # Reject absurdly wide stops (e.g. zone spans the whole range, or the price
+    # is too far past the zone so the SL would be huge).
     if atr > 0 and max_risk_atr > 0 and risk > max_risk_atr * atr:
         return None
 
     sign = 1.0 if direction == "BULLISH" else -1.0
     take_profit = entry + sign * rr * risk
 
-    inside = bottom <= price <= top
-    if require_inside_zone and not inside:
-        # Not yet at the zone → no immediate entry (caller stores PENDING).
+    # "At the zone" = inside the band OR within the tolerance buffer around it.
+    # ``entry_trigger_atr`` is the practical firing distance: price within that
+    # many ATRs of the band counts as "at the zone" (default 2.0 ATR is a normal
+    # retracement, so entries actually fire in a trend instead of only when the
+    # price sits exactly inside a narrow band).
+    tol = max(zone_tolerance_atr * atr, 0.0) if atr > 0 else max(abs(top - bottom), 0.0)
+    trigger_window = max(tol, entry_trigger_atr * atr) if atr > 0 else tol
+    inside = (bottom - tol) <= price <= (top + tol)
+    if require_inside_zone and not inside and distance > trigger_window:
+        # Not yet close enough → no immediate entry (caller stores PENDING).
         return None
 
     return EntryPlan(
@@ -336,6 +427,10 @@ class ZoneEntryGate:
         trigger_price: float,
         atr: float = 0.0,
         rr: float = DEFAULT_RR,
+        zone_opens: list[float] | None = None,
+        zone_tolerance_atr: float = DEFAULT_ZONE_TOLERANCE_ATR,
+        zone_proximity_atr: float = DEFAULT_ZONE_PROXIMITY_ATR,
+        entry_trigger_atr: float = DEFAULT_ENTRY_TRIGGER_ATR,
     ) -> Optional[EntryPlan]:
         """Return a plan to execute NOW, or ``None`` while waiting at the zone.
 
@@ -356,6 +451,10 @@ class ZoneEntryGate:
                 atr=atr,
                 rr=rr,
                 require_inside_zone=True,
+                zone_opens=zone_opens,
+                zone_tolerance_atr=zone_tolerance_atr,
+                zone_proximity_atr=zone_proximity_atr,
+                entry_trigger_atr=entry_trigger_atr,
             )
             if live is not None:
                 self._pending.pop(symbol, None)
@@ -369,6 +468,10 @@ class ZoneEntryGate:
                 atr=atr,
                 rr=rr,
                 require_inside_zone=False,
+                zone_opens=zone_opens,
+                zone_tolerance_atr=zone_tolerance_atr,
+                zone_proximity_atr=zone_proximity_atr,
+                entry_trigger_atr=entry_trigger_atr,
             )
             if waiting is not None:
                 if symbol not in self._pending and len(self._pending) >= self._max_pending:

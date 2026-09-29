@@ -708,13 +708,15 @@ class TradingPipeline:
         # zone (aligned with the M30/H1 bias). If price is not there yet, the
         # signal is parked as pending and NO order is sent this cycle.
         if self.zone_entry_enabled and self.zone_entry_gate is not None:
-            plan = self._zone_entry_plan(result.symbol, proposal, validation, analysis_context)
+            plan, zone_reason = self._zone_entry_plan(
+                result.symbol, proposal, validation, analysis_context
+            )
             if plan is None:
                 result.status = STATUS_BLOCKED
-                result.risk_reason = "menunggu harga masuk zona OB/FVG"
+                result.risk_reason = f"entry OB/FVG: {zone_reason}"
                 result.add_stage("zone_entry", STAGE_BLOCKED, result.risk_reason)
                 result.add_stage("execution", STAGE_SKIPPED, "menunggu zona entry")
-                self._mark_signal(result, "skipped", "menunggu zona OB/FVG")
+                self._mark_signal(result, "skipped", f"menunggu zona OB/FVG: {zone_reason}")
                 self._finalise(result)
                 return result
             # At the zone → apply the plan's levels onto the proposal so the
@@ -1668,14 +1670,13 @@ class TradingPipeline:
         proposal: dict[str, Any],
         validation: dict[str, Any],
         analysis_context: dict[str, Any],
-    ) -> Optional[dict[str, Any]]:
-        """Return an executable OB/FVG plan for ``symbol``, or None to wait (F2).
+    ) -> tuple[Optional[dict[str, Any]], str]:
+        """Return ``(plan, reason)`` for the OB/FVG gate (F2).
 
-        Gathers the multi-timeframe inputs (bias TF for direction, zone TF for
-        OB/FVG bands, the live price for the trigger) and asks the injected
-        :class:`ZoneEntryGate` whether to fire now. Only a plan whose direction
-        AGREES with the committee's proposal is accepted. Fail-safe: any error
-        returns None (the entry waits rather than firing blind).
+        ``plan`` is the executable entry plan (or ``None``); ``reason`` is a
+        short human-readable explanation surfaced in the cycle result so the
+        operator can see WHY a signal did not fire (bias neutral, no zone,
+        too far, direction mismatch, …). Fail-safe: any error → ``(None, ...)``.
         """
         try:
             gate = self.zone_entry_gate
@@ -1698,12 +1699,13 @@ class TradingPipeline:
                 except (TypeError, ValueError):
                     continue
             if trigger_price <= 0:
-                return None
+                return None, "tidak ada harga live untuk cek zona"
 
             bars = self._zone_bars(symbol, ctx)
             bias_closes = bars.get("bias_closes") or []
             zone_highs = bars.get("zone_highs") or []
             zone_lows = bars.get("zone_lows") or []
+            zone_opens = bars.get("zone_opens") or []
             atr = float(bars.get("atr") or 0.0)
 
             rr = 0.0
@@ -1719,12 +1721,15 @@ class TradingPipeline:
                 htf_closes=bias_closes,
                 zone_highs=zone_highs,
                 zone_lows=zone_lows,
+                zone_opens=zone_opens,
                 trigger_price=trigger_price,
                 atr=atr,
                 rr=(rr if rr > 0 else ez.DEFAULT_RR),
             )
             if plan is None:
-                return None
+                return None, self._zone_wait_reason(
+                    bias_closes, zone_highs, zone_lows, trigger_price, atr
+                )
             plan_dict = plan.to_dict()
             want = str(proposal.get("direction", "")).upper()
             if want and plan_dict.get("direction") != want:
@@ -1734,11 +1739,43 @@ class TradingPipeline:
                     plan_dict.get("direction"),
                     want,
                 )
-                return None
-            return plan_dict
+                return None, f"arah zona {plan_dict.get('direction')} != sinyal {want}"
+            return plan_dict, "harga di zona OB/FVG"
         except Exception as exc:  # noqa: BLE001 - never break the cycle
             logger.debug("Zone entry plan skipped for %s: %s", symbol, exc)
-            return None
+            return None, "gagal menghitung zona"
+
+    def _zone_wait_reason(
+        self,
+        bias_closes: list[float],
+        zone_highs: list[float],
+        zone_lows: list[float],
+        price: float,
+        atr: float,
+    ) -> str:
+        """Explain why the zone gate did not fire (best-effort, fail-safe)."""
+        try:
+            import trading.entry_zone as ez
+
+            if len(bias_closes) < 51:
+                return f"data bias kurang ({len(bias_closes)} bar)"
+            bias = ez.compute_bias(bias_closes)
+            if bias.get("direction") == "NEUTRAL":
+                return "bias pasar netral (M30/H1 tak searah)"
+            want = "bullish" if bias["direction"] == "BULLISH" else "bearish"
+            zones = ez.find_fair_value_gaps(zone_highs, zone_lows) + ez.find_order_blocks(
+                zone_highs, zone_lows
+            )
+            zone = ez.pick_zone(zones, want, price)
+            if zone is None:
+                return "tak ada zona OB/FVG yang cocok"
+            dist = ez.zone_distance(zone, price)
+            return (
+                f"harga {dist:.4g} dari zona (window {ez.DEFAULT_ENTRY_TRIGGER_ATR}×ATR"
+                f"={ez.DEFAULT_ENTRY_TRIGGER_ATR * atr:.4g}); menunggu harga mendekat"
+            )
+        except Exception:  # noqa: BLE001
+            return "menunggu harga masuk zona OB/FVG"
 
     def _zone_bars(self, symbol: str, ctx: dict[str, Any]) -> dict[str, Any]:
         """Fetch MTF bars for the zone gate (bias/zones/atr) — fail-safe {}."""
@@ -1780,6 +1817,10 @@ class TradingPipeline:
                 float(b.get("low", 0.0)) if isinstance(b, dict) else float(getattr(b, "low", 0.0))
                 for b in zone_bars
             ]
+            zone_opens = [
+                float(b.get("open", 0.0)) if isinstance(b, dict) else float(getattr(b, "open", 0.0))
+                for b in zone_bars
+            ]
             atr = 0.0
             try:
                 from trading.indicators import atr_series
@@ -1801,6 +1842,7 @@ class TradingPipeline:
                 "bias_closes": bias_closes,
                 "zone_highs": zone_highs,
                 "zone_lows": zone_lows,
+                "zone_opens": zone_opens,
                 "atr": atr,
             }
         except Exception:  # noqa: BLE001
