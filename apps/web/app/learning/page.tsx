@@ -2,6 +2,8 @@
 
 import AppShell from '@/components/AppShell';
 import Pagination, { usePagination } from '@/components/ui/pagination';
+import { LoadingState } from '@/components/ui/loading-state';
+import { EmptyState } from '@/components/ui/empty-state';
 import { useApiData } from '@/lib/useApiData';
 import { OUTCOME_LABELS, humanize } from '@/lib/labels';
 import styles from '@/components/ops.module.css';
@@ -103,9 +105,12 @@ export default function LearningPage() {
           </div>
           <div className={styles.panelBody}>
             {loading && lessons.length === 0 ? (
-              <p className={styles.empty}>Loading…</p>
+              <LoadingState rows={6} />
             ) : lessons.length === 0 ? (
-              <p className={styles.empty}>No lessons recorded yet.</p>
+              <EmptyState
+                title="Belum ada pelajaran tercatat"
+                description="Pelajaran terkumpul saat trade ditutup dan review otomatis berjalan."
+              />
             ) : (
               <table className={styles.table}>
                 <thead>

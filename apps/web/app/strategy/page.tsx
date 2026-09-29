@@ -8,6 +8,7 @@ import { fmtDateTime } from '../../lib/useApiData';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 import Pagination from '../../components/ui/pagination';
+import { LoadingState } from '../../components/ui/loading-state';
 import { PARAM_LABELS, labelFor } from '../../lib/labels';
 
 // View model: camelCase performance fields for rendering. Mapped from the
@@ -151,7 +152,7 @@ export default function StrategyCenterPage() {
           <section className={styles.card}>
             <h2>Daftar strategi</h2>
             {loading ? (
-              <div className={styles.empty}>Memuat…</div>
+              <LoadingState rows={5} />
             ) : error && strategies.length === 0 ? (
               <div className={styles.empty}>Data strategi tidak tersedia — cek token lalu muat ulang.</div>
             ) : strategies.length === 0 ? (

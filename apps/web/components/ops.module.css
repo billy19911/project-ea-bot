@@ -26,6 +26,11 @@
   flex-direction: column;
   gap: 6px;
   overflow: hidden;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.card:hover {
+  border-color: var(--border-strong);
 }
 
 /* A hairline accent bar on the top edge — a nod to instrument bezels. */
@@ -122,12 +127,15 @@
 .tableWrapper {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--r-lg);
   overflow-x: auto;
   padding: var(--sp-2);
 }
 
 .table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   text-align: left;
   padding: 9px var(--sp-3);
   font-family: var(--font-mono);
@@ -146,6 +154,11 @@
   border-bottom: 1px solid var(--border);
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
+}
+
+/* Subtle zebra so long numeric tables scan cleanly, plus a warm hover. */
+.table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--surface-muted) 45%, transparent);
 }
 
 .table tbody tr {
@@ -252,7 +265,7 @@
 .btnPrimary {
   background: var(--primary);
   border-color: var(--primary);
-  color: #17130c;
+  color: var(--on-primary);
 }
 
 .btnPrimary:hover:not(:disabled) {

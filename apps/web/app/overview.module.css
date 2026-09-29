@@ -170,6 +170,9 @@
 }
 
 .table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   text-align: left;
   padding: 9px var(--sp-3);
   font-family: var(--font-mono);
@@ -188,6 +191,14 @@
   border-bottom: 1px solid var(--border);
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
+}
+
+.table tbody tr {
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.table tbody tr:hover {
+  background: var(--surface-muted);
 }
 
 .table tbody tr:last-child td {

@@ -5,6 +5,7 @@ import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
 import { useApiData, errorMessageFor } from '@/lib/useApiData';
 import { COLUMN_LABELS, PARAM_LABELS, labelFor } from '@/lib/labels';
+import { LoadingState } from '@/components/ui/loading-state';
 import styles from '@/components/ops.module.css';
 
 /**
@@ -137,7 +138,7 @@ export default function WalkForwardPage() {
             {!selected ? (
               <p className={styles.empty}>Select an experiment to view its windows.</p>
             ) : loadingDetail ? (
-              <p className={styles.empty}>Loading…</p>
+              <LoadingState rows={5} />
             ) : windows.length === 0 ? (
               <p className={styles.empty}>
                 No walk-forward windows for this experiment yet. Run a backtest

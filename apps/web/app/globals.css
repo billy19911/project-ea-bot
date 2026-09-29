@@ -282,6 +282,15 @@ table {
   border-collapse: collapse;
 }
 
+/* Sticky headers give long numeric tables (control-plane, observability,
+   research) a scannable header while scrolling. Harmless where the table has no
+   own scroll container (the header simply stays at the top of the viewport). */
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
 th,
 td {
   text-align: left;

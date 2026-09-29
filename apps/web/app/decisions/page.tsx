@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import Pagination, { usePagination } from '@/components/ui/pagination';
+import { LoadingState } from '@/components/ui/loading-state';
+import { EmptyState } from '@/components/ui/empty-state';
 import { useApiData } from '@/lib/useApiData';
 import styles from '@/components/ops.module.css';
 
@@ -115,13 +117,16 @@ export default function DecisionsPage() {
           </div>
           <div className={styles.panelBody}>
             {loading && rows.length === 0 ? (
-              <p className={styles.empty}>Loading…</p>
+              <LoadingState rows={6} />
             ) : rows.length === 0 ? (
-              <p className={styles.empty}>
-                {filter
-                  ? 'No decisions match the filter.'
-                  : 'No decisions recorded yet — run a pipeline cycle to populate the ledger.'}
-              </p>
+              <EmptyState
+                title={filter ? 'Tidak ada keputusan cocok' : 'Belum ada keputusan'}
+                description={
+                  filter
+                    ? 'Coba ubah kata kunci filter.'
+                    : 'Jalankan satu siklus pipeline untuk mengisi ledger keputusan.'
+                }
+              />
             ) : (
               <table className={styles.table}>
                 <thead>

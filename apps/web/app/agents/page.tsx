@@ -5,6 +5,7 @@ import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
+import { LoadingState } from '../../components/ui/loading-state';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 interface DecisionLevels {
@@ -337,7 +338,7 @@ export default function AgentsPage() {
     <AppShell activeKey="agents" eyebrow="Xynn / Agen" title="Ruang Komite">
       <div className={styles.wrap}>
         <div className={styles.left}>
-          {!loaded && <p className={styles.muted}>Memuat…</p>}
+          {!loaded && <LoadingState rows={4} />}
 
           {/* A. Ringkasan */}
           <div className={styles.summaryRow}>

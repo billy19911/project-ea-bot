@@ -4,6 +4,9 @@ import { useCallback, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { DataTable } from '@/components/ui/data-table';
 import { Card } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { LoadingState } from '@/components/ui/loading-state';
 import { apiFetch } from '@/lib/api';
 import { errorMessageFor, fmtDateTime } from '@/lib/useApiData';
 import { useAutoRefresh } from '@/lib/useAutoRefresh';
@@ -60,17 +63,24 @@ export default function OrdersPage() {
 
   return (
     <AppShell activeKey="orders" eyebrow="Xynn / Order" title="Order" actions={null}>
-      {error && <div style={{ marginBottom: 12, color: 'var(--danger)' }}>{error}</div>}
-      <Card title="Order" description="Order pending di broker">
-        {loaded && rows.length === 0 && !error ? (
-          <p className="text-center text-[var(--text-muted)] py-6">
-            Tidak ada order pending. Entry pasar dieksekusi langsung, jadi daftar ini
-            biasanya kosong kecuali Anda memasang order pending (limit/stop).
-          </p>
-        ) : (
-          <DataTable columns={columns} rows={rows} unitLabel="order" />
-        )}
-      </Card>
+      {error ? (
+        <ErrorState title="Gagal memuat order" description={error} onRetry={load} />
+      ) : (
+        <Card title="Order" description="Order pending di broker" noPadding>
+          {!loaded ? (
+            <div className="p-4">
+              <LoadingState rows={5} />
+            </div>
+          ) : rows.length === 0 ? (
+            <EmptyState
+              title="Tidak ada order pending"
+              description="Entry pasar dieksekusi langsung, jadi daftar ini biasanya kosong kecuali Anda memasang order pending (limit/stop)."
+            />
+          ) : (
+            <DataTable columns={columns} rows={rows} unitLabel="order" />
+          )}
+        </Card>
+      )}
     </AppShell>
   );
 }

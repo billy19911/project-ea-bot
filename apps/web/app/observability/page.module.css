@@ -7,7 +7,7 @@
 .pageBody {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--sp-5);
 }
 
 /* ── Tabs ── */
@@ -117,7 +117,7 @@
 .table td strong { display: block; color: var(--text); }
 
 .table td code {
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   background: var(--surface-muted);
   padding: 2px 6px;
@@ -258,7 +258,7 @@
   height: 28px;
   border-radius: 8px;
   background: var(--danger);
-  color: white;
+  color: var(--on-primary);
   display: grid;
   place-items: center;
   font-weight: 800;
@@ -279,7 +279,7 @@
 }
 
 .errorHeader strong { color: var(--text); }
-.errorHeader code { font-family: 'Courier New', monospace; font-size: 11px; color: var(--text-muted); }
+.errorHeader code { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 
 .errorContent p {
   margin: 0;

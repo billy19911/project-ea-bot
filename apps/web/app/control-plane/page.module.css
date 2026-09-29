@@ -71,8 +71,8 @@
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border-radius: 999px;
-  background: rgba(31, 111, 235, 0.12);
+  border-radius: var(--r-full);
+  background: var(--primary-soft);
   color: inherit;
   font-size: 10px;
   font-weight: 700;

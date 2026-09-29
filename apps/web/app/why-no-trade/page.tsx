@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
+import { LoadingState } from '@/components/ui/loading-state';
+import { EmptyState } from '@/components/ui/empty-state';
 import { useApiData } from '@/lib/useApiData';
 import styles from '@/components/ops.module.css';
 
@@ -154,13 +156,16 @@ export default function WhyNoTradePage() {
           </div>
           <div className={styles.panelBody}>
             {loading && rows.length === 0 ? (
-              <p className={styles.empty}>Loading…</p>
+              <LoadingState rows={6} />
             ) : rows.length === 0 ? (
-              <p className={styles.empty}>
-                {all.length === 0
-                  ? 'No decisions recorded yet — run a cycle to populate the ledger.'
-                  : 'No cycles match the filter.'}
-              </p>
+              <EmptyState
+                title={all.length === 0 ? 'Belum ada keputusan' : 'Tidak ada siklus cocok'}
+                description={
+                  all.length === 0
+                    ? 'Jalankan satu siklus untuk mengisi ledger.'
+                    : 'Coba ubah filter.'
+                }
+              />
             ) : (
               <table className={styles.table}>
                 <thead>

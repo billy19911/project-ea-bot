@@ -53,7 +53,7 @@ export function DataTable<T extends unknown>({
               {columns.map((col, i) => (
                 <th
                   key={i}
-                  className="px-4 py-2.5 text-left font-[family-name:var(--font-mono)] text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]"
+                  className="sticky top-0 z-[1] bg-[var(--surface-muted)] px-4 py-2.5 text-left font-[family-name:var(--font-mono)] text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]"
                 >
                   {col.header}
                 </th>

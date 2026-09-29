@@ -3,7 +3,7 @@
 .pageBody {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--sp-5);
 }
 
 .card {
@@ -148,7 +148,7 @@
 }
 
 .table td code {
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   background: var(--surface-muted);
   padding: 2px 6px;
@@ -238,7 +238,7 @@
   height: 28px;
   border-radius: 8px;
   background: var(--danger);
-  color: white;
+  color: var(--on-primary);
   display: grid;
   place-items: center;
   font-weight: 800;
@@ -263,7 +263,7 @@
 }
 
 .errorHeader code {
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
 }

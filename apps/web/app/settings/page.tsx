@@ -27,6 +27,7 @@ import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 import Pagination from '../../components/ui/pagination';
 import InfoTooltip from '../../components/ui/info-tooltip';
+import { useToast } from '../../components/ui/toast';
 import { KNOB_LABELS, KNOB_HELP, RISK_LABELS, labelFor } from '../../lib/labels';
 
 type SourceState = 'live' | 'defaults' | 'unavailable';
@@ -185,6 +186,7 @@ function KnobNumberField({
 export default function SettingsPage() {
   const [tab, setTab] = useState('Runtime');
   const [notice, setNotice] = useState<Notice>(null);
+  const toast = useToast();
   const [modelsState, setModelsState] = useState<ModelsState>({ models: [], source: 'unavailable' });
   const [payload, setPayload] = useState<SettingsPayload | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -319,16 +321,16 @@ export default function SettingsPage() {
       }
       const applied = data.applied ?? {};
       const keys = Object.keys(applied);
-      setNotice({
-        kind: 'ok',
-        text: keys.length
-          ? `Tersimpan & diterapkan: ${keys.map((k) => `${k} = ${applied[k]}`).join(', ')}`
-          : 'Tersimpan.',
-      });
+      const okText = keys.length
+        ? `Tersimpan & diterapkan: ${keys.map((k) => `${k} = ${applied[k]}`).join(', ')}`
+        : 'Tersimpan.';
+      setNotice({ kind: 'ok', text: okText });
+      toast.show(okText, 'ok');
       setDirty(false);
       await load();
     } catch {
       setNotice({ kind: 'error', text: 'Gagal menyimpan — layanan tidak menjawab.' });
+      toast.show('Gagal menyimpan — layanan tidak menjawab.', 'error');
     } finally {
       setSaving(false);
     }
@@ -537,6 +539,7 @@ export default function SettingsPage() {
           )}
         </div>
       </AppShell>
+      <toast.View />
     </>
   );
 }

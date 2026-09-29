@@ -3,6 +3,8 @@
 import AppShell from '@/components/AppShell';
 import { useApiData, fmtDate } from '@/lib/useApiData';
 import { MISMATCH_KIND_LABELS, labelFor } from '@/lib/labels';
+import { LoadingState } from '@/components/ui/loading-state';
+import { EmptyState } from '@/components/ui/empty-state';
 import styles from '@/components/ops.module.css';
 
 /**
@@ -89,12 +91,12 @@ export default function ReconciliationPage() {
           </div>
           <div className={styles.panelBody}>
             {loading && report == null ? (
-              <p className={styles.empty}>Loading…</p>
+              <LoadingState rows={5} />
             ) : report == null ? (
-              <p className={styles.empty}>
-                No reconciliation has run yet. The guard reports clean-vs-clean until MT5 live mode
-                supplies both sides.
-              </p>
+              <EmptyState
+                title="Belum ada rekonsiliasi"
+                description="Guard melaporkan clean-vs-clean sampai mode MT5 live menyediakan kedua sisi."
+              />
             ) : (
               <>
                 <div className={styles.kv} style={{ marginBottom: 'var(--sp-4)' }}>

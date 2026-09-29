@@ -5,6 +5,7 @@ import AppShell from '@/components/AppShell';
 import { apiFetch } from '@/lib/api';
 import { useApiData, fmtNum, fmtPct, errorMessageFor } from '@/lib/useApiData';
 import { PARAM_LABELS, labelFor } from '@/lib/labels';
+import { LoadingState } from '@/components/ui/loading-state';
 import styles from '@/components/ops.module.css';
 
 /**
@@ -121,7 +122,7 @@ export default function MonteCarloPage() {
         {detailError && <div className={styles.error}>{detailError}</div>}
 
         {loadingDetail ? (
-          <p className={styles.empty}>Loading…</p>
+          <LoadingState rows={6} />
         ) : !hasMC ? (
           <div className={styles.notice}>
             This experiment has no Monte Carlo result yet — run a backtest to produce one. The

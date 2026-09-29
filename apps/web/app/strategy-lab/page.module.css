@@ -3,7 +3,7 @@
 .pageBody {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--sp-5);
 }
 
 .notice {
@@ -173,7 +173,7 @@
   cursor: pointer;
   border: none;
   background: var(--primary);
-  color: white;
+  color: var(--on-primary);
 }
 
 .btnPrimary:hover:not(:disabled) {

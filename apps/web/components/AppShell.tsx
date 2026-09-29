@@ -1,8 +1,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import { apiFetch, getAuthToken } from '../lib/api';
-import { cn } from '../lib/utils';
 // Inline SVG Icon component defined later
 import { StatusIndicator, type UiStatus } from './ui/status-indicator';
 import { EnvironmentBadge, type Environment } from './ui/environment-badge';
@@ -266,6 +265,39 @@ export default function AppShell({
   const [collapsedReady, setCollapsedReady] = useState(false);
   // Mobile drawer state (independent from desktop collapse).
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Collapsible nav groups: label -> open. The group holding the active page is
+  // always forced open; the rest remember the operator's choice (localStorage).
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const [groupsReady, setGroupsReady] = useState(false);
+  // Ref to the active nav link so the sidebar can scroll it into view.
+  const activeLinkRef = useRef<HTMLAnchorElement | null>(null);
+
+  // Load persisted group-open state (after mount: hydration-safe).
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('sidebar-groups');
+      if (raw) setOpenGroups(JSON.parse(raw) as Record<string, boolean>);
+    } catch {
+      // localStorage tidak tersedia — pakai default (semua grup terbuka).
+    }
+    setGroupsReady(true);
+  }, []);
+
+  // Persist group state after the operator toggles.
+  useEffect(() => {
+    if (!groupsReady) return;
+    try {
+      localStorage.setItem('sidebar-groups', JSON.stringify(openGroups));
+    } catch {
+      // abaikan
+    }
+  }, [openGroups, groupsReady]);
+
+  // A group is open when explicitly opened OR (by default) not yet collapsed.
+  const isGroupOpen = (label: string) => openGroups[label] !== false;
+
+  const toggleGroup = (label: string) =>
+    setOpenGroups((prev) => ({ ...prev, [label]: prev[label] === false }));
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
@@ -300,6 +332,19 @@ export default function AppShell({
       localStorage.setItem('sidebar-collapsed', collapsed.toString());
     } catch {}
   }, [collapsed, collapsedReady]);
+
+  // Keep the active nav item visible: with 36 items the active one is often
+  // below the fold, forcing a manual scroll. Scroll it to the centre whenever
+  // the route changes (mirrors the command palette's behaviour).
+  useEffect(() => {
+    const el = activeLinkRef.current;
+    if (!el) return;
+    try {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } catch {
+      // Older engines: ignore.
+    }
+  }, [pathname]);
 
   // Toggle button (placed in topbar actions)
   const toggleSidebar = () => setCollapsed(c => !c);
@@ -460,10 +505,31 @@ export default function AppShell({
       <aside className={`${styles.sidebar} ${drawerOpen ? styles.sidebarOpen : ''}`}>
         <div className={styles.brand}>
           <span className={styles.brandMark}>EA</span>
-          <div>
+          <div className={styles.brandText}>
             <strong>EA BOT</strong>
             <small>TRADING COMMAND</small>
           </div>
+          <button
+            type="button"
+            className={styles.collapseBtn}
+            onClick={toggleSidebar}
+            title={collapsed ? 'Perluas sidebar' : 'Perkecil sidebar'}
+            aria-label={collapsed ? 'Perluas sidebar' : 'Perkecil sidebar'}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              {collapsed ? <path d="M9 18l6-6-6-6" /> : <path d="M15 18l-6-6 6-6" />}
+            </svg>
+          </button>
           <button
             type="button"
             className={styles.drawerClose}
@@ -477,23 +543,58 @@ export default function AppShell({
         </div>
 
         <nav className={styles.nav}>
-          {NAV_GROUPS.map(group => (
-            <div key={group.label} className={styles.navGroup}>
-              <div className={styles.navLabel}>{group.label}</div>
-              {group.items.map(item => (
-                <Link
-                  key={item.key}
-                  href={item.href}
-                  className={`${styles.navItem} ${activeKey === item.key ? styles.navActive : ''}`}
-                  aria-current={activeKey === item.key ? 'page' : undefined}
-                  onClick={() => setDrawerOpen(false)}
+          {NAV_GROUPS.map(group => {
+            const groupHasActive = group.items.some(it => it.key === activeKey);
+            // The active group is ALWAYS open; others follow the saved state.
+            const open = groupHasActive || isGroupOpen(group.label);
+            return (
+              <div key={group.label} className={styles.navGroup}>
+                <button
+                  type="button"
+                  className={styles.navLabel}
+                  aria-expanded={open}
+                  onClick={() => toggleGroup(group.label)}
                 >
-                  <Icon name={item.icon} />
-                  <span>{item.label}</span>
-                </Link>
-              ))}
-            </div>
-          ))}
+                  <span>{group.label}</span>
+                  <svg
+                    className={`${styles.navChevron} ${open ? styles.navChevronOpen : ''}`}
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+                {open && (
+                  <div className={styles.navItems}>
+                    {group.items.map(item => {
+                      const isActive = activeKey === item.key;
+                      return (
+                        <Link
+                          key={item.key}
+                          href={item.href}
+                          ref={isActive ? activeLinkRef : undefined}
+                          className={`${styles.navItem} ${isActive ? styles.navActive : ''}`}
+                          aria-current={isActive ? 'page' : undefined}
+                          title={collapsed ? item.label : undefined}
+                          onClick={() => setDrawerOpen(false)}
+                        >
+                          <Icon name={item.icon} />
+                          <span className={styles.navItemText}>{item.label}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </nav>
 
         <div className={styles.footer}>
@@ -541,14 +642,6 @@ export default function AppShell({
               Sign out
             </button>
           )}
-          <button
-            type="button"
-            className={cn(styles.logoutBtn, 'ml-2')}
-            onClick={toggleSidebar}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {collapsed ? '→' : '←'}
-          </button>
           {/* Realtime indicator always visible at bottom */}
           <div className={styles.accountHint}>
             <RealtimeIndicator status={realtime} />

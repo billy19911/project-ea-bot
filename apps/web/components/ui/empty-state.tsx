@@ -41,7 +41,7 @@ export function EmptyState({ title, description, actionLabel, onAction, classNam
       {description && <p className="text-[var(--text-muted)]">{description}</p>}
       {actionLabel && onAction && (
         <button
-          className={cn('mt-2 px-4 py-2 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-md hover:bg-[var(--primary-hover)]')}
+          className={cn('mt-2 px-4 py-2 bg-[var(--primary)] text-[var(--on-primary)] rounded-md hover:bg-[var(--primary-hover)]')}
           onClick={onAction}
         >{actionLabel}</button>
       )}

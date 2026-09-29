@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { RiskBadge, type RiskLevel } from '@/components/ui/risk-badge';
+import { LoadingState } from '@/components/ui/loading-state';
 import { apiFetch } from '@/lib/api';
 import { useAutoRefresh } from '@/lib/useAutoRefresh';
 
@@ -128,7 +129,7 @@ export default function RiskPage() {
             <p className="text-sm text-[var(--text-secondary)]">Latched: {breaker.latched ? 'yes' : 'no'}</p>
           )}
           {breaker?.since && <p className="text-sm text-[var(--text-secondary)]">Since: {new Date(breaker.since).toLocaleString()}</p>}
-          {!breakerLoaded && !breakerError && <p className="text-sm text-[var(--text-muted)]">Loading…</p>}
+          {!breakerLoaded && !breakerError && <LoadingState rows={3} />}
         </section>
 
         <section className="p-4 bg-[var(--surface-muted)] rounded-md">
@@ -153,7 +154,7 @@ export default function RiskPage() {
           {reconHistoryCount !== null && (
             <p className="text-sm text-[var(--text-secondary)]">History: {reconHistoryCount}</p>
           )}
-          {!reconLoaded && !reconError && <p className="text-sm text-[var(--text-muted)]">Loading…</p>}
+          {!reconLoaded && !reconError && <LoadingState rows={3} />}
         </section>
       </div>
     </AppShell>

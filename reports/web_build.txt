@@ -5,7 +5,7 @@
    Γû▓ Next.js 15.5.25
 
    Creating an optimized production build ...
- Γ£ô Compiled successfully in 3.0s
+ Γ£ô Compiled successfully in 2.7s
    Skipping linting
    Checking validity of types ...
    Collecting page data ...
@@ -21,43 +21,43 @@ Route (app)                                 Size  First Load JS
 Γöî Γùï /                                    2.83 kB         127 kB
 Γö£ Γùï /_not-found                            986 B         104 kB
 Γö£ Γùï /accounts                            2.32 kB         126 kB
-Γö£ Γùï /agents                              5.06 kB         129 kB
-Γö£ Γùï /ai-control                          5.73 kB         129 kB
-Γö£ Γùï /audit                               3.57 kB         127 kB
-Γö£ Γùï /backtest                            4.49 kB         128 kB
+Γö£ Γùï /agents                               5.2 kB         129 kB
+Γö£ Γùï /ai-control                          5.73 kB         130 kB
+Γö£ Γùï /audit                               4.16 kB         128 kB
+Γö£ Γùï /backtest                            4.49 kB         129 kB
 Γö£ Γùï /certification                       2.33 kB         126 kB
-Γö£ Γùï /circuit-breaker                     6.49 kB         130 kB
-Γö£ Γùï /control-plane                       16.5 kB         140 kB
-Γö£ Γùï /decision-replay                     6.27 kB         130 kB
-Γö£ Γùï /decisions                            3.9 kB         128 kB
+Γö£ Γùï /circuit-breaker                     6.68 kB         131 kB
+Γö£ Γùï /control-plane                       17.1 kB         141 kB
+Γö£ Γùï /decision-replay                     6.46 kB         130 kB
+Γö£ Γùï /decisions                           4.48 kB         129 kB
 Γö£ Γùï /environment                         2.34 kB         126 kB
-Γö£ Γùï /execution                            3.8 kB         127 kB
+Γö£ Γùï /execution                            3.8 kB         128 kB
 Γö£ Γùï /execution-quality                   2.34 kB         126 kB
-Γö£ Γùï /incidents                           6.11 kB         130 kB
-Γö£ Γùï /learning                             6.1 kB         130 kB
+Γö£ Γùï /incidents                           6.31 kB         130 kB
+Γö£ Γùï /learning                            6.89 kB         131 kB
 Γö£ Γùï /login                               2.44 kB         105 kB
 Γö£ Γùï /market                                12 kB         136 kB
 Γö£ Γùï /models                              2.98 kB         127 kB
-Γö£ Γùï /monte-carlo                         5.67 kB         129 kB
-Γö£ Γùï /news                                3.53 kB         127 kB
+Γö£ Γùï /monte-carlo                         6.01 kB         130 kB
+Γö£ Γùï /news                                3.53 kB         128 kB
 Γö£ Γùï /observability                       6.95 kB         131 kB
-Γö£ Γùï /orders                              3.29 kB         127 kB
+Γö£ Γùï /orders                              1.25 kB         128 kB
 Γö£ Γùï /overview                            4.15 kB         128 kB
-Γö£ Γùï /performance                         3.45 kB         127 kB
-Γö£ Γùï /positions                           3.52 kB         127 kB
-Γö£ Γùï /reconciliation                      5.45 kB         129 kB
-Γö£ Γùï /research                            9.22 kB         133 kB
-Γö£ Γùï /risk                                2.06 kB         126 kB
-Γö£ Γùï /risk-center                          5.6 kB         129 kB
-Γö£ Γùï /settings                            7.67 kB         131 kB
-Γö£ Γùï /slo                                 2.77 kB         126 kB
-Γö£ Γùï /strategy                            6.49 kB         130 kB
+Γö£ Γùï /performance                         4.09 kB         128 kB
+Γö£ Γùï /positions                           1.55 kB         129 kB
+Γö£ Γùï /reconciliation                      6.23 kB         130 kB
+Γö£ Γùï /research                             9.4 kB         133 kB
+Γö£ Γùï /risk                                2.17 kB         126 kB
+Γö£ Γùï /risk-center                         5.79 kB         130 kB
+Γö£ Γùï /settings                            8.28 kB         132 kB
+Γö£ Γùï /slo                                 2.77 kB         127 kB
+Γö£ Γùï /strategy                            6.82 kB         131 kB
 Γö£ Γùï /strategy-lab                        2.31 kB         126 kB
 Γö£ Γùï /system-health                       3.21 kB         127 kB
-Γö£ Γùï /system-readiness                    3.55 kB         127 kB
-Γö£ Γùï /trade-history                       3.01 kB         127 kB
-Γö£ Γùï /walk-forward                        5.53 kB         129 kB
-Γöö Γùï /why-no-trade                        3.32 kB         127 kB
+Γö£ Γùï /system-readiness                    3.55 kB         128 kB
+Γö£ Γùï /trade-history                         940 B         128 kB
+Γö£ Γùï /walk-forward                        5.88 kB         130 kB
+Γöö Γùï /why-no-trade                        3.91 kB         128 kB
 + First Load JS shared by all             103 kB
   Γö£ chunks/18-2c82660ce7c4918d.js        46.4 kB
   Γö£ chunks/87c73c54-24122e7b92478d00.js  54.2 kB

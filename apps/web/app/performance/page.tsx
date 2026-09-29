@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import AppShell from '@/components/AppShell';
+import { LoadingState } from '@/components/ui/loading-state';
+import { EmptyState } from '@/components/ui/empty-state';
 import { useApiData } from '@/lib/useApiData';
 import styles from '@/components/ops.module.css';
 
@@ -135,9 +137,12 @@ export default function PerformancePage() {
           </div>
           <div className={styles.panelBody}>
             {loading && rows.length === 0 ? (
-              <p className={styles.empty}>Loading…</p>
+              <LoadingState rows={5} />
             ) : rows.length === 0 ? (
-              <p className={styles.empty}>No buckets available for this dimension.</p>
+              <EmptyState
+                title="Belum ada bucket"
+                description="Tidak ada data untuk dimensi ini."
+              />
             ) : (
               <table className={styles.table}>
                 <thead>
@@ -191,7 +196,7 @@ export default function PerformancePage() {
           <div className={styles.panelBody}>
             {rError && <div className={styles.error}>{rError}</div>}
             {rLoading && rRows.length === 0 ? (
-              <p className={styles.empty}>Loading…</p>
+              <LoadingState rows={5} />
             ) : rRows.length === 0 ? (
               <p className={styles.empty}>
                 Belum ada trade dengan R. R dihitung saat posisi ditutup menggunakan

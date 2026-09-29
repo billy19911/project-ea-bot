@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import Pagination, { usePagination } from '@/components/ui/pagination';
+import { EmptyState } from '@/components/ui/empty-state';
+import { LoadingState } from '@/components/ui/loading-state';
 import { useApiData, fmtDate, formatDetails } from '@/lib/useApiData';
 import styles from '@/components/ops.module.css';
 
@@ -87,11 +89,16 @@ export default function AuditPage() {
           </div>
           <div className={styles.panelBody}>
             {loading && rows.length === 0 ? (
-              <p className={styles.empty}>Loading…</p>
+              <LoadingState rows={6} />
             ) : rows.length === 0 ? (
-              <p className={styles.empty}>
-                {filter ? 'No events match the filter.' : 'No audit events recorded yet.'}
-              </p>
+              <EmptyState
+                title={filter ? 'Tidak ada event cocok' : 'Belum ada event audit'}
+                description={
+                  filter
+                    ? 'Coba ubah kata kunci filter.'
+                    : 'Event audit muncul di sini saat sistem mencatat aksi.'
+                }
+              />
             ) : (
               <table className={styles.table}>
                 <thead>

@@ -4,6 +4,9 @@ import { useCallback, useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { DataTable } from '@/components/ui/data-table';
 import { Card } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { LoadingState } from '@/components/ui/loading-state';
 import { apiFetch } from '@/lib/api';
 import { errorMessageFor, fmtDateTime } from '@/lib/useApiData';
 import { useAutoRefresh } from '@/lib/useAutoRefresh';
@@ -77,8 +80,8 @@ export default function PositionsPage() {
 
   return (
     <AppShell activeKey="positions" eyebrow="Xynn / Posisi" title="Posisi Terbuka" actions={null}>
-      {error && <div style={{ marginBottom: 12, color: 'var(--danger)' }}>{error}</div>}
-      
+      {error && <ErrorState title="Gagal memuat posisi" description={error} onRetry={load} />}
+
       <Card title="Info Posisi" description={`Mode MT5: ${mode} • Status Data Live`} noPadding>
         <div className="px-4 py-2 text-sm">
           <div className="flex gap-3 text-[var(--text-muted)]">
@@ -90,15 +93,22 @@ export default function PositionsPage() {
         </div>
       </Card>
 
-      <br />
-      
-      <Card title="Posisi Terbuka" description={`${rows.length} posisi sedang terbuka`}>
-        {loaded && rows.length === 0 && !error ? (
-          <p className="text-center text-[var(--text-muted)] py-6">
-            {mode === 'LIVE' 
-              ? 'Belum ada posisi terbuka — periksa tab Broker atau pasang order manual.' 
-              : 'Akun paper dalam mode simulasi; tidak ada posisi nyata.'}
-          </p>
+      <div style={{ height: 'var(--sp-4)' }} />
+
+      <Card title="Posisi Terbuka" description={`${rows.length} posisi sedang terbuka`} noPadding>
+        {!loaded ? (
+          <div className="p-4">
+            <LoadingState rows={5} />
+          </div>
+        ) : rows.length === 0 ? (
+          <EmptyState
+            title="Belum ada posisi terbuka"
+            description={
+              mode === 'LIVE'
+                ? 'Periksa tab Broker atau pasang order manual.'
+                : 'Akun paper dalam mode simulasi; tidak ada posisi nyata.'
+            }
+          />
         ) : (
           <DataTable columns={columns} rows={rows} unitLabel="posisi" />
         )}

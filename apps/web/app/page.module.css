@@ -51,7 +51,7 @@
 .pageBody {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--sp-5);
 }
 
 .tabs {
