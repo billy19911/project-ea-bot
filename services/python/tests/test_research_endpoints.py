@@ -220,6 +220,32 @@ def test_backtest_runs_on_real_bars_and_is_json_safe(monkeypatch):
     # Trades preview is capped and JSON-safe.
     assert len(detail["trades_preview"]) <= 10
     assert detail["trades_total"] == data["metrics"]["total_trades"]
+    # Monte Carlo robustness block is derived from the trade sequence (PRD §41):
+    # present on both the backtest response and the detail endpoint.
+    mc = detail["metrics"].get("monte_carlo")
+    assert mc is not None
+    for key in (
+        "median_return",
+        "5th_percentile_return",
+        "95th_percentile_drawdown",
+        "worst_drawdown",
+        "max_loss_streak",
+        "probability_severe_drawdown",
+        "status",
+    ):
+        assert key in mc
+    assert mc["status"] in ("ROBUST", "FRAGILE", "INSUFFICIENT_DATA", "FAILED")
+    assert data["metrics"].get("monte_carlo") is not None
+
+
+def test_monte_carlo_from_result_is_none_without_trades():
+    """No trades / no PnL → no fabricated Monte Carlo block."""
+    from src.research.endpoints import _monte_carlo_from_result
+    from src.research.engine import BacktestResult
+
+    empty = BacktestResult(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, [])
+    assert _monte_carlo_from_result(None) is None
+    assert _monte_carlo_from_result(empty) is None
 
 
 def test_backtest_rejects_bad_symbol_and_timeframe(monkeypatch):

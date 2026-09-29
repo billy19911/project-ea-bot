@@ -199,6 +199,102 @@ def _metrics_dict(result: BacktestResult | None) -> dict[str, Any] | None:
     }
 
 
+# Number of Monte Carlo resamples (PRD §41 trade-sequence resampling). Kept
+# modest so the detail endpoint stays fast; deterministic (fixed seed).
+_MC_SIMS = 1000
+
+
+def _monte_carlo_from_result(result: BacktestResult | None) -> dict[str, Any] | None:
+    """Bootstrap the trade sequence into a Monte-Carlo robustness block.
+
+    The Monte Carlo page reads ``metrics.monte_carlo`` (``MonteCarloResult
+    .to_dict()``). The backtest result already carries the realised trade PnLs,
+    so we resample that sequence deterministically to estimate the return /
+    drawdown distribution — no bars or re-run needed, and it works for every
+    experiment that already has a result.
+
+    Returns ``None`` when there is nothing to resample (no trades / no PnL);
+    never fabricates a block.
+    """
+    if result is None:
+        return None
+    pnls = [
+        float(t["pnl"])
+        for t in (result.trades or [])
+        if isinstance(t, dict) and t.get("pnl") is not None
+    ]
+    if len(pnls) < 2:
+        return None
+
+    import random
+    from statistics import median
+
+    from .monte_carlo import MAX_ACCEPTABLE_SEVERE_DD_PROB, SEVERE_DRAWDOWN_PCT
+
+    rng = random.Random(41)  # fixed seed → reproducible
+    returns: list[float] = []
+    drawdowns: list[float] = []
+    max_loss_streak = 0
+    k = len(pnls)
+    for _ in range(_MC_SIMS):
+        # Bootstrap: sample k trades WITH replacement so both the ORDER and the
+        # MIX vary → the return distribution is meaningful (a pure shuffle keeps
+        # the total identical every time). This is the PRD §41 return bootstrap.
+        seq = [pnls[rng.randrange(k)] for _ in range(k)]
+        equity = 0.0
+        peak = 0.0
+        max_dd = 0.0
+        streak = 0
+        for p in seq:
+            equity += p
+            if equity > peak:
+                peak = equity
+            else:
+                max_dd = max(max_dd, peak - equity)
+            if p < 0:
+                streak += 1
+                max_loss_streak = max(max_loss_streak, streak)
+            else:
+                streak = 0
+        returns.append(equity)
+        drawdowns.append(max_dd)
+
+    returns_sorted = sorted(returns)
+    drawdowns_sorted = sorted(drawdowns)
+    n = len(returns_sorted)
+    median_ret = median(returns_sorted)
+    # 5th percentile index (0-based) for n samples.
+    idx5 = max(0, min(n - 1, int(round(0.05 * (n - 1)))))
+    idx95 = max(0, min(n - 1, int(round(0.95 * (n - 1)))))
+    perc5_ret = returns_sorted[idx5]
+    perc95_dd = drawdowns_sorted[idx95]
+    worst_dd = max(drawdowns_sorted)
+    prob_severe = sum(1 for d in drawdowns_sorted if d > SEVERE_DRAWDOWN_PCT) / n if n else 0.0
+
+    # Deterministic status rules (mirror monte_carlo.classify_status intent).
+    if result.total_trades < 30:
+        status = "INSUFFICIENT_DATA"
+    elif median_ret < 0:
+        status = "FAILED"
+    elif perc5_ret < 0 or prob_severe > MAX_ACCEPTABLE_SEVERE_DD_PROB:
+        status = "FRAGILE"
+    else:
+        status = "ROBUST"
+
+    return _sanitize(
+        {
+            "median_return": _finite(median_ret, 4),
+            "5th_percentile_return": _finite(perc5_ret, 4),
+            "95th_percentile_drawdown": _finite(perc95_dd, 4),
+            "worst_drawdown": _finite(worst_dd, 4),
+            "max_loss_streak": int(max_loss_streak),
+            "probability_severe_drawdown": _finite(prob_severe, 4),
+            "status": status,
+            "simulations": _MC_SIMS,
+        }
+    )
+
+
 def _run_realistic_backtest(bars: Any) -> Any:
     """Run the PRD §39 realistic-cost backtester over real bars.
 
@@ -443,10 +539,17 @@ def get_experiment_detail(experiment_id: str) -> dict[str, Any]:
     if experiment is None:
         raise HTTPException(status_code=404, detail=f"Eksperimen tidak ditemukan: {experiment_id}")
     result = engine.get_backtest_result(experiment_id)
+    metrics = _metrics_dict(result)
+    if metrics is not None:
+        # Monte Carlo robustness block (PRD §41) derived from the realised
+        # trade sequence — the page reads ``metrics.monte_carlo``.
+        mc = _monte_carlo_from_result(result)
+        if mc is not None:
+            metrics["monte_carlo"] = mc
     return {
         "ok": True,
         "experiment": _experiment_row(engine, experiment),
-        "metrics": _metrics_dict(result),
+        "metrics": metrics,
         "walk_forward": _sanitize(result.walk_forward) if result else None,
         "trades_total": len(result.trades) if result else 0,
         "trades_preview": _sanitize(result.trades[-TRADES_PREVIEW:]) if result else [],
@@ -579,11 +682,17 @@ def run_experiment_backtest(experiment_id: str, payload: BacktestRequest) -> dic
     _RUNS[experiment_id] = provenance
     engine.record_run_provenance(experiment_id, provenance)
 
+    metrics = _metrics_dict(result)
+    if metrics is not None:
+        mc = _monte_carlo_from_result(result)
+        if mc is not None:
+            metrics["monte_carlo"] = mc
+
     return {
         "ok": True,
         "experiment": _experiment_row(engine, experiment),
         "provenance": provenance,
-        "metrics": _metrics_dict(result),
+        "metrics": metrics,
         "walk_forward": _sanitize(result.walk_forward),
         "trades_total": len(result.trades),
         "trades_preview": _sanitize(result.trades[-TRADES_PREVIEW:]),
