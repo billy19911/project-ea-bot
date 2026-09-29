@@ -568,27 +568,31 @@ export default function AppShell({
                     <path d="M6 9l6 6 6-6" />
                   </svg>
                 </button>
-                {open && (
-                  <div className={styles.navItems}>
-                    {group.items.map(item => {
-                      const isActive = activeKey === item.key;
-                      return (
-                        <Link
-                          key={item.key}
-                          href={item.href}
-                          ref={isActive ? activeLinkRef : undefined}
-                          className={`${styles.navItem} ${isActive ? styles.navActive : ''}`}
-                          aria-current={isActive ? 'page' : undefined}
-                          title={collapsed ? item.label : undefined}
-                          onClick={() => setDrawerOpen(false)}
-                        >
-                          <Icon name={item.icon} />
-                          <span className={styles.navItemText}>{item.label}</span>
-                        </Link>
-                      );
-                    })}
+                {/* Always rendered so the open/close can animate smoothly
+                    (grid-template-rows 0fr→1fr). */}
+                <div className={`${styles.navItemsWrap} ${open ? styles.navItemsOpen : ''}`}>
+                  <div className={styles.navItemsInner}>
+                    <div className={styles.navItems}>
+                      {group.items.map(item => {
+                        const isActive = activeKey === item.key;
+                        return (
+                          <Link
+                            key={item.key}
+                            href={item.href}
+                            ref={isActive ? activeLinkRef : undefined}
+                            className={`${styles.navItem} ${isActive ? styles.navActive : ''}`}
+                            aria-current={isActive ? 'page' : undefined}
+                            title={collapsed ? item.label : undefined}
+                            onClick={() => setDrawerOpen(false)}
+                          >
+                            <Icon name={item.icon} />
+                            <span className={styles.navItemText}>{item.label}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
             );
           })}
