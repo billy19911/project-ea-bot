@@ -116,11 +116,18 @@
   border-radius: 4px;
 }
 
+/* Baris panjang → zebra + hover agar mudah dipindai. */
+.table tbody tr { transition: background var(--dur-fast) var(--ease); }
+.table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--surface-muted) 45%, transparent);
+}
+.table tbody tr:hover { background: var(--surface-muted); }
+
 /* Badges */
 .badge {
   display: inline-block;
   padding: 5px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   font-size: 12px;
   font-weight: 700;
 }

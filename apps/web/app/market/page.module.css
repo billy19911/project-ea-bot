@@ -34,7 +34,7 @@
   background: var(--surface);
   color: var(--text);
   font-size: 13px;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
   text-transform: uppercase;
 }
 .symbolInput:focus { outline: 2px solid var(--primary-soft); border-color: var(--primary); }
@@ -54,12 +54,12 @@
 .chip {
   padding: 3px 9px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--surface-muted);
   color: var(--text-secondary);
   font-size: 11.5px;
   font-weight: 600;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
   cursor: pointer;
 }
 .chip:hover { border-color: var(--border-strong); color: var(--text); }
@@ -81,7 +81,7 @@
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
   cursor: pointer;
 }
 .tfBtn:hover { border-color: var(--border-strong); color: var(--text); }
@@ -235,7 +235,7 @@
   font-size: 15px;
   font-weight: 600;
   color: var(--text);
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
 }
 .levelStop { color: var(--danger); }
 .levelTarget { color: var(--success); }
@@ -288,7 +288,14 @@
 }
 .posTable td { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
 .posTable tbody tr:last-child td { border-bottom: none; }
-.posMono { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); color: var(--text); }
+
+/* Baris panjang → zebra + hover agar mudah dipindai. */
+.posTable tbody tr { transition: background var(--dur-fast) var(--ease); }
+.posTable tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--surface-muted) 45%, transparent);
+}
+.posTable tbody tr:hover { background: var(--surface-muted); }
+.posMono { font-family: var(--font-mono); color: var(--text); }
 .posNone { color: var(--text-muted); font-style: italic; }
 .posUp { color: var(--success); }
 .posDown { color: var(--danger); }

@@ -140,6 +140,14 @@
   vertical-align: middle;
 }
 
+/* Zebra untuk tabel panjang (hover sudah lewat .row). */
+.table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--surface-muted) 40%, transparent);
+}
+.table tbody tr:hover {
+  background: var(--surface-muted);
+}
+
 .row {
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease);

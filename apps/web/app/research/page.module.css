@@ -33,7 +33,7 @@
 }
 
 .badge {
-  border-radius: 999px;
+  border-radius: var(--r-full);
   font-size: 12px;
   font-weight: 700;
 }
@@ -154,6 +154,13 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
+/* Baris panjang → zebra + hover agar mudah dipindai. */
+.tableCard tbody tr { transition: background var(--dur-fast) var(--ease); }
+.tableCard tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--surface-muted) 45%, transparent);
+}
+.tableCard tbody tr:hover { background: var(--surface-muted); }
 
 .tableCard td strong {
   display: block;
