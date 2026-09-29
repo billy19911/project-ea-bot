@@ -158,6 +158,14 @@
   background: var(--sidebar-hover);
 }
 
+.navLabelActive {
+  color: var(--sidebar-accent);
+}
+
+.navLabelActive .navChevron {
+  opacity: 1;
+}
+
 .navChevron {
   flex-shrink: 0;
   opacity: 0.7;

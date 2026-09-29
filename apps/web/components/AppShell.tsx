@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ReactNode, useEffect, useRef, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch, getAuthToken } from '../lib/api';
 // Inline SVG Icon component defined later
 import { StatusIndicator, type UiStatus } from './ui/status-indicator';
@@ -265,39 +265,36 @@ export default function AppShell({
   const [collapsedReady, setCollapsedReady] = useState(false);
   // Mobile drawer state (independent from desktop collapse).
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // Collapsible nav groups: label -> open. The group holding the active page is
-  // always forced open; the rest remember the operator's choice (localStorage).
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
-  const [groupsReady, setGroupsReady] = useState(false);
   // Ref to the active nav link so the sidebar can scroll it into view.
   const activeLinkRef = useRef<HTMLAnchorElement | null>(null);
 
-  // Load persisted group-open state (after mount: hydration-safe).
+  // Accordion nav: only ONE group is open at a time (the one holding the active
+  // page by default), so the sidebar stays compact. The operator can open a
+  // different group; clicking the open one closes it.
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const [groupTouched, setGroupTouched] = useState(false);
+
+  // The group that contains the currently active page.
+  const activeGroupLabel = useMemo(
+    () => NAV_GROUPS.find(g => g.items.some(it => it.key === activeKey))?.label ?? null,
+    [activeKey],
+  );
+
+  // Which group is open: the operator's explicit choice once they touch it,
+  // otherwise the group of the active page.
+  const effectiveOpenGroup = groupTouched ? openGroup : activeGroupLabel;
+
+  // Whenever the route changes, follow the active group again (unless the
+  // operator is mid-navigation inside their chosen group — safe to reset).
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('sidebar-groups');
-      if (raw) setOpenGroups(JSON.parse(raw) as Record<string, boolean>);
-    } catch {
-      // localStorage tidak tersedia — pakai default (semua grup terbuka).
-    }
-    setGroupsReady(true);
-  }, []);
+    setGroupTouched(false);
+    setOpenGroup(null);
+  }, [pathname]);
 
-  // Persist group state after the operator toggles.
-  useEffect(() => {
-    if (!groupsReady) return;
-    try {
-      localStorage.setItem('sidebar-groups', JSON.stringify(openGroups));
-    } catch {
-      // abaikan
-    }
-  }, [openGroups, groupsReady]);
-
-  // A group is open when explicitly opened OR (by default) not yet collapsed.
-  const isGroupOpen = (label: string) => openGroups[label] !== false;
-
-  const toggleGroup = (label: string) =>
-    setOpenGroups((prev) => ({ ...prev, [label]: prev[label] === false }));
+  const toggleGroup = (label: string) => {
+    setGroupTouched(true);
+    setOpenGroup(prev => (prev === label ? null : label));
+  };
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
@@ -544,14 +541,14 @@ export default function AppShell({
 
         <nav className={styles.nav}>
           {NAV_GROUPS.map(group => {
+            // Accordion: only ONE group open at a time.
+            const open = effectiveOpenGroup === group.label;
             const groupHasActive = group.items.some(it => it.key === activeKey);
-            // The active group is ALWAYS open; others follow the saved state.
-            const open = groupHasActive || isGroupOpen(group.label);
             return (
               <div key={group.label} className={styles.navGroup}>
                 <button
                   type="button"
-                  className={styles.navLabel}
+                  className={`${styles.navLabel} ${groupHasActive ? styles.navLabelActive : ''}`}
                   aria-expanded={open}
                   onClick={() => toggleGroup(group.label)}
                 >
