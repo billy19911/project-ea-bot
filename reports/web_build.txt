@@ -5,7 +5,7 @@
    Γû▓ Next.js 15.5.25
 
    Creating an optimized production build ...
- Γ£ô Compiled successfully in 2.7s
+ Γ£ô Compiled successfully in 3.3s
    Skipping linting
    Checking validity of types ...
    Collecting page data ...
@@ -21,14 +21,14 @@ Route (app)                                 Size  First Load JS
 Γöî Γùï /                                    2.83 kB         127 kB
 Γö£ Γùï /_not-found                            986 B         104 kB
 Γö£ Γùï /accounts                            2.32 kB         126 kB
-Γö£ Γùï /agents                               5.2 kB         129 kB
+Γö£ Γùï /agents                              5.93 kB         130 kB
 Γö£ Γùï /ai-control                          5.73 kB         130 kB
 Γö£ Γùï /audit                               4.16 kB         128 kB
 Γö£ Γùï /backtest                            4.49 kB         129 kB
 Γö£ Γùï /certification                       2.33 kB         126 kB
 Γö£ Γùï /circuit-breaker                     6.68 kB         131 kB
-Γö£ Γùï /control-plane                       17.1 kB         141 kB
-Γö£ Γùï /decision-replay                     6.46 kB         130 kB
+Γö£ Γùï /control-plane                       17.2 kB         141 kB
+Γö£ Γùï /decision-replay                     6.46 kB         131 kB
 Γö£ Γùï /decisions                           4.48 kB         129 kB
 Γö£ Γùï /environment                         2.34 kB         126 kB
 Γö£ Γùï /execution                            3.8 kB         128 kB
@@ -46,7 +46,7 @@ Route (app)                                 Size  First Load JS
 Γö£ Γùï /performance                         4.09 kB         128 kB
 Γö£ Γùï /positions                           1.55 kB         129 kB
 Γö£ Γùï /reconciliation                      6.23 kB         130 kB
-Γö£ Γùï /research                             9.4 kB         133 kB
+Γö£ Γùï /research                             9.4 kB         134 kB
 Γö£ Γùï /risk                                2.17 kB         126 kB
 Γö£ Γùï /risk-center                         5.79 kB         130 kB
 Γö£ Γùï /settings                            8.28 kB         132 kB

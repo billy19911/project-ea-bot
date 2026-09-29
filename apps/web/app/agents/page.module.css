@@ -29,15 +29,41 @@
 /* ---- Baris ringkasan atas ------------------------------------------------ */
 .summaryRow {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--sp-3);
 }
 
+@media (max-width: 720px) {
+  .summaryRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .card {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   padding: var(--sp-4);
+  transition: border-color var(--dur) var(--ease);
+}
+
+.card:hover {
+  border-color: var(--border-strong);
+}
+
+/* Hairline accent pada tepi atas — konsisten dengan panel "ops". */
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--primary), transparent 60%);
+  opacity: 0.5;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  pointer-events: none;
 }
 
 .summaryCard {
@@ -118,6 +144,11 @@
 .avatarSupervisor {
   background: var(--info);
   color: var(--surface);
+}
+
+.avatarSynthesis {
+  background: var(--primary);
+  color: var(--on-primary);
 }
 
 .avatarLive {
@@ -309,8 +340,9 @@
 
 .metaLine {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
   font-size: var(--fs-sm);
   color: var(--text-muted);
 }
@@ -516,6 +548,21 @@
   font-size: var(--fs-sm);
   color: var(--danger);
   margin-bottom: var(--sp-2);
+}
+
+/* Peringatan data SIMULASI — amber, dengan ikon (bukan emoji). */
+.inlineWarn {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--warning-border);
+  border-radius: var(--r-md);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
 }
 
 /* ---- Animasi ------------------------------------------------------------- */

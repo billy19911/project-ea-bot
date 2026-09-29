@@ -6,6 +6,7 @@ import { apiFetch } from '../../lib/api';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import AppShell from '../../components/AppShell';
 import { LoadingState } from '../../components/ui/loading-state';
+import { AgentIcon } from './icons';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 interface DecisionLevels {
@@ -361,9 +362,12 @@ export default function AgentsPage() {
           </div>
 
           {dataSource?.toUpperCase() === 'SIMULATED' && (
-            <p className={styles.inlineError}>
-              ⚠️ Data pasar SIMULASI (MT5 belum ter-attach) — analisa bukan dari
-              harga riil. Jangan jadikan dasar eksekusi.
+            <p className={styles.inlineWarn}>
+              <AgentIcon name="warning" size={15} />
+              <span>
+                Data pasar SIMULASI (MT5 belum ter-attach) — analisa bukan dari harga
+                riil. Jangan jadikan dasar eksekusi.
+              </span>
             </p>
           )}
 
@@ -371,7 +375,10 @@ export default function AgentsPage() {
 
           {/* B. Percakapan */}
           <div className={styles.card}>
-            <h2 className={styles.cardTitle}>💬 Percakapan Komite</h2>
+            <h2 className={styles.cardTitle}>
+              <AgentIcon name="chat" size={18} />
+              Percakapan Komite
+            </h2>
 
             {!selected ? (
               <div className={styles.empty}>Belum ada data komite pada siklus ini.</div>
@@ -382,7 +389,9 @@ export default function AgentsPage() {
                   className={`${styles.bubble} ${styles.bubbleSupervisor} ${styles.bubbleIn}`}
                   style={{ animationDelay: '0ms' }}
                 >
-                  <span className={`${styles.avatar} ${styles.avatarSupervisor}`}>🧠</span>
+                  <span className={`${styles.avatar} ${styles.avatarSupervisor}`}>
+                    <AgentIcon name="brain" size={18} />
+                  </span>
                   <div className={styles.bubbleBody}>
                     <div className={styles.bubbleHead}>
                       <span className={styles.agentName}>Supervisor</span>
@@ -465,10 +474,12 @@ export default function AgentsPage() {
                   className={`${styles.bubble} ${styles.bubbleSynthesis} ${styles.bubbleIn}`}
                   style={{ animationDelay: `${agentEntries.length * 120}ms` }}
                 >
-                  <span className={styles.avatar}>🧩</span>
+                  <span className={`${styles.avatar} ${styles.avatarSynthesis}`}>
+                    <AgentIcon name="puzzle" size={18} />
+                  </span>
                   <div className={styles.bubbleBody}>
                     <div className={styles.bubbleHead}>
-                      <span className={styles.agentName}>🧩 Sintesis Komite</span>
+                      <span className={styles.agentName}>Sintesis Komite</span>
                       <span className={`${styles.mono} ${styles.agentName}`}>
                         {selected.decision || '—'}
                       </span>
@@ -500,20 +511,23 @@ export default function AgentsPage() {
 
                     {selected.risk_reason && (
                       <div className={styles.metaLine}>
-                        <span>⛔ {selected.risk_reason}</span>
+                        <AgentIcon name="ban" size={14} />
+                        <span>{selected.risk_reason}</span>
                       </div>
                     )}
 
                     {selected.execution_result?.ticket !== undefined &&
                       selected.execution_result?.ticket !== null && (
                         <div className={styles.metaLine}>
-                          <span>🎫 ticket {selected.execution_result.ticket}</span>
+                          <AgentIcon name="ticket" size={14} />
+                          <span>ticket {selected.execution_result.ticket}</span>
                         </div>
                       )}
 
                     {selected.trace_id && (
                       <div className={styles.metaLine}>
-                        <span className={styles.muted}>🔎 trace {selected.trace_id}</span>
+                        <AgentIcon name="scan" size={14} />
+                        <span className={styles.muted}>trace {selected.trace_id}</span>
                       </div>
                     )}
                   </div>
@@ -524,7 +538,10 @@ export default function AgentsPage() {
 
           {/* C. Riwayat siklus */}
           <div className={styles.card}>
-            <h2 className={styles.cardTitle}>🕑 Riwayat Siklus</h2>
+            <h2 className={styles.cardTitle}>
+              <AgentIcon name="clock" size={18} />
+              Riwayat Siklus
+            </h2>
             {decisions.length === 0 ? (
               <div className={styles.empty}>Belum ada siklus terekam.</div>
             ) : (
@@ -559,7 +576,10 @@ export default function AgentsPage() {
         <aside className={styles.sidebar}>
           {errors.status && <p className={styles.inlineError}>{errors.status}</p>}
           <div className={styles.panel}>
-            <h2 className={styles.panelTitle}>👥 Anggota</h2>
+            <h2 className={styles.panelTitle}>
+              <AgentIcon name="users" size={16} />
+              Anggota
+            </h2>
             {agentList.length === 0 ? (
               <p className={styles.muted}>Belum ada agent terdaftar.</p>
             ) : (
@@ -583,7 +603,10 @@ export default function AgentsPage() {
 
           {errors.learning && <p className={styles.inlineError}>{errors.learning}</p>}
           <div className={styles.panel}>
-            <h2 className={styles.panelTitle}>📚 Pelajaran</h2>
+            <h2 className={styles.panelTitle}>
+              <AgentIcon name="book" size={16} />
+              Pelajaran
+            </h2>
             {!learning?.available || lessons.length === 0 ? (
               <p className={styles.muted}>Belum ada pelajaran terekam.</p>
             ) : (
