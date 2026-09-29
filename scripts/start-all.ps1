@@ -76,6 +76,10 @@ $fanoutOn = EnvOr 'FANOUT_ENABLED' 'false'
 $zoneOn   = EnvOr 'ZONE_ENTRY_ENABLED' 'false'
 $zoneBias = EnvOr 'ZONE_BIAS_TFS' 'M30,H1'
 $zoneTf   = EnvOr 'ZONE_TF' 'M5'
+# Entry anti-spam guards.
+$entryCooldown = EnvOr 'ENTRY_COOLDOWN_S' '900'
+$entryMinDist  = EnvOr 'ENTRY_MIN_DISTANCE_ATR' '1.0'
+$oneEntryPolicy = EnvOr 'ONE_ENTRY_POLICY' 'true'
 
 if (-not $jwt) {
   $bytes = New-Object byte[] 24
@@ -138,6 +142,10 @@ function Export-CommonEnv {
   $env:ZONE_ENTRY_ENABLED = $zoneOn
   $env:ZONE_BIAS_TFS = $zoneBias
   $env:ZONE_TF = $zoneTf
+  # Entry anti-spam guards.
+  $env:ENTRY_COOLDOWN_S = $entryCooldown
+  $env:ENTRY_MIN_DISTANCE_ATR = $entryMinDist
+  $env:ONE_ENTRY_POLICY = $oneEntryPolicy
 }
 
 $logDir = Join-Path $root 'logs'

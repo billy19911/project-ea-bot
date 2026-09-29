@@ -580,6 +580,9 @@ class TradingPipeline:
             result.levels = self._indicative_levels(analysis, analysis_context)
             result.add_stage("risk", STAGE_SKIPPED, "HTF bias veto (multi-timeframe)")
             result.add_stage("execution", STAGE_SKIPPED, "no approved order")
+            # The pending signal we just opened must NOT stay live, or the gate
+            # would block every future cycle (stuck). Mark it SKIPPED (terminal).
+            self._mark_signal(result, "skipped", f"HTF veto: {htf_veto}")
             self._finalise(result)
             return result
 
@@ -648,6 +651,7 @@ class TradingPipeline:
                     result.risk_reason,
                 )
                 result.add_stage("execution", STAGE_SKIPPED, "dependency guard blocked")
+                self._mark_signal(result, "skipped", f"dependency guard: {result.risk_reason}")
                 self._finalise(result)
                 return result
             result.add_stage("dependency_guard", STAGE_OK, "execution-critical deps healthy")
@@ -667,6 +671,7 @@ class TradingPipeline:
                 result.error = rec_reason or "execution blocked by reconciliation"
                 result.add_stage("reconciliation", STAGE_BLOCKED, result.risk_reason)
                 result.add_stage("execution", STAGE_SKIPPED, "reconciliation blocked")
+                self._mark_signal(result, "skipped", f"reconciliation: {result.risk_reason}")
                 self._finalise(result)
                 return result
             result.add_stage("reconciliation", STAGE_OK, "internal state matches MT5")
@@ -681,6 +686,8 @@ class TradingPipeline:
             result.risk_reason = f"kebijakan satu entry: posisi #{ticket} masih terbuka"
             result.add_stage("single_entry", STAGE_BLOCKED, result.risk_reason)
             result.add_stage("execution", STAGE_SKIPPED, "single entry policy")
+            # Do not leave the freshly-opened signal live (would stick forever).
+            self._mark_signal(result, "skipped", f"single-entry: posisi #{ticket} terbuka")
             self._finalise(result)
             return result
 
@@ -700,6 +707,10 @@ class TradingPipeline:
             result.risk_reason = block_reason
             result.add_stage("entry_cooldown", STAGE_BLOCKED, block_reason)
             result.add_stage("execution", STAGE_SKIPPED, "entry cooldown guard")
+            # CRITICAL: a signal parked by the entry cooldown must NOT stay
+            # PENDING, or the pending-signal gate would block every future cycle
+            # for this symbol (the "stuck, no new signal" symptom).
+            self._mark_signal(result, "skipped", block_reason)
             self._finalise(result)
             return result
 

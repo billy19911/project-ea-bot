@@ -241,6 +241,10 @@ export default function ControlPlanePage() {
   const [notice, setNotice] = useState('');
   const [runningCycle, setRunningCycle] = useState(false);
   const [cycle, setCycle] = useState<CycleResult | null>(null);
+  // Symbol the manual "Jalankan Siklus" button scans. Defaults to the primary
+  // instrument (XAUUSD/gold) — previously hard-coded to EURUSD, which made the
+  // manual cycle analyse the wrong pair.
+  const [cycleSymbol, setCycleSymbol] = useState('XAUUSD');
   const [hasToken, setHasToken] = useState(false);
 
   useEffect(() => {
@@ -311,9 +315,10 @@ export default function ControlPlanePage() {
         },
         // Kirim event eksplisit: payload datar {symbol, timeframe} membuat
         // pipeline memakai event_type UNKNOWN. MARKET_SCAN = scan manual dan
-        // dirutekan ke komite MarketLead (prefix MARKET_).
+        // dirutekan ke komite MarketLead (prefix MARKET_). Symbol diambil dari
+        // pilihan operator (default instrumen utama XAUUSD).
         body: JSON.stringify({
-          event: { event_type: 'MARKET_SCAN', symbol: 'EURUSD', timeframe: 'M15' },
+          event: { event_type: 'MARKET_SCAN', symbol: cycleSymbol, timeframe: 'M15' },
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -342,6 +347,19 @@ export default function ControlPlanePage() {
 
   const mt5Mode = data.mt5Mode as { live_data?: boolean; execution?: string } | undefined;
 
+  // Symbols available for the manual cycle scan. Prefer the live market list;
+  // always include the primary instrument + the current pick so the operator
+  // can select what the button analyses.
+  const cycleSymbolOptions = (() => {
+    const fromMarket = Array.isArray((data.market as { symbols?: unknown })?.symbols)
+      ? ((data.market as { symbols: { symbol?: string }[] }).symbols
+          .map((s) => s?.symbol)
+          .filter(Boolean) as string[])
+      : [];
+    const base = ['XAUUSD', 'BTCUSD', ...fromMarket, cycleSymbol];
+    return Array.from(new Set(base.filter(Boolean)));
+  })();
+
   return (
     <AppShell
       activeKey="control-plane"
@@ -350,6 +368,20 @@ export default function ControlPlanePage() {
       actions={
         <>
           <span className={styles.envBadge}>{mt5Mode?.live_data ? 'LIVE DATA · READ-ONLY' : 'PAPER'}</span>
+          <select
+            className={styles.tab}
+            value={cycleSymbol}
+            onChange={(e) => setCycleSymbol(e.target.value)}
+            disabled={runningCycle}
+            title="Instrumen yang dipindai saat menjalankan siklus manual"
+            aria-label="Simbol siklus manual"
+          >
+            {cycleSymbolOptions.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
           <button
             className={styles.tab}
             onClick={runCycle}
