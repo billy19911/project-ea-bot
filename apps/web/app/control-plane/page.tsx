@@ -50,6 +50,12 @@ function priorityLabel(value: number | null | undefined): string {
   return tier ? `${tier} (${value})` : String(value);
 }
 
+// Nada warna sel angka (PnL / perubahan %) tanpa inline style.
+function pnlClass(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value === 0) return '';
+  return value > 0 ? styles.pos : styles.neg;
+}
+
 // Activity timestamps arrive as ISO strings; show a compact local time and
 // fall back to the raw value when it cannot be parsed.
 function formatLastActive(value: string | null | undefined): string {
@@ -431,10 +437,9 @@ export default function ControlPlanePage() {
 
       {notice && <div className={styles.notice}>{notice}</div>}
         {!hasToken && (
-          <div className={styles.notice} style={{ background: 'var(--warning-soft)', borderColor: 'var(--warning-border)', color: 'var(--warning)' }}>
+          <div className={`${styles.notice} ${styles.noticeWarn}`}>
             Belum ada token — data di bawah akan kosong. Buka{' '}
-            <a href="/login" style={{ color: 'inherit', fontWeight: 600 }}>halaman Masuk</a> untuk
-            menyiapkan token.
+            <a href="/login">halaman Masuk</a> untuk menyiapkan token.
           </div>
         )}
         {cycle && (
@@ -443,7 +448,7 @@ export default function ControlPlanePage() {
               Cycle OK · decision <strong>{cycle.decision}</strong> · status <strong>{cycle.status}</strong> · trace <code className={styles.mono}>{cycle.traceId}</code>
             </div>
           ) : (
-            <div className={styles.notice} style={{ background: 'var(--danger-soft)', borderColor: 'var(--danger-border)', color: 'var(--danger)' }}>
+            <div className={`${styles.notice} ${styles.noticeDanger}`}>
               Cycle gagal: {cycle.message}
             </div>
           )
@@ -578,7 +583,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                     <td><strong>{t.symbol}</strong></td>
                     <td>{t.side}</td>
                     <td>{t.volume}</td>
-                    <td style={{ color: t.pnl > 0 ? 'var(--success)' : t.pnl < 0 ? 'var(--danger)' : undefined }}>{formatAmount(t.pnl)}</td>
+                    <td className={pnlClass(t.pnl)}>{formatAmount(t.pnl)}</td>
                     <td><span className={`${s.badge} ${badgeClass(t.status, s)}`}>{t.status}</span></td>
                   </tr>
                 ))}
@@ -612,7 +617,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                   <td>{p.price_current ?? p.current_price ?? '—'}</td>
                   <td>{p.sl ?? '—'}</td>
                   <td>{p.tp ?? '—'}</td>
-                  <td style={{ color: pnl == null ? undefined : pnl > 0 ? 'var(--success)' : pnl < 0 ? 'var(--danger)' : undefined }}>{formatAmount(pnl)}</td>
+                  <td className={pnlClass(pnl)}>{formatAmount(pnl)}</td>
                 </tr>
                 );
               })}
@@ -654,7 +659,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                 <tr key={sym.symbol}>
                   <td><strong>{sym.symbol}</strong></td>
                   <td>{sym.price ?? '—'}</td>
-                  <td style={{ color: sym.change_pct == null ? undefined : sym.change_pct > 0 ? 'var(--success)' : 'var(--danger)' }}>{sym.change_pct == null ? '—' : `${sym.change_pct}%`}</td>
+                  <td className={pnlClass(sym.change_pct)}>{sym.change_pct == null ? '—' : `${sym.change_pct}%`}</td>
                   <td>{sym.spread ?? '—'}</td>
                   <td>{sym.volatility == null ? '—' : <span className={`${s.badge} ${sym.volatility === 'HIGH' ? s.danger : sym.volatility === 'MEDIUM' ? s.warning : s.muted}`}>{sym.volatility}</span>}</td>
                 </tr>
@@ -750,7 +755,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
     return (
       <section className={s.card}>
         <h2>Task Explorer</h2>
-        <div className={s.kpiRow} style={{ marginBottom: 12 }}>
+        <div className={`${s.kpiRow} ${s.mb1}`}>
           <div className={s.kpi}><span className={s.kpiValue}>{tasks.counts?.running}</span><span className={s.kpiLabel}>Running</span></div>
           <div className={s.kpi}><span className={s.kpiValue}>{tasks.counts?.queued}</span><span className={s.kpiLabel}>Queued</span></div>
           <div className={s.kpi}><span className={s.kpiValue}>{tasks.counts?.completed}</span><span className={s.kpiLabel}>Completed</span></div>
@@ -915,7 +920,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           </tbody>
         </table>
         {healthPage.pager}
-        {health.checked_at && <div className={s.mono} style={{ marginTop: 10 }}>Checked at: {fmtDateTime(health.checked_at)}</div>}
+        {health.checked_at && <div className={`${s.mono} ${s.mt1}`}>Checked at: {fmtDateTime(health.checked_at)}</div>}
       </section>
     );
   }
@@ -995,9 +1000,9 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           </table>
           {providersPage.pager}
           {providers.budget ? (
-            <div className={s.mono} style={{ marginTop: 10 }}>Budget: {providers.budget.tokens_used}/{providers.budget.tokens_limit} tokens · ${providers.budget.cost_today}</div>
+            <div className={`${s.mono} ${s.mt1}`}>Budget: {providers.budget.tokens_used}/{providers.budget.tokens_limit} tokens · ${providers.budget.cost_today}</div>
           ) : (
-            <div className={s.mono} style={{ marginTop: 10 }}>Budget: — (belum dilaporkan router)</div>
+            <div className={`${s.mono} ${s.mt1}`}>Budget: — (belum dilaporkan router)</div>
           )}
         </section>
       </div>
@@ -1010,7 +1015,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
     return (
       <section className={s.card}>
         <h2>Model Discovery & Registry</h2>
-        <div className={s.kpiRow} style={{ marginBottom: 12 }}>
+        <div className={`${s.kpiRow} ${s.mb1}`}>
           <div className={s.kpi}>
             <span className={s.kpiValue}>
               <span className={`${s.badge} ${badgeClass(String(registryState), s)}`}>{registryState}</span>
@@ -1027,7 +1032,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
           </div>
         </div>
         {shortError(models.health?.error) && (
-          <div className={s.mono} style={{ marginBottom: 12 }}>
+          <div className={`${s.mono} ${s.mb1}`}>
             Health error: {shortError(models.health?.error)}
           </div>
         )}
@@ -1082,7 +1087,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                   <td>{h.hour}:00</td>
                   <td>{h.trades}</td>
                   <td>{nullablePercent(h.win_rate)}</td>
-                  <td style={{ color: h.avg_pnl > 0 ? 'var(--success)' : 'var(--danger)' }}>{h.avg_pnl}</td>
+                    <td className={pnlClass(h.avg_pnl)}>{h.avg_pnl}</td>
                 </tr>
               ))}
               {(!learning.by_hour || learning.by_hour.length === 0) && (
@@ -1101,7 +1106,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                   <td><strong>{r.regime}</strong></td>
                   <td>{r.trades}</td>
                   <td>{nullablePercent(r.win_rate)}</td>
-                  <td style={{ color: r.avg_pnl > 0 ? 'var(--success)' : 'var(--danger)' }}>{r.avg_pnl}</td>
+                    <td className={pnlClass(r.avg_pnl)}>{r.avg_pnl}</td>
                 </tr>
               ))}
               {(!learning.by_regime || learning.by_regime.length === 0) && (
@@ -1305,7 +1310,7 @@ function TerminalPanel({
   };
 
   return (
-    <section className={s.card} style={{ gridColumn: '1 / -1' }}>
+    <section className={`${s.card} ${s.cardFull}`}>
       <h2>
         Terminal MT5{' '}
         {armed ? (
@@ -1314,8 +1319,7 @@ function TerminalPanel({
           <span className={`${s.badge} ${s.muted}`}>eksekusi OFF</span>
         )}
         <button
-          className={s.tab}
-          style={{ marginLeft: 'auto' }}
+          className={`${s.tab} ${s.mlAuto}`}
           onClick={toggleStopped}
           title={
             showStopped
@@ -1376,8 +1380,8 @@ function TerminalPanel({
                   <td>
                     {/* F3: lot/risk per akun. Fixed lot menang; kalau kosong,
                         sizing dari risk % equity akun itu. */}
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      <label style={{ fontSize: 11 }}>
+                    <div className={s.sizingRow}>
+                      <label className={s.sizingLabel}>
                         Lot{' '}
                         <input
                           type="number"
@@ -1386,7 +1390,7 @@ function TerminalPanel({
                           defaultValue={t.fixed_lot ?? ''}
                           placeholder={t.risk_per_trade_pct ? `risk ${t.risk_per_trade_pct}%` : '—'}
                           disabled={busy || !hasToken}
-                          style={{ width: 64 }}
+                          className={s.sizingInput}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               const v = (e.target as HTMLInputElement).value.trim();
@@ -1400,7 +1404,7 @@ function TerminalPanel({
                           title="Isi lot tetap untuk akun ini (Enter untuk simpan). Kosongkan untuk pakai risk %."
                         />
                       </label>
-                      <label style={{ fontSize: 11 }}>
+                      <label className={s.sizingLabel}>
                         Risk%{' '}
                         <input
                           type="number"
@@ -1408,7 +1412,7 @@ function TerminalPanel({
                           min="0"
                           defaultValue={t.risk_per_trade_pct ?? ''}
                           disabled={busy || !hasToken}
-                          style={{ width: 56 }}
+                          className={s.sizingInput}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               const v = (e.target as HTMLInputElement).value.trim();
@@ -1521,7 +1525,7 @@ function TerminalPanel({
         </span>
       </div>
       {list.some((t) => t.running && t.account == null) && (
-        <div className={s.mono} style={{ marginTop: 8, color: 'var(--text-muted)' }}>
+        <div className={`${s.mono} ${s.mt1} ${s.mutedText}`}>
           Terminal yang berjalan tapi kolom akun masih —: klik <strong>Cek akun</strong> untuk membacanya (read-only).
         </div>
       )}
@@ -1542,7 +1546,11 @@ function TerminalPanel({
             }
             onClick={() => post('/mt5/terminals/arm', { armed: true }, 'Execution ARMED.')}
           >
-            🔓 Arm Execution
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="4" y="11" width="16" height="10" rx="2" />
+              <path d="M8 11V7a4 4 0 0 1 7.9-.9" />
+            </svg>
+            Arm Execution
           </button>
           <button
             className={s.tab}
@@ -1550,7 +1558,11 @@ function TerminalPanel({
             title={armed ? 'Matikan izin eksekusi sekarang' : 'Tidak sedang armed'}
             onClick={() => post('/mt5/terminals/arm', { armed: false }, 'Execution disarmed.')}
           >
-            🔒 Disarm
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="4" y="11" width="16" height="10" rx="2" />
+              <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+            </svg>
+            Disarm
           </button>
           <span className={s.mono}>
             Arm mengizinkan eksekusi lewat jalur yang sudah di-guard; order nyata tetap butuh aksi

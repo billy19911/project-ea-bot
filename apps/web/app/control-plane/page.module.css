@@ -4,59 +4,82 @@
   background: var(--success-soft);
   color: var(--success);
   border: 1px solid var(--success-border);
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 12px;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-full);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
   font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .tabs {
   display: flex;
   flex-wrap: nowrap;
-  gap: 8px;
-  margin-bottom: 18px;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
   overflow-x: auto;
-  padding-bottom: 4px;
+  padding-bottom: var(--sp-1);
   scrollbar-width: thin;
 }
 
 .tab {
-  padding: 7px 14px;
-  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px var(--sp-4);
+  border-radius: var(--r-full);
   border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--fs-md);
+  font-weight: 500;
   cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.tab:hover:not(:disabled) {
+  background: var(--surface-muted);
+  color: var(--text);
+  border-color: var(--border-strong);
 }
 
 .tab:disabled { opacity: 0.55; cursor: not-allowed; }
 
-.tabActive { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.tabActive,
+.tabActive:hover:not(:disabled) {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+}
 
 /* Ide #4: navigasi bergrup — baris grup (kategori) di atas baris tab. */
 .groupBar {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
 }
 
 .groupBtn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
-  border-radius: 8px;
+  padding: 5px var(--sp-3);
+  border-radius: var(--r-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
-.groupBtn:hover { background: var(--neutral-muted); }
+.groupBtn:hover { background: var(--neutral-muted); color: var(--text); }
 
 .groupActive {
   background: var(--primary-soft);
@@ -74,30 +97,49 @@
   border-radius: var(--r-full);
   background: var(--primary-soft);
   color: inherit;
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
   font-weight: 700;
 }
 
 .notice {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
   background: var(--primary-soft);
   border: 1px solid var(--primary-soft);
   color: var(--primary);
-  padding: 10px 14px;
-  border-radius: 10px;
-  margin-bottom: 14px;
-  font-size: 13px;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  margin-bottom: var(--sp-4);
+  font-size: var(--fs-md);
 }
 
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+/* Varian notice (menggantikan inline style di komponen). */
+.noticeWarn {
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--warning);
+}
 
-.loading { color: var(--text-muted); padding: 24px; font-size: 14px; }
+.noticeDanger {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
+.notice a { color: inherit; font-weight: 600; }
+
+.mono { font-family: var(--font-mono); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+
+.loading { color: var(--text-muted); padding: var(--sp-6); font-size: var(--fs-md); }
 
 /* ── Layout kartu & KPI ─────────────────────────────────────────────────── */
 
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 16px;
+  gap: var(--sp-4);
 }
 
 /* Grid items default to min-width:auto — a wide table would blow the column
@@ -108,36 +150,76 @@
 }
 
 .card {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  padding: 18px;
+  padding: var(--sp-4);
   box-shadow: var(--shadow-sm);
+  transition: border-color var(--dur) var(--ease);
 }
 
-.card h2 { margin: 0 0 12px; font-size: 17px; color: var(--text); }
+.card:hover {
+  border-color: var(--border-strong);
+}
 
-.card h3 { margin: 14px 0 6px; font-size: 14px; color: var(--text-secondary); }
+/* Hairline accent di tepi atas kartu — konsisten dgn panel "ops". */
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--primary), transparent 55%);
+  opacity: 0.45;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  pointer-events: none;
+}
 
-.kpiRow { display: flex; gap: 24px; flex-wrap: wrap; }
+.cardFull { grid-column: 1 / -1; }
+
+.card h2 {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-xl);
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.card h3 { margin: var(--sp-3) 0 6px; font-size: var(--fs-md); color: var(--text-secondary); }
+
+.kpiRow { display: flex; gap: var(--sp-6); flex-wrap: wrap; }
 
 .kpi { display: flex; flex-direction: column; gap: 2px; }
 
-.kpiValue { font-size: 22px; font-weight: 700; color: var(--text); }
+.kpiValue {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
 
-.kpiLabel { font-size: 12px; color: var(--text-muted); }
+.kpiLabel {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
 
 .bar {
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--neutral-muted);
   overflow: hidden;
   margin-top: 6px;
 }
 
-.barFill { height: 100%; background: var(--primary); }
+.barFill { height: 100%; border-radius: var(--r-full); background: var(--primary); }
 
-.barFillGreen { height: 100%; background: var(--success); }
+.barFillGreen { height: 100%; border-radius: var(--r-full); background: var(--success); }
 
 /* ── Tabel ──────────────────────────────────────────────────────────────── */
 
@@ -146,25 +228,37 @@
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .table th,
 .table td {
-  padding: 10px 12px;
+  padding: 9px var(--sp-3);
   border-bottom: 1px solid var(--border);
   text-align: left;
   white-space: nowrap;
 }
 
 .table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: var(--surface-muted);
-  color: var(--text-secondary);
-  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-weight: 600;
+  letter-spacing: 0.06em;
+  font-weight: 500;
 }
+
+.table tbody tr { transition: background var(--dur-fast) var(--ease); }
+
+.table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--surface-muted) 45%, transparent);
+}
+
+.table tbody tr:hover { background: var(--surface-muted); }
 
 .table tbody tr:last-child td { border-bottom: none; }
 
@@ -173,49 +267,59 @@
 .table td small { display: block; margin-top: 2px; color: var(--text-muted); }
 
 .table td code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
   background: var(--surface-muted);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
 }
+
+/* Nada warna sel angka (PnL / perubahan %) tanpa inline style. */
+.pos { color: var(--success); font-variant-numeric: tabular-nums; }
+.neg { color: var(--danger); font-variant-numeric: tabular-nums; }
 
 /* ── Badge status ───────────────────────────────────────────────────────── */
 
 .badge {
-  display: inline-block;
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: var(--r-full);
+  border: 1px solid transparent;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.success { background: var(--success-soft); color: var(--success); }
+.success { background: var(--success-soft); border-color: var(--success-border); color: var(--success); }
 
-.warning { background: var(--warning-soft); color: var(--warning); }
+.warning { background: var(--warning-soft); border-color: var(--warning-border); color: var(--warning); }
 
-.danger { background: var(--danger-soft); color: var(--danger); }
+.danger { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); }
 
-.info { background: var(--primary-soft); color: var(--primary); }
+.info { background: var(--primary-soft); border-color: var(--border); color: var(--primary); }
 
-.muted { background: var(--neutral-muted); color: var(--text-secondary); }
+.muted { background: var(--neutral-muted); border-color: var(--border); color: var(--text-secondary); }
 
 /* ── Empty state ────────────────────────────────────────────────────────── */
 
-.empty { color: var(--text-muted); font-size: 13px; padding: 12px 0; }
+.empty { color: var(--text-muted); font-size: var(--fs-sm); padding: var(--sp-3) 0; }
 
 /* ── Aksi & zona berbahaya (F3) ─────────────────────────────────────────── */
 
-.actions { margin-top: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.actions { margin-top: var(--sp-3); display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; }
 
 .dangerZone {
-  margin-top: 14px;
-  padding: 12px 14px;
+  margin-top: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--danger-border);
   background: var(--danger-soft);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   display: flex;
-  gap: 10px;
+  gap: var(--sp-3);
   align-items: center;
   flex-wrap: wrap;
 }
@@ -224,12 +328,50 @@
 
 .traceRound {
   border-left: 3px solid var(--border-strong);
-  padding: 8px 12px;
-  margin: 8px 0;
+  padding: var(--sp-2) var(--sp-3);
+  margin: var(--sp-2) 0;
   background: var(--surface-muted);
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 var(--r-md) var(--r-md) 0;
 }
 
-.traceSpeaker { font-weight: 700; color: var(--text); font-size: 13px; }
+.traceSpeaker { font-weight: 700; color: var(--text); font-size: var(--fs-md); }
 
-.traceText { color: var(--text-secondary); font-size: 12.5px; margin-top: 3px; }
+.traceText { color: var(--text-secondary); font-size: var(--fs-sm); margin-top: 3px; }
+
+/* Util spacing kecil (menggantikan inline style marginTop/marginBottom). */
+.mt1 { margin-top: var(--sp-2); }
+.mb1 { margin-bottom: var(--sp-3); }
+.mlAuto { margin-left: auto; }
+.mutedText { color: var(--text-muted); font-size: var(--fs-sm); }
+
+/* Kontrol lot/risk per akun di panel MT5 Terminals. */
+.sizingRow {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.sizingLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.sizingInput {
+  width: 62px;
+  padding: 3px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.sizingInput:focus {
+  outline: none;
+  border-color: var(--primary);
+}

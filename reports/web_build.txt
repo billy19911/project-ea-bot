@@ -5,7 +5,7 @@
    Γû▓ Next.js 15.5.25
 
    Creating an optimized production build ...
- Γ£ô Compiled successfully in 3.3s
+ Γ£ô Compiled successfully in 3.1s
    Skipping linting
    Checking validity of types ...
    Collecting page data ...
@@ -27,7 +27,7 @@ Route (app)                                 Size  First Load JS
 Γö£ Γùï /backtest                            4.49 kB         129 kB
 Γö£ Γùï /certification                       2.33 kB         126 kB
 Γö£ Γùï /circuit-breaker                     6.68 kB         131 kB
-Γö£ Γùï /control-plane                       17.2 kB         141 kB
+Γö£ Γùï /control-plane                       17.4 kB         142 kB
 Γö£ Γùï /decision-replay                     6.46 kB         131 kB
 Γö£ Γùï /decisions                           4.48 kB         129 kB
 Γö£ Γùï /environment                         2.34 kB         126 kB
