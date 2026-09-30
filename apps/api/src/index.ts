@@ -1379,7 +1379,13 @@ app.get('/committee/trace', async (req, res) => {
     decision_id: d.decision_id ?? d.event_id ?? null,
     symbol: d.symbol ?? null,
     rounds: Array.isArray(d.trace) ? d.trace : [],
-    final: { verdict: d.decision ?? 'UNKNOWN', confidence: null },
+    final: {
+      verdict: d.decision ?? 'UNKNOWN',
+      confidence: typeof d.confidence === 'number' ? d.confidence : null,
+    },
+    // TASK 03: structured committee cycle + natural human-facing narrative.
+    committee: d.committee_record ?? null,
+    narrative: d.committee_narrative ?? '',
   }));
   res.json({ traces, source: 'live' });
 });

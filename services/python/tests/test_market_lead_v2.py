@@ -232,11 +232,41 @@ def test_analyze_delegates_to_injected_specialists():
 def test_analyze_uses_production_specialists_by_default():
     lead = MarketLead()
     prices = [1.0 + 0.001 * i for i in range(60)]
-    result = lead.analyze({"event_type": "MOMENTUM_BULLISH", "prices": prices, "symbol": "EURUSD"})
+    # An unmapped event family keeps the full analyst coverage (fail-safe).
+    result = lead.analyze({"event_type": "UNMAPPED_CONTEXT", "prices": prices, "symbol": "EURUSD"})
 
     assert set(result["specialist_results"]) == SPECIALIST_NAMES
     for specialist_result in result["specialist_results"].values():
         assert "signal" in specialist_result
+
+
+def test_analyze_selects_only_relevant_specialists_for_breakout():
+    """TASK 03: a BREAKOUT must not convene every analyst."""
+    lead = MarketLead()
+    prices = [1.0 + 0.001 * i for i in range(60)]
+    result = lead.analyze({"event_type": "BREAKOUT", "prices": prices, "symbol": "EURUSD"})
+
+    called = set(result["specialist_results"])
+    assert "structure_analyst" in called
+    assert "momentum_analyst" in called
+    # News/Macro are irrelevant to a pure price-structure breakout.
+    assert "fundamental_analyst" not in called
+    assert result["agents_called"], "agents_called must be recorded"
+    assert set(result["agents_called"]) == called
+    assert "fundamental_analyst" in result["agents_skipped"]
+    # Coverage is narrowed but non-empty.
+    assert called != SPECIALIST_NAMES
+    assert called.issubset(SPECIALIST_NAMES)
+
+
+def test_select_specialists_respects_explicit_required_list():
+    lead = MarketLead()
+    called, called_names, skipped = lead.select_specialists(
+        "BREAKOUT", {"required_specialists": ["news_sentiment"]}
+    )
+    assert called_names == ["news_sentiment"]
+    assert "structure_analyst" in skipped
+    assert set(called) == {"news_sentiment"}
 
 
 def test_analyze_returns_neutral_without_directional_evidence():

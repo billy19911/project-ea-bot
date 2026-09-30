@@ -156,6 +156,12 @@ class PipelineResult:
     # "SIMULATED". Analysts on synthetic data must never masquerade as real
     # intelligence; the dashboard/reports show this flag.
     data_source: str = "UNKNOWN"
+    # TASK 03: canonical committee-cycle record (event, agents_called,
+    # agents_skipped, agent_outputs, conflicts, evidence, supervisor_reasoning,
+    # decision, confidence, signal_id) and the natural human-facing narrative.
+    # Persisted with the decision history so every committee cycle is traceable.
+    committee_record: dict[str, Any] = field(default_factory=dict)
+    committee_narrative: str = ""
 
     def add_stage(self, stage: str, status: str, detail: str = "") -> None:
         """Append a stage entry (as a plain dict) to the trace."""
@@ -188,6 +194,8 @@ class PipelineResult:
             "agent_results": self.agent_results,
             "supervisor_summary": self.supervisor_summary,
             "data_source": self.data_source,
+            "committee_record": self.committee_record,
+            "committee_narrative": self.committee_narrative,
         }
 
 
@@ -537,6 +545,13 @@ class TradingPipeline:
                 else {}
             )
             result.supervisor_summary = str(analysis.get("summary") or "")
+            # TASK 03: carry the structured committee record + natural narrative
+            # through the cycle result so it is persisted with the decision.
+            if isinstance(analysis.get("committee_record"), dict):
+                result.committee_record = analysis["committee_record"]
+            if analysis.get("signal_id"):
+                result.committee_record.setdefault("signal_id", str(analysis["signal_id"]))
+            result.committee_narrative = str(analysis.get("committee_narrative") or "")
 
         # ── Extract trade proposal ──────────────────────────────────────
         proposal = self._extract_proposal(analysis)

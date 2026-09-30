@@ -14,11 +14,13 @@ Phase 7 enhancements:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 
 from .base import AgentCapability, AgentPriority, BaseAgent
+from .committee_record import build_committee_record, render_committee_narrative
 from .synthesis import AgentSynthesizer
 
 logger = logging.getLogger(__name__)
@@ -262,6 +264,41 @@ class SupervisorAgent(BaseAgent):
             if isinstance(out, dict) and out.get("unresolved_conflict"):
                 return True
         return False
+
+    @staticmethod
+    def collect_agents_called_skipped(
+        results: dict[str, Any],
+    ) -> tuple[list[str], list[str]]:
+        """Aggregate called/skipped agent names across department leads.
+
+        A lead records ``agents_called`` / ``agents_skipped`` for its own
+        specialists. The supervisor merges them (preserving lead order) and
+        also counts the leads themselves as called. When a lead does not
+        report (older cycles), its specialists are treated as called so
+        coverage is never silently understated.
+        """
+        called: list[str] = []
+        skipped: list[str] = []
+
+        def _add(names: list[str], bucket: list[str]) -> None:
+            for name in names:
+                if name not in bucket and name not in called:
+                    bucket.append(name)
+
+        for lead_name, out in (results or {}).items():
+            if not isinstance(out, dict):
+                continue
+            _add([str(lead_name)], called)
+            lead_called = out.get("agents_called")
+            lead_skipped = out.get("agents_skipped")
+            if isinstance(lead_called, (list, tuple)):
+                _add([str(n) for n in lead_called], called)
+            if isinstance(lead_skipped, (list, tuple)):
+                _add([str(n) for n in lead_skipped], skipped)
+        # A specialist reported as skipped by one lead and called by another is
+        # called (no net exclusion).
+        skipped = [n for n in skipped if n not in called]
+        return called, skipped
 
     def _is_weak_consensus(self, proposal: dict[str, Any]) -> bool:
         """True when the proposal's confidence is below the conflict floor."""
@@ -608,6 +645,51 @@ class SupervisorAgent(BaseAgent):
         # routing, EPIC 01) still consume the lead-level ``results`` unchanged.
         display_results = build_display_agent_results(results)
 
+        # ── TASK 03: canonical committee record + natural narrative ────
+        # The supervisor synthesises ONE canonical intent. We persist the
+        # structured cycle record (machine-deterministic) and derive the
+        # natural human-facing narrative from real evidence — never a template.
+        called_names, skipped_names = self.collect_agents_called_skipped(results)
+        decision_str = (
+            str((proposal or {}).get("direction") or "WAIT").upper()
+            if proposal is not None
+            else ("WAIT" if synthesis and synthesis.get("proposal") else "NO_TRADE")
+        )
+        confidence_val = _coerce_float((proposal or {}).get("confidence"))
+        if confidence_val is None:
+            confidence_val = overall_confidence
+        signal_id = str(
+            (proposal or {}).get("proposal_id")
+            or context.get("signal_id")
+            or context.get("event_id")
+            or self._canonical_signal_id(event_type, context)
+        )
+        conflicts_for_reasoning = build_committee_record(
+            event={"event_type": event_type},
+            agent_outputs=display_results,
+            decision=decision_str,
+            confidence=confidence_val or 0.0,
+        )["conflicts"]
+        supervisor_reasoning = self._natural_supervisor_reasoning(
+            decision_str, proposal, synthesis, conflicts_for_reasoning, results
+        )
+        committee_record = build_committee_record(
+            event={
+                "event_id": context.get("event_id")
+                or (context.get("event") or {}).get("event_id", ""),
+                "event_type": event_type,
+                "symbol": context.get("symbol") or (context.get("event") or {}).get("symbol", ""),
+            },
+            agent_outputs=display_results,
+            decision=decision_str,
+            confidence=confidence_val or 0.0,
+            signal_id=signal_id,
+            supervisor_reasoning=supervisor_reasoning,
+            agents_called=called_names,
+            agents_skipped=skipped_names,
+        )
+        committee_narrative = render_committee_narrative(committee_record)
+
         return {
             "agent": self.name,
             "event_type": event_type,
@@ -616,11 +698,66 @@ class SupervisorAgent(BaseAgent):
             "agent_results": display_results,
             "summary": "; ".join(summary_reasons),
             "skipped_agents": skipped,
+            # TASK 03: selective-dispatch + structured committee record.
+            "agents_called": called_names,
+            "agents_skipped": skipped_names,
+            "conflicts": committee_record["conflicts"],
+            "evidence": committee_record["evidence"],
+            "supervisor_reasoning": supervisor_reasoning,
+            "decision": decision_str,
+            "confidence": confidence_val,
+            "signal_id": signal_id,
+            "committee_record": committee_record,
+            "committee_narrative": committee_narrative,
             "token_used": self.token_used,
             "token_budget": self.token_budget,
             "synthesis": synthesis,
             "proposal": proposal,
         }
+
+    @staticmethod
+    def _canonical_signal_id(event_type: str, context: dict[str, Any]) -> str:
+        """Deterministic signal id fallback when no event/proposal id exists."""
+        symbol = str(context.get("symbol") or "UNKNOWN").upper()
+        digest = hashlib.sha1(
+            f"{symbol}|{event_type}|{context.get('bar_time', '')}".encode("utf-8")
+        ).hexdigest()[:12]
+        return f"sig_{digest}"
+
+    @staticmethod
+    def _natural_supervisor_reasoning(
+        decision: str,
+        proposal: Optional[dict[str, Any]],
+        synthesis: Optional[dict[str, Any]],
+        conflicts: list[dict[str, Any]] | None,
+        results: dict[str, Any],
+    ) -> str:
+        """Derive a natural human-facing supervisor rationale from structured evidence.
+
+        The output explains WHY the committee decided this way (evidence-weighted),
+        not a template string. It mentions key agents/evidence only when relevant.
+        No fake conversational fluff.
+        """
+        parts: list[str] = []
+        # Core verdict explanation.
+        if decision == "BUY":
+            parts.append("struktur dan momentum selaras; bobot bukti mendukung BUY")
+        elif decision == "SELL":
+            parts.append("struktur dan momentum selaras; bobot bukti mendukung SELL")
+        else:
+            parts.append("tidak ada kesepakatan arah yang dominan — WAIT")
+
+        # Conflicts when present.
+        if conflicts and len(conflicts) > 0:
+            parts[-1] += "; " + (f"ada {len(conflicts)} konflik belum terselesaikan")
+        # Evidence coverage note (when we called few specialists).
+        total_skipped = sum(
+            len(out.get("agents_skipped", [])) for out in results.values() if isinstance(out, dict)
+        )
+        if total_skipped > 0:
+            parts[-1] += f"; {total_skipped} spesialis tidak dipanggil karena bukti tidak relevan"
+
+        return ". ".join(parts) + "."
 
     def _synthesise(
         self,

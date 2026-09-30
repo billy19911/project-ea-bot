@@ -397,6 +397,49 @@ class MarketLead(BaseAgent):
     #: ADX threshold below which a directionless market is treated as ranging.
     ADX_RANGE_THRESHOLD = 20.0
 
+    # ── TASK 03: relevant specialists only ──────────────────────────────
+    # An event does NOT need every specialist. This map narrows the
+    # production analyst set to the ones whose EVIDENCE is relevant to the
+    # detected event family (TASK 03 §"DO NOT"). A BREAKOUT, for example,
+    # never needs News/Macro unless the event itself is a news event.
+    #: Event-family → relevant specialist names (order preserved). Keys are
+    #: matched against the upper-cased event type by ``startswith``.
+    MARKET_EVENT_SPECIALISTS: dict[str, tuple[str, ...]] = {
+        # Pure price-structure events: location + momentum + (vol) context.
+        "BREAKOUT": ("structure_analyst", "momentum_analyst", "volatility_analyst"),
+        "BREAKDOWN": ("structure_analyst", "momentum_analyst", "volatility_analyst"),
+        "REVERSAL": ("structure_analyst", "momentum_analyst", "volatility_analyst"),
+        "STRUCTURE_": ("structure_analyst", "technical_analyst"),
+        "PRICE_ACTION": ("structure_analyst", "momentum_analyst"),
+        "LEVEL_SCAN": ("structure_analyst", "technical_analyst"),
+        "MARKET_": ("structure_analyst", "technical_analyst", "momentum_analyst"),
+        # Trend / momentum events: trend + momentum + (vol) + STRUCTURE context
+        # (momentum claims are only meaningful with location/S-R structure).
+        "TREND_": (
+            "technical_analyst",
+            "momentum_analyst",
+            "volatility_analyst",
+            "structure_analyst",
+        ),
+        "MOMENTUM_": ("momentum_analyst", "structure_analyst", "technical_analyst"),
+        "RSI_": ("momentum_analyst", "structure_analyst", "technical_analyst"),
+        "STOCH_": ("momentum_analyst", "structure_analyst", "technical_analyst"),
+        "EMA_": ("technical_analyst", "momentum_analyst"),
+        "MACD_": ("technical_analyst", "momentum_analyst"),
+        "GAP_": ("technical_analyst", "volatility_analyst"),
+        "DOJI": ("structure_analyst", "momentum_analyst"),
+        # Volatility events: volatility + structure context only.
+        "VOLATILITY_": ("volatility_analyst", "structure_analyst", "technical_analyst"),
+        # News / macro events: news + macro are THE point of these events.
+        "NEWS_": ("news_sentiment", "fundamental_analyst"),
+        "SOCIAL_": ("news_sentiment",),
+        "EARNINGS_": ("fundamental_analyst", "news_sentiment"),
+        "ECONOMIC_": ("fundamental_analyst", "news_sentiment"),
+    }
+    #: Specialist names always considered relevant regardless of event family
+    #: (the market lead's structural core). Empty: relevance is event-driven.
+    MARKET_CORE_SPECIALISTS: tuple[str, ...] = ()
+
     #: Adaptive specialist weights per regime (each dict sums to 1.0).
     ADAPTIVE_WEIGHTS: dict[str, dict[str, float]] = {
         "TRENDING": {
@@ -675,6 +718,52 @@ class MarketLead(BaseAgent):
             return True
         return any(event_type.startswith(prefix) for prefix in self.MARKET_EVENT_PREFIXES)
 
+    def relevant_specialists(self, event_type: str) -> tuple[str, ...] | None:
+        """Return the specialist names relevant to ``event_type`` (TASK 03).
+
+        Returns ``None`` when the event family is not mapped — callers then
+        fall back to running the full analyst set (safe, evidence-driven). An
+        un-mapped/empty result never silently drops coverage: only families we
+        have explicitly reasoned about are narrowed.
+        """
+        raw = str(event_type or "").upper()
+        for prefix, names in self.MARKET_EVENT_SPECIALISTS.items():
+            if raw.startswith(prefix):
+                return tuple(names)
+        return None
+
+    def select_specialists(
+        self,
+        event_type: str,
+        context: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, BaseAgent], list[str], list[str]]:
+        """Split registered specialists into (called, called_names, skipped_names).
+
+        * An explicit ``required_specialists`` list in the context wins.
+        * A mapped event family narrows to its relevant specialists.
+        * An unmapped event keeps the full analyst set (fail-safe coverage).
+
+        Only specialists actually registered with the lead participate.
+        """
+        ctx = context if isinstance(context, dict) else {}
+        explicit = ctx.get("required_specialists")
+        if isinstance(explicit, (list, tuple)) and explicit:
+            wanted = [str(n) for n in explicit]
+        else:
+            relevant = self.relevant_specialists(event_type)
+            wanted = list(relevant) if relevant is not None else list(self._specialists.keys())
+
+        called: dict[str, BaseAgent] = {}
+        for name in wanted:
+            specialist = self._specialists.get(name)
+            if specialist is not None and name not in called:
+                called[name] = specialist
+        # Fail-safe: never run with zero specialists when some are registered.
+        if not called and self._specialists:
+            called = dict(self._specialists)
+        skipped = [n for n in self._specialists if n not in called]
+        return called, list(called.keys()), skipped
+
     @staticmethod
     def _direction_of(signal: Any) -> str:
         """Map an arbitrary specialist signal onto BULLISH/BEARISH/NEUTRAL."""
@@ -699,8 +788,14 @@ class MarketLead(BaseAgent):
         regime = self.detect_regime(context)
         weights = self.get_adaptive_weights(regime)
 
+        # TASK 03: run only the specialists whose evidence is relevant to
+        # this event family (never all agents on every event). The selection
+        # is deterministic and recorded (called/skipped) for traceability.
+        event_type = str((context or {}).get("event_type", "") or "")
+        called, called_names, skipped_names = self.select_specialists(event_type, context)
+
         specialist_results: dict[str, dict[str, Any]] = {}
-        for name, specialist in self._specialists.items():
+        for name, specialist in called.items():
             try:
                 raw = specialist.analyze(context)
             except Exception as exc:  # defensive boundary around specialists
@@ -815,6 +910,12 @@ class MarketLead(BaseAgent):
         if lessons_reason:
             reasons.append(lessons_reason)
 
+        # TASK 03: explain the scope of the meeting (why only these ran).
+        if skipped_names:
+            reasons.append(
+                "spesialis tidak dipanggil (bukti tidak relevan): " + ", ".join(skipped_names)
+            )
+
         return {
             "agent": self.name,
             "role": "department_lead",
@@ -827,6 +928,9 @@ class MarketLead(BaseAgent):
             "specialist_results": specialist_results,
             "dissent": dissent,
             "unresolved_conflict": len(votes) > 1,
+            # TASK 03: selective-dispatch traceability.
+            "agents_called": called_names,
+            "agents_skipped": skipped_names,
         }
 
     def execute(self, task):

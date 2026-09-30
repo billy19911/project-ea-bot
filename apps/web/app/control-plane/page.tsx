@@ -932,6 +932,23 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
         {committee.traces?.map((tr: any) => (
           <section className={s.card} key={tr.decision_id}>
             <h2>Decision {tr.decision_id}{tr.symbol ? ` — ${tr.symbol}` : ''}</h2>
+            {/* TASK 03: natural human-facing committee narrative */}
+            {tr.narrative && tr.narrative.length > 0 && (
+              <pre className={s.traceText}>{tr.narrative}\n</pre>
+            )}
+            {/* Structured record fields */}
+            {tr.committee && (
+              <>
+                <h3>Structured Record</h3>
+                <ul>
+                  <li><b>signal_id:</b> {tr.committee.signal_id || '—'}</li>
+                  <li><b>agents_called:</b> {Array.isArray(tr.committee.agents_called) ? tr.committee.agents_called.join(', ') : '—'}</li>
+                  <li><b>agents_skipped:</b> {Array.isArray(tr.committee.agents_skipped) && tr.committee.agents_skipped.length > 0 ? tr.committee.agents_skipped.join(', ') : '(semua relevan)'}</li>
+                  <li><b>conflicts:</b> {Array.isArray(tr.committee.conflicts) ? `${tr.committee.conflicts.length} konflik` : '—'}</li>
+                  <li><b>supervisor_reasoning:</b> {tr.committee.supervisor_reasoning || '—'}</li>
+                </ul>
+              </>
+            )}
             {tr.rounds?.map((r: any, i: number) => (
               <div className={s.traceRound} key={i}>
                 <div className={s.traceSpeaker}>Tahap {r.stage ?? i + 1} <span className={`${s.badge} ${badgeClass(r.status, s)}`}>{r.status ?? '—'}</span></div>
