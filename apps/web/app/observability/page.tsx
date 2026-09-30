@@ -32,7 +32,7 @@ interface MetricsSummary {
 
 interface SupervisorStatus {
   supervisor: { status: string; routing_policy: string; max_concurrency: number | null; token_budget: number | null; token_used: number | null; uptime: number | null };
-  agents: { name: string; type: string; status: string; priority: number; errorCount: number }[];
+  agents: { name: string; displayName?: string; type: string; status: string; priority: number; errorCount: number }[];
   models: { model: string; provider: string; calls: number; promptTokens: number; completionTokens: number; cost: number; isFree?: boolean }[];
   errors: { id: string; timestamp: string; agent: string; message: string; severity: string }[];
 }
@@ -474,7 +474,7 @@ export default function ObservabilityPage() {
                     ) : agents.map((agent) => (
                       <div key={agent.name} className={styles.agentCard}>
                         <div className={styles.agentHeader}>
-                          <strong>{agent.name}</strong>
+                          <strong title={`routing key: ${agent.name}`}>{agent.displayName || agent.name}</strong>
                           <span className={`${styles.badge} ${statusClass(agent.status)}`}>
                             {agent.status}
                           </span>
@@ -611,7 +611,7 @@ export default function ObservabilityPage() {
                       <tr><td colSpan={5} className={styles.emptyRow}>Belum ada agent data</td></tr>
                     ) : visibleAgents.map((agent) => (
                       <tr key={agent.name}>
-                        <td><strong>{agent.name}</strong></td>
+                        <td><strong title={`routing key: ${agent.name}`}>{agent.displayName || agent.name}</strong></td>
                         <td>{agent.type}</td>
                         <td>
                           <span className={`${styles.badge} ${statusClass(agent.status)}`}>

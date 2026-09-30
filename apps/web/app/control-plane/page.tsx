@@ -713,7 +713,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
                     : '';
                   return (
                     <tr key={a.name}>
-                      <td><strong>{a.name}</strong></td>
+                      <td><strong title={`routing key: ${a.name}`}>{(a as { displayName?: string }).displayName || a.name}</strong></td>
                       <td>{humanize(String(a.type ?? ''))}</td>
                       <td><span className={`${s.badge} ${badgeClass(a.status, s)}`}>{a.status}</span></td>
                       <td>{a.invocations ?? 0}</td>

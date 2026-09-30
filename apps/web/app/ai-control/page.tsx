@@ -11,6 +11,8 @@ import Pagination from '../../components/ui/pagination';
 type AgentStatus = 'active' | 'idle' | 'error';
 type AgentNode = {
   name: string;
+  /** Human-facing callsign (e.g. TREND-SCAN); falls back to `name`. */
+  displayName?: string;
   type: string;
   status: AgentStatus;
   priority: number | null;
@@ -31,7 +33,7 @@ type ActivityLog = {
   status: 'success' | 'warning' | 'error';
   duration?: number;
 };
-type AgentError = { 
+type AgentError = {
   id: string; 
   timestamp: string; 
   agent: string; 
@@ -71,6 +73,30 @@ function formatUptime(seconds: number | null | undefined): string {
 // `number | null` → locale string or '—' (no fabricated zeros).
 function formatCount(value: number | null | undefined): string {
   return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : '—';
+}
+
+// Human-facing callsign for a routing name (mirrors backend display_name).
+const CALLSIGNS: Record<string, string> = {
+  supervisor: 'OVERWATCH',
+  market_lead: 'MARKET-LEAD',
+  risk_lead: 'RISK-LEAD',
+  review_lead: 'REVIEW-LEAD',
+  technical_analyst: 'TREND-SCAN',
+  structure_analyst: 'STRUCTURE',
+  momentum_analyst: 'MOMENTUM',
+  volatility_analyst: 'VOLATILITY',
+  news_sentiment: 'NEWS-WIRE',
+  fundamental_analyst: 'MACRO',
+  post_trade_review: 'REVIEW',
+  'Account Risk Analyst': 'RISK-ACC',
+  'Position Risk Analyst': 'RISK-POS',
+  'Portfolio Risk Analyst': 'RISK-PORT',
+  'Drawdown Analyst': 'RISK-DD',
+};
+
+function callsignFor(name: string): string {
+  if (CALLSIGNS[name]) return CALLSIGNS[name];
+  return name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function SourceBadge({ source }: { source: SourceState | undefined }) {
@@ -247,7 +273,7 @@ export default function AIControlPage() {
                 <div key={agent.name} className={styles.agentCard}>
                   <div className={styles.agentCardHeader}>
                     <div>
-                      <strong>{agent.name}</strong>
+                      <strong title={`routing key: ${agent.name}`}>{agent.displayName || callsignFor(agent.name)}</strong>
                       <small>{agent.type}</small>
                     </div>
                     <span className={`${styles.badge} ${
@@ -284,8 +310,7 @@ export default function AIControlPage() {
                     )}
                     {agent.errors > 0 && (
                       <span className={styles.errorBadge}>{agent.errors} error</span>
-                    )}
-                  </div>
+                    )}                  </div>
                 </div>
               ))}
             </div>
@@ -315,7 +340,7 @@ export default function AIControlPage() {
                   {activity.map((log) => (
                     <tr key={log.id}>
                       <td><code>{fmtDateTime(log.timestamp)}</code></td>
-                      <td><strong>{log.agent}</strong></td>
+                      <td><strong title={`routing key: ${log.agent}`}>{callsignFor(log.agent)}</strong></td>
                       <td>{log.action}</td>
                       <td>
                         <span className={`${styles.statusBadge} ${

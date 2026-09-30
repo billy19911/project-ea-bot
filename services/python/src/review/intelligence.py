@@ -37,6 +37,7 @@ class ReviewLead(BaseAgent):
             role="department_lead",
             permissions=["ANALYZE_TRADES"],
             priority=AgentPriority.NORMAL,
+            display_name="REVIEW-LEAD",
         )
         self._specialist = PostTradeReviewAgent(lesson_store=lesson_store)
 
