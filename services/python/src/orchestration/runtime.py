@@ -33,6 +33,7 @@ from risk.dependency_breakers import ExecutionGuard
 from risk.engine import RiskEngine
 from risk.gate import RiskGate
 from risk.money_management import MoneyManager
+from trading.event_classes import EventGate
 from trading.event_engine import EventQueue
 from trading.scheduler import AutonomousScheduler
 
@@ -466,6 +467,7 @@ class OrchestrationRuntime:
         reconciliation_history_limit: int = RECONCILIATION_HISTORY_LIMIT,
         reconciliation_runner: Optional[ReconciliationRunner] = None,
         execution_guard: Optional[ExecutionGuard] = None,
+        event_gate: Optional[EventGate] = None,
     ) -> None:
         self.queue = queue if queue is not None else EventQueue()
         # Periodic reconciliation (PRD_V2 §14). Providers default to the
@@ -510,6 +512,10 @@ class OrchestrationRuntime:
                 # /decisions + traces stay complete for feed-driven events.
                 pipeline=_RecordingPipelineProxy(self.pipeline, self),
                 reconciliation_runner=self.reconciliation,
+                # TASK 02: qualifying-event gate — only TRADE_TRIGGER events may
+                # convene the committee and identical events are suppressed, so
+                # the supervisor stays idle when nothing qualifying changed.
+                event_gate=event_gate if event_gate is not None else EventGate(),
                 # Audit P1-3: supply REAL account/positions/market inputs so the
                 # deterministic Risk Gate is account-aware, merged with news.
                 context_provider=AccountContextProvider(

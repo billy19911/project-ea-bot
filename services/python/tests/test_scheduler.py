@@ -176,6 +176,7 @@ class TestStats:
         assert stats == {
             "events_processed": 0,
             "events_skipped": 0,
+            "events_gated": 0,
             "trades_proposed": 0,
             "trades_blocked": 0,
             "trades_executed": 0,
@@ -183,6 +184,8 @@ class TestStats:
             "running": False,
             "backpressure": False,
             "queue_size": 0,
+            "event_gate_enabled": False,
+            "event_trace_size": 0,
         }
 
 

@@ -78,6 +78,21 @@ async def scheduler_status() -> dict[str, Any]:
     }
 
 
+@router.get("/scheduler/event-trace", summary="Recent event wake-cause trace (TASK 02)")
+async def scheduler_event_trace(
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    """Return recent event traces showing the exact wake cause per analysis.
+
+    Each entry carries event_id/type/symbol, the gate decision (qualifying vs
+    gated-duplicate/housekeeping), the resulting decision/status, and timing —
+    so an operator can confirm the supervisor only woke for qualifying events.
+    """
+    runtime = get_runtime()
+    traces = runtime.scheduler.recent_event_traces(limit=limit)
+    return {"traces": traces, "count": len(traces), "source": "live"}
+
+
 @router.get("/signals/active", summary="Active trade signals per symbol (FOKUS #2)")
 async def active_signals() -> dict[str, Any]:
     """Return the authoritative per-symbol signal registry state.

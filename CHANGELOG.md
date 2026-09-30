@@ -3,6 +3,15 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — TASK 02: Event-driven supervisor / wake model
+- `src/trading/event_classes.py`: event-class taxonomy (TRADE_TRIGGER / CONTEXT_UPDATE / HOUSEKEEPING / TRADE_CLOSE) + `EventGate` (classification gate + TTL fingerprint dedup) + `EventFingerprintGuillotine`.
+- `src/trading/scheduler.py`: `AutonomousScheduler(event_gate=...)` — only qualifying (TRADE_TRIGGER) events reach the committee; identical events are suppressed deterministically; new `events_gated` stat + bounded event-trace (`recent_event_traces`) recording the exact wake cause per analysis.
+- `src/orchestration/runtime.py`: production scheduler now carries an `EventGate` so housekeeping (RISK_*, RECONCILIATION, HEALTH_CHECK, METRICS) can never convene the committee or create a trade proposal.
+- `src/trading/feed_loop.py`: stamps `event_id` / `event_created_at` / `feed_poll_time` / `bar_time` on emitted events for the wake-cause trace.
+- `GET /scheduler/event-trace` endpoint exposes the recent wake-cause trace.
+- Prinsip: NO EVENT → supervisor idle; QUALIFYING EVENT → wake → committee; DUPLICATE → suppressed; HOUSEKEEPING → never a trade signal.
+- Verifikasi: 28 test TASK 02 baru (`tests/test_task02_event_driven_supervisor.py`). Execution tetap DISARMED.
+
 ### Added — Phase 3: Committee & Debate Engine (COMPLETE)
 - `src/agents/roles.py`: 8 canonical roles (regime/structure/liquidity/momentum/volatility/news/entry/challenger) dengan `RoleOutput` ternormalisasi.
 - `src/agents/debate.py`: `DebateEngine` bounded (max 2 rounds, max 3 challenges/cycle) + `DebateRecord` traceable.

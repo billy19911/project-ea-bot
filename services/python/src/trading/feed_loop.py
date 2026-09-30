@@ -42,6 +42,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from trading.market_snapshot import set_latest_snapshot
@@ -299,6 +300,23 @@ class MarketFeedLoop:
                     event.market_snapshot = snapshot
                 except Exception:  # noqa: BLE001 - evidence attach is best-effort
                     logger.warning("Market feed could not attach snapshot to %s", event_type)
+            # TASK 02 trace metadata: stamp when the event was created, when the
+            # feed polled, and the bar time so the scheduler trace shows the
+            # exact wake cause (event creation → queue → wake). Best-effort.
+            try:
+                event_created_at = getattr(event, "timestamp", "") or ""
+                if not getattr(event, "event_created_at", None):
+                    event.event_created_at = event_created_at
+                if not getattr(event, "feed_poll_time", None):
+                    event.feed_poll_time = datetime.now(timezone.utc).isoformat()
+                if not getattr(event, "bar_time", None):
+                    # The detector stamps the event's own ``time`` from the last
+                    # bar when available; otherwise leave it blank.
+                    event.bar_time = str(getattr(event, "time", "") or "")
+                if not getattr(event, "event_id", None):
+                    event.event_id = f"evt_{symbol}_{event_type}_{int(now * 1000)}"
+            except Exception:  # noqa: BLE001 - trace metadata is best-effort
+                logger.debug("Market feed trace metadata skipped for %s", event_type)
             if not self.queue.enqueue(event):
                 logger.warning(
                     "Market feed queue full; dropping %s %s this cycle",

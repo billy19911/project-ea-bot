@@ -14,14 +14,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from collections import deque
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from execution.reconciliation_runner import ReconciliationRunner
+from trading.event_classes import EventGate
 from trading.event_engine import EventPriority, EventQueue, get_priority
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["AutonomousScheduler"]
+
+# Bound on the in-memory event trace retained for diagnostics (TASK 02).
+_EVENT_TRACE_LIMIT = 200
 
 # Pipeline statuses counted as a "blocked" trade.
 _BLOCKED_STATUS = "BLOCKED"
@@ -50,6 +57,12 @@ class AutonomousScheduler:
             §14). When supplied, its ``tick()`` is invoked once per drain pass so
             reconciliation runs every N cycles. Fail-safe: a reconciliation error
             is recorded, never raised.
+        event_gate: Optional :class:`~trading.event_classes.EventGate` (TASK 02).
+            When supplied, only QUALIFYING (TRADE_TRIGGER) events reach the
+            pipeline, and identical events are suppressed deterministically.
+            Non-qualifying events are recorded as skipped (never turned into a
+            trade proposal). ``None`` preserves the legacy "process everything"
+            behaviour so existing callers/tests are unaffected.
     """
 
     def __init__(
@@ -61,6 +74,7 @@ class AutonomousScheduler:
         max_events_per_cycle: int = 0,
         backpressure: bool = False,
         reconciliation_runner: Optional[ReconciliationRunner] = None,
+        event_gate: Optional[EventGate] = None,
     ) -> None:
         self.queue = queue
         self.pipeline = pipeline
@@ -69,6 +83,8 @@ class AutonomousScheduler:
         self.max_events_per_cycle = max(0, int(max_events_per_cycle))
         self.backpressure = bool(backpressure)
         self.reconciliation_runner = reconciliation_runner
+        # TASK 02: qualifying-event gate (None → legacy behaviour).
+        self.event_gate = event_gate
 
         self._task: Optional[asyncio.Task] = None
         self._stop_event: Optional[asyncio.Event] = None
@@ -78,11 +94,16 @@ class AutonomousScheduler:
         self._stats: dict[str, int] = {
             "events_processed": 0,
             "events_skipped": 0,
+            "events_gated": 0,
             "trades_proposed": 0,
             "trades_blocked": 0,
             "trades_executed": 0,
             "errors": 0,
         }
+        # TASK 02: bounded event trace so every analysis shows its exact wake
+        # cause (event_class, gate decision, timings). Diagnostics only — never
+        # read by the decision path.
+        self._event_trace: deque[dict[str, Any]] = deque(maxlen=_EVENT_TRACE_LIMIT)
 
     # ------------------------------------------------------------------
     # Properties
@@ -119,8 +140,8 @@ class AutonomousScheduler:
             if self.backpressure and self._is_background(event):
                 self._stats["events_skipped"] += 1
                 continue
-            self._process_event(event)
-            processed += 1
+            if self._process_event(event):
+                processed += 1
         self._maybe_reconcile()
         return processed
 
@@ -146,8 +167,45 @@ class AutonomousScheduler:
         except Exception:  # pragma: no cover - defensive
             return False
 
-    def _process_event(self, event: Any) -> None:
-        """Run the pipeline for one event, recording stats and errors."""
+    def _process_event(self, event: Any) -> bool:
+        """Run the pipeline for one event, recording stats and errors.
+
+        Returns:
+            True when the event reached the pipeline (counts as processed),
+            False when the event gate suppressed it.
+
+        TASK 02: if an event_gate is present, check whether this event qualifies
+        before running the committee. Non-qualifying events are skipped without
+        reaching the pipeline, and the count goes to ``events_gated`` rather than
+        ``events_skipped`` (distinguish intentional gating from backpressure).
+        """
+        symbol = self._event_symbol(event)
+        event_type = self._event_type(event)
+        wake_started = time.monotonic()
+
+        # TASK 02: qualifying-event gate.
+        if self.event_gate is not None:
+            allowed, reason = self.event_gate.check(
+                event_type=event_type,
+                symbol=symbol,
+                fingerprint=self._event_fingerprint(event),
+            )
+            if not allowed:
+                self._stats["events_gated"] += 1
+                logger.debug("Event gate suppressed %s %s: %s", symbol, event_type, reason)
+                self._record_event_trace(
+                    event=event,
+                    symbol=symbol,
+                    event_type=event_type,
+                    wake_cause=f"gated:{self._gate_kind(event_type)}",
+                    gate_allowed=False,
+                    gate_reason=reason,
+                    decision="",
+                    status="SKIPPED",
+                    wake_started=wake_started,
+                )
+                return False
+
         self._stats["events_processed"] += 1
         context = self._build_context(event)
         try:
@@ -155,7 +213,18 @@ class AutonomousScheduler:
         except Exception as exc:  # deterministic-safe: never kill the loop
             self._stats["errors"] += 1
             logger.exception("Pipeline failed for event %s: %s", _event_label(event), exc)
-            return
+            self._record_event_trace(
+                event=event,
+                symbol=symbol,
+                event_type=event_type,
+                wake_cause=f"qualifying:{self._gate_kind(event_type)}",
+                gate_allowed=True,
+                gate_reason="",
+                decision="",
+                status="ERROR",
+                wake_started=wake_started,
+            )
+            return True
 
         status = str(getattr(result, "status", "")).upper()
         decision = str(getattr(result, "decision", "")).upper()
@@ -168,6 +237,154 @@ class AutonomousScheduler:
             self._stats["trades_executed"] += 1
         if getattr(result, "error", None):
             self._stats["errors"] += 1
+
+        # TASK 02: remember the cycle outcome for future duplicate checks so an
+        # identical event within the TTL window does not re-run the committee.
+        if self.event_gate is not None and symbol:
+            self.event_gate.record_result(
+                event_type=event_type,
+                symbol=symbol,
+                fingerprint=self._event_fingerprint(event),
+                result=f"{decision}_{status}",
+            )
+
+        self._record_event_trace(
+            event=event,
+            symbol=symbol,
+            event_type=event_type,
+            wake_cause=f"qualifying:{self._gate_kind(event_type)}",
+            gate_allowed=True,
+            gate_reason="",
+            decision=decision,
+            status=status,
+            wake_started=wake_started,
+        )
+        return True
+
+    # ------------------------------------------------------------------
+    # Event trace (TASK 02: exact wake cause per analysis)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _gate_kind(event_type: str) -> str:
+        """Return the event class name for tracing (never raises)."""
+        try:
+            from trading.event_classes import classify_event_class
+
+            return classify_event_class(event_type).value
+        except Exception:  # noqa: BLE001 - trace only
+            return "UNKNOWN"
+
+    def _record_event_trace(
+        self,
+        *,
+        event: Any,
+        symbol: str,
+        event_type: str,
+        wake_cause: str,
+        gate_allowed: bool,
+        gate_reason: str,
+        decision: str,
+        status: str,
+        wake_started: float,
+    ) -> None:
+        """Append one event-trace entry (diagnostics; never raises)."""
+        try:
+            created_at = ""
+            bar_time = ""
+            if isinstance(event, dict):
+                created_at = str(event.get("event_created_at") or event.get("timestamp") or "")
+                bar_time = str(event.get("bar_time") or "")
+                event_id = str(event.get("event_id") or "")
+            else:
+                created_at = str(getattr(event, "timestamp", "") or "")
+                bar_time = str(getattr(event, "bar_time", "") or "")
+                event_id = str(getattr(event, "event_id", "") or "")
+            now = time.monotonic()
+            entry = {
+                "event_id": event_id,
+                "event_type": event_type,
+                "symbol": symbol,
+                "event_created_at": created_at,
+                "bar_time": bar_time,
+                "scheduler_wake_at": datetime.now(timezone.utc).isoformat(),
+                "wake_cause": wake_cause,
+                "gate_allowed": bool(gate_allowed),
+                "gate_reason": gate_reason,
+                "decision": decision,
+                "status": status,
+                "duration_ms": round((now - wake_started) * 1000.0, 3),
+            }
+            self._event_trace.append(entry)
+            if gate_allowed:
+                logger.info(
+                    "Event analysis: %s %s cause=%s decision=%s status=%s dur=%.1fms",
+                    symbol,
+                    event_type,
+                    wake_cause,
+                    decision or "-",
+                    status or "-",
+                    entry["duration_ms"],
+                )
+        except Exception:  # noqa: BLE001 - tracing must never break the loop
+            logger.debug("Event trace record failed", exc_info=True)
+
+    def recent_event_traces(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return the most recent event-trace entries (newest first)."""
+        if limit <= 0:
+            return []
+        items = list(self._event_trace)[-limit:]
+        items.reverse()
+        return items
+
+    # ------------------------------------------------------------------
+    # Event extraction helpers (TASK 02 gate inputs)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _event_symbol(event: Any) -> str:
+        """Return the event's symbol ('' when absent)."""
+        if isinstance(event, dict):
+            return str(event.get("symbol") or "")
+        return str(getattr(event, "symbol", "") or "")
+
+    @staticmethod
+    def _event_type(event: Any) -> str:
+        """Return the event's type string ('' when absent)."""
+        if isinstance(event, dict):
+            raw = event.get("event_type")
+        else:
+            raw = getattr(event, "event_type", None)
+        value = getattr(raw, "value", raw)
+        return str(value) if value is not None else ""
+
+    @classmethod
+    def _event_fingerprint(cls, event: Any) -> tuple:
+        """Return a deterministic fingerprint of the event instance.
+
+        Prefers a bar timestamp/index carried on the event (a new bar is a
+        materially different event); falls back to the event timestamp. Two
+        identical events observed on the same bar share a fingerprint → the gate
+        suppresses the second one.
+        """
+        symbol = cls._event_symbol(event)
+        event_type = cls._event_type(event)
+        bar_marker = ""
+        if isinstance(event, dict):
+            bar_marker = str(
+                event.get("bar_time")
+                or event.get("bar_index")
+                or event.get("timestamp")
+                or event.get("time")
+                or ""
+            )
+        else:
+            bar_marker = str(
+                getattr(event, "bar_time", None)
+                or getattr(event, "bar_index", None)
+                or getattr(event, "timestamp", None)
+                or getattr(event, "time", None)
+                or ""
+            )
+        return (symbol.upper(), event_type.upper(), bar_marker)
 
     def _build_context(self, event: Any) -> dict[str, Any]:
         """Build the per-event pipeline context via the provider (if any)."""
@@ -278,6 +495,7 @@ class AutonomousScheduler:
         stats: dict[str, Any] = {
             "events_processed": self._stats["events_processed"],
             "events_skipped": self._stats["events_skipped"],
+            "events_gated": self._stats["events_gated"],
             "trades_proposed": self._stats["trades_proposed"],
             "trades_blocked": self._stats["trades_blocked"],
             "trades_executed": self._stats["trades_executed"],
@@ -285,7 +503,11 @@ class AutonomousScheduler:
             "running": self._running,
             "backpressure": self.backpressure,
             "queue_size": len(self.queue),
+            "event_gate_enabled": self.event_gate is not None,
+            "event_trace_size": len(self._event_trace),
         }
+        if self.event_gate is not None:
+            stats["event_gate"] = self.event_gate.stats()
         runner = self.reconciliation_runner
         if runner is not None:
             stats.update(runner.summary())
