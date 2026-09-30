@@ -90,6 +90,7 @@ and detailed deterministic reasoning."""
             agent_type="momentum",
             description="Analyzes momentum: RSI, MACD, Stochastic, velocity, divergences",
             priority=AgentPriority.HIGH,
+            display_name="MOMENTUM",
         )
         self.capabilities = [
             AgentCapability("rsi_analysis", "Analyzes RSI levels and centerline crosses"),

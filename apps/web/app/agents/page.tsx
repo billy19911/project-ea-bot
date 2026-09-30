@@ -56,6 +56,8 @@ interface DecisionRecord {
 
 interface ControlAgent {
   name: string;
+  /** Human-facing callsign (e.g. TREND-SCAN); falls back to `name`. */
+  displayName?: string;
   type: string;
   status: string;
   priority?: number | null;
@@ -118,6 +120,37 @@ function formatClock(value: string | number | null | undefined): string {
 function initials(name: string): string {
   const trimmed = (name || '').trim();
   return trimmed ? trimmed.charAt(0).toUpperCase() : '?';
+}
+
+// Human-facing callsign for a routing name. The registry key (e.g.
+// "technical_analyst") stays the internal identity; this only prettifies the
+// committee bubble. Values mirror the backend display_name field.
+const CALLSIGNS: Record<string, string> = {
+  supervisor: 'OVERWATCH',
+  market_lead: 'MARKET-LEAD',
+  risk_lead: 'RISK-LEAD',
+  technical_analyst: 'TREND-SCAN',
+  structure_analyst: 'STRUCTURE',
+  momentum_analyst: 'MOMENTUM',
+  volatility_analyst: 'VOLATILITY',
+  news_sentiment: 'NEWS-WIRE',
+  fundamental_analyst: 'MACRO',
+  post_trade_review: 'REVIEW',
+  'Technical Analyst': 'TREND-SCAN',
+  'Structure Analyst': 'STRUCTURE',
+  'Momentum Analyst': 'MOMENTUM',
+  'Volatility Analyst': 'VOLATILITY',
+  'News/Sentiment Analyst': 'NEWS-WIRE',
+  'Account Risk Analyst': 'RISK-ACC',
+  'Position Risk Analyst': 'RISK-POS',
+  'Portfolio Risk Analyst': 'RISK-PORT',
+  'Drawdown Analyst': 'RISK-DD',
+};
+
+/** Callsign for a routing name, falling back to a de-snaked label. */
+function callsignFor(name: string): string {
+  if (CALLSIGNS[name]) return CALLSIGNS[name];
+  return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
 // Chip signal: BULLISH/BUY → trendUp, BEARISH/SELL → trendDown, else muted.
@@ -429,12 +462,12 @@ export default function AgentsPage() {
                         <span
                           className={`${styles.avatar} ${viewingLatest ? styles.avatarLive : ''}`}
                         >
-                          {initials(name)}
+                          {initials(callsignFor(name))}
                         </span>
                         <div className={styles.bubbleBody}>
                           <div className={styles.bubbleHead}>
-                            <span className={styles.agentName}>{name}</span>
-                            <span className={styles.chip}>{type}</span>
+                            <span className={styles.agentName}>{callsignFor(name)}</span>
+                            <span className={styles.chip} title={`routing key: ${name}`}>{type}</span>
                             <span className={`${styles.chip} ${signalClass(signal)}`}>
                               {String(signal || 'NEUTRAL')}
                             </span>
@@ -587,7 +620,7 @@ export default function AgentsPage() {
                 <div key={a.name} className={styles.memberRow}>
                   <span className={a.status === 'active' ? styles.dotLive : styles.dotIdle} />
                   <div className={styles.memberMain}>
-                    <div className={styles.memberName}>{a.name}</div>
+                    <div className={styles.memberName}>{a.displayName || a.name}</div>
                     <div className={styles.memberMeta}>
                       {a.invocations ?? 0}× · conf {formatAvgConf(a.avgConfidence)}
                       {a.lastActive !== null && a.lastActive !== undefined

@@ -164,6 +164,7 @@ class PostTradeReviewAgent(BaseAgent):
             description="Reviews closed trades to extract lessons",
             priority=AgentPriority.LOW,  # post-trade, not time-critical
             permissions=["ANALYZE_TRADES"],
+            display_name="REVIEW",
         )
         self._lesson_store = lesson_store if lesson_store is not None else _default_lesson_store
 

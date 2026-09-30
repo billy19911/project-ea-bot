@@ -426,6 +426,9 @@ app.get('/ai-control/status', async (req, res) => {
   const agents = Array.isArray(healthData.agents)
     ? healthData.agents.map((a: any) => ({
         name: a.name,
+        // Human-facing callsign (e.g. "TREND-SCAN"). Falls back to the internal
+        // snake_case name so the UI never shows a blank label.
+        displayName: a.display_name ?? a.name,
         type: a.agent_type ?? a.type ?? 'agent',
         // REAL runtime status derived from activity (idle until it has run).
         status: typeof a.status === 'string' ? a.status : 'idle',

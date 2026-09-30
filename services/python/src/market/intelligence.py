@@ -444,6 +444,7 @@ class MarketLead(BaseAgent):
             role="department_lead",
             permissions=["ANALYZE_MARKET"],
             priority=AgentPriority.HIGH,
+            display_name="MARKET-LEAD",
         )
         self._specialists: dict[str, BaseAgent] = (
             dict(specialists) if specialists is not None else _build_default_specialists()

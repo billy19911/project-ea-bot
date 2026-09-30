@@ -112,6 +112,7 @@ class StructureAnalystAgent(BaseAgent):
                 "highs/lows, BOS, CHoCH, FVG, order blocks, and applies past lessons"
             ),
             priority=AgentPriority.HIGH,
+            display_name="STRUCTURE",
         )
         self.capabilities = [
             AgentCapability("support_resistance", "Identifies key support/resistance levels"),

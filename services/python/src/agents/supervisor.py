@@ -224,6 +224,7 @@ class SupervisorAgent(BaseAgent):
             agent_type="supervisor",
             description="Event routing and agent orchestration supervisor",
             priority=AgentPriority.CRITICAL,
+            display_name="OVERWATCH",
         )
         self.routing_table: dict[str, list[str]] = (
             routing_table if routing_table is not None else dict(DEFAULT_ROUTING_TABLE)

@@ -88,6 +88,7 @@ class AccountRiskAnalyst(BaseAgent):
             agent_type="analyst",
             description="Evaluates account-level risk metrics",
             permissions=["ANALYZE_RISK"],
+            display_name="RISK-ACC",
         )
 
     def analyze(self, data: dict[str, Any]) -> RiskAssessmentReport:
@@ -147,6 +148,7 @@ class PositionRiskAnalyst(BaseAgent):
             agent_type="analyst",
             description="Evaluates open position risk and concentration",
             permissions=["ANALYZE_RISK"],
+            display_name="RISK-POS",
         )
 
     def analyze(self, data: dict[str, Any]) -> RiskAssessmentReport:
@@ -209,6 +211,7 @@ class PortfolioRiskAnalyst(BaseAgent):
             agent_type="analyst",
             description="Evaluates portfolio correlations and exposure",
             permissions=["ANALYZE_RISK"],
+            display_name="RISK-PORT",
         )
 
     def analyze(self, data: dict[str, Any]) -> RiskAssessmentReport:
@@ -260,6 +263,7 @@ class DrawdownAnalyst(BaseAgent):
             agent_type="analyst",
             description="Assesses current and max drawdown",
             permissions=["ANALYZE_RISK"],
+            display_name="RISK-DD",
         )
 
     def analyze(self, data: dict[str, Any]) -> RiskAssessmentReport:
@@ -331,6 +335,7 @@ class RiskLead(BaseAgent):
             role="department_lead",
             permissions=["ANALYZE_RISK"],
             priority=AgentPriority.HIGH,
+            display_name="RISK-LEAD",
         )
         self.department: RiskDepartment | None = None
 

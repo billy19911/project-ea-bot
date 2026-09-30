@@ -48,6 +48,7 @@ class VolatilityAnalystAgent(BaseAgent):
             agent_type="volatility",
             description="Deterministic ATR, Bollinger, and historical volatility analyst",
             priority=AgentPriority.HIGH,
+            display_name="VOLATILITY",
         )
         self.capabilities = [
             AgentCapability("atr_analysis", "Analyzes average true range"),

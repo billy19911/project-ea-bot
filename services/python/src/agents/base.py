@@ -181,6 +181,7 @@ class BaseAgent(ABC):
         dependencies: list[str] | None = None,
         model_policy: dict[str, str] | None = None,
         timeout_seconds: int = 30,
+        display_name: str = "",
     ) -> None:
         self.name = name
         self.agent_type = agent_type
@@ -191,6 +192,10 @@ class BaseAgent(ABC):
         self.dependencies = dependencies or []
         self.model_policy = model_policy or {}
         self.timeout_seconds = timeout_seconds
+        # Human-facing callsign for the dashboard (e.g. "TREND-SCAN"). The
+        # internal ``name`` stays the routing/registry key and must never
+        # change; this field only improves presentation.
+        self.display_name = display_name or name
         self.capabilities: list[AgentCapability] = []
         self.created_at = datetime.now(timezone.utc).isoformat()
 
@@ -219,6 +224,7 @@ class BaseAgent(ABC):
         """Serialise agent metadata (for health endpoints)."""
         return {
             "name": self.name,
+            "display_name": self.display_name,
             "agent_type": self.agent_type,
             "description": self.description,
             "priority": self.priority.value,
@@ -264,6 +270,7 @@ class TechnicalAnalystAgent(BaseAgent):
             agent_type="technical",
             description="Technical analysis agent — interprets price action and indicator events",
             priority=AgentPriority.HIGH,
+            display_name="TREND-SCAN",
         )
         self.capabilities = [
             AgentCapability("trend_analysis", "Identifies and rates trend direction/strength"),

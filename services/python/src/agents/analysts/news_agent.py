@@ -74,6 +74,7 @@ class NewsSentimentAgent(BaseAgent):
             agent_type="news",
             description="Deterministic news sentiment and high-impact news filter",
             priority=AgentPriority.HIGH,
+            display_name="NEWS-WIRE",
         )
         self.capabilities = [
             AgentCapability("news_analysis", "Analyzes news headlines for sentiment"),

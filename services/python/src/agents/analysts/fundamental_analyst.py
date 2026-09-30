@@ -211,6 +211,7 @@ class FundamentalAnalystAgent(BaseAgent):
                 "(interest rates, CPI, NFP, GDP, risk sentiment)"
             ),
             priority=AgentPriority.HIGH,
+            display_name="MACRO",
         )
         self.capabilities = [
             AgentCapability("economic_calendar", "Monitors economic events"),
