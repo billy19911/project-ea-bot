@@ -7,6 +7,7 @@ import { StatusIndicator, type UiStatus } from './ui/status-indicator';
 import { EnvironmentBadge, type Environment } from './ui/environment-badge';
 import { RealtimeIndicator, type RealtimeStatus } from './ui/realtime-indicator';
 import { CommandPalette } from './ui/command-palette';
+import { OpsAlertBanner } from './OpsAlertBanner';
 import { ThemeToggle } from './ui/theme-toggle';
 import styles from './AppShell.module.css';
 
@@ -36,6 +37,18 @@ function mapTradeMode(raw: unknown): AccountMode | null {
 }
 
 const NAV_GROUPS = [
+  {
+    label: 'Daily Flow',
+    shortcut: true,
+    items: [
+      { key: 'overview', label: 'Overview', href: '/', icon: 'gauge' },
+      { key: 'market', label: 'Market', href: '/market', icon: 'candles' },
+      { key: 'why-no-trade', label: 'Why No Trade', href: '/why-no-trade', icon: 'alert' },
+      { key: 'risk-center', label: 'Risk Center', href: '/risk-center', icon: 'shield' },
+      { key: 'execution', label: 'Execution', href: '/execution', icon: 'activity' },
+      { key: 'positions', label: 'Positions', href: '/positions', icon: 'activity' },
+    ],
+  },
   {
     label: 'Command',
     items: [
@@ -111,15 +124,18 @@ const NAV_GROUPS = [
 
 /**
  * Flat list of navigable pages for the command palette (Ctrl/⌘ K), derived
- * from NAV_GROUPS so the two can never drift apart.
+ * from NAV_GROUPS so the two can never drift apart. Shortcut groups (Daily
+ * Flow) are excluded here because their items already appear in the main
+ * navigation groups.
  */
-const COMMAND_ITEMS = NAV_GROUPS.flatMap(group =>
-  group.items.map(item => ({
-    key: item.key,
-    label: item.label,
-    href: item.href,
-    group: group.label,
-  }))
+const COMMAND_ITEMS = NAV_GROUPS.filter(g => !(g as { shortcut?: boolean }).shortcut).flatMap(
+  group =>
+    group.items.map(item => ({
+      key: item.key,
+      label: item.label,
+      href: item.href,
+      group: group.label,
+    }))
 );
 
 type IconProps = { name: string };
@@ -273,6 +289,9 @@ export default function AppShell({
   // different group; clicking the open one closes it.
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [groupTouched, setGroupTouched] = useState(false);
+  // Inline menu filter — faster than the palette for mouse users, and it keeps
+  // the 40+ item catalogue searchable without leaving the sidebar.
+  const [navFilter, setNavFilter] = useState('');
 
   // The group that contains the currently active page.
   const activeGroupLabel = useMemo(
@@ -539,16 +558,53 @@ export default function AppShell({
           </button>
         </div>
 
+        {!collapsed && (
+          <div className={styles.navSearchWrap}>
+            <svg
+              className={styles.navSearchIcon}
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="M21 21l-4.3-4.3" />
+            </svg>
+            <input
+              type="search"
+              className={styles.navSearch}
+              placeholder="Filter menu…"
+              value={navFilter}
+              onChange={e => setNavFilter(e.target.value)}
+              aria-label="Filter menu"
+            />
+          </div>
+        )}
+
         <nav className={styles.nav}>
           {NAV_GROUPS.map(group => {
-            // Accordion: only ONE group open at a time.
-            const open = effectiveOpenGroup === group.label;
+            // While a filter is typed, flatten the match across all groups so
+            // the operator finds any page from one input — no expanding needed.
+            const q = navFilter.trim().toLowerCase();
+            const searching = q.length > 0;
+            const visibleItems = searching
+              ? group.items.filter(it => it.label.toLowerCase().includes(q))
+              : group.items;
+            if (searching && visibleItems.length === 0) return null;
+            // A search forces groups open; otherwise the accordion rule applies.
+            const open = searching || effectiveOpenGroup === group.label;
             const groupHasActive = group.items.some(it => it.key === activeKey);
+            const isShortcut = Boolean((group as { shortcut?: boolean }).shortcut);
             return (
               <div key={group.label} className={styles.navGroup}>
                 <button
                   type="button"
-                  className={`${styles.navLabel} ${groupHasActive ? styles.navLabelActive : ''}`}
+                  className={`${styles.navLabel} ${groupHasActive ? styles.navLabelActive : ''} ${isShortcut ? styles.navLabelShortcut : ''}`}
                   aria-expanded={open}
                   onClick={() => toggleGroup(group.label)}
                 >
@@ -573,11 +629,11 @@ export default function AppShell({
                 <div className={`${styles.navItemsWrap} ${open ? styles.navItemsOpen : ''}`}>
                   <div className={styles.navItemsInner}>
                     <div className={styles.navItems}>
-                      {group.items.map(item => {
+                      {visibleItems.map(item => {
                         const isActive = activeKey === item.key;
                         return (
                           <Link
-                            key={item.key}
+                            key={`${group.label}-${item.key}`}
                             href={item.href}
                             ref={isActive ? activeLinkRef : undefined}
                             className={`${styles.navItem} ${isActive ? styles.navActive : ''}`}
@@ -651,6 +707,7 @@ export default function AppShell({
       </aside>
 
       <main className={styles.main}>
+        <OpsAlertBanner />
         <header className={styles.topbar}>
           <button
             type="button"

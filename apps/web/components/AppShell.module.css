@@ -102,6 +102,52 @@
 
 /* Navigasi ----------------------------------------------------------------- */
 
+.navSearchWrap {
+  position: relative;
+  margin: 0 var(--sp-3, 12px) var(--sp-2, 8px);
+}
+
+.navSearchIcon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--sidebar-muted);
+  pointer-events: none;
+}
+
+.navSearch {
+  width: 100%;
+  padding: 7px 10px 7px 30px;
+  font-size: 12.5px;
+  color: var(--sidebar-text);
+  background: var(--sidebar-hover);
+  border: 1px solid var(--sidebar-border);
+  border-radius: 8px;
+  outline: none;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.navSearch::placeholder {
+  color: var(--sidebar-muted);
+}
+
+.navSearch:focus {
+  border-color: var(--sidebar-accent);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.navSearch::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+
+/* Penanda grup pintasan alur harian — dibedakan tanpa warna mencolok. */
+.navLabelShortcut span {
+  font-style: italic;
+}
+
 .nav {
   display: flex;
   flex-direction: column;
@@ -687,5 +733,105 @@
 
   .topbar h1 {
     font-size: var(--fs-lg);
+  }
+}
+
+/* Global ops alert banner --------------------------------------------------- */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+  padding: 8px 14px;
+  font-size: var(--fs-sm);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+}
+
+.bannerDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--neutral);
+}
+
+.bannerText {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bannerOk {
+  border-color: var(--success-border);
+  background: var(--success-soft);
+  color: var(--success);
+}
+.bannerOk .bannerDot {
+  background: var(--success);
+}
+
+.bannerWarning {
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.bannerWarning .bannerDot {
+  background: var(--warning);
+}
+
+.bannerHigh {
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.bannerHigh .bannerDot {
+  background: var(--accent);
+}
+
+.bannerCritical {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.bannerCritical .bannerDot {
+  background: var(--danger);
+  animation: bannerPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes bannerPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.bannerLink {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.bannerSep {
+  opacity: 0.5;
+}
+
+.bannerMeta {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.02em;
+  opacity: 0.75;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bannerCritical .bannerDot {
+    animation: none;
   }
 }
