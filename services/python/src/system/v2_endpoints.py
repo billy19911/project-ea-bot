@@ -915,15 +915,17 @@ async def r_performance(period: str = "day") -> dict[str, Any]:
         buckets = aggregate_r_by_period(trades, period=period)
         overall = _overall_r(trades)
         total_reviews = _total_review_count()
+        r_available = overall["count"]
         return {
             "value": buckets,
             "period": period,
             "overall": overall,
-            "trade_count": overall["count"],
-            # How many closed trades exist vs how many have a usable R — lets
-            # the UI explain any gap (e.g. trades opened before R tracking).
+            # Distinguish ALL closed trades (reviews_total) from the subset with a
+            # valid R (r_available), and the gap (r_unavailable) — spec §3.6.
+            "trade_count": r_available,
+            "r_available": r_available,
             "reviews_total": total_reviews,
-            "r_unavailable": max(0, total_reviews - overall["count"]),
+            "r_unavailable": max(0, total_reviews - r_available),
             "source": "live",
             "status": "OK" if buckets else "NO_DATA",
         }
@@ -937,35 +939,67 @@ async def r_performance(period: str = "day") -> dict[str, Any]:
 
 
 def _closed_trade_r_rows() -> list[dict[str, Any]]:
-    """Build ``{r_multiple, closed_at}`` rows from the auto-review history.
+    """Build ``{r_multiple, closed_at}`` rows from DURABLE closed-trade records.
 
-    For records missing an R (e.g. a trade opened before the R feature landed),
-    fall back to the entry-context registry — if the original stop-loss is still
-    cached for that ticket — before giving up. Trades whose R cannot be derived
-    are skipped (honest), never fabricated as 0R.
+    Source order (spec §3.6 — read from durable records, survive restart):
+
+    1. The persistent review store (``logs/reviews.jsonl``) — rehydrated on
+       startup so performance survives a restart. Each record carries its own
+       ``r_multiple`` and ``closed_at``.
+    2. Fallback: the in-process auto-review history (for records not yet flushed
+       or where the store is unavailable), recomputing R from the carried close
+       context / entry-context registry when the stored R is missing.
+
+    Trades whose R cannot be derived are counted (via ``_total_review_count``)
+    but skipped from the aggregated rows (honest), never fabricated as 0R.
     """
-    from ..review.auto_trigger import get_auto_trigger
     from ..review.r_multiple import compute_r_multiple
 
     rows: list[dict[str, Any]] = []
+
+    # 1) Durable review store (survives restart).
+    durable_added = 0
     try:
-        for record in get_auto_trigger().recent(limit=2000):
-            r = getattr(record, "r_multiple", None)
-            ctx = getattr(record, "trade_result", None) or {}
-            if r is None:
-                r = compute_r_multiple(
-                    direction=ctx.get("direction", ""),
-                    entry_price=ctx.get("entry_price", 0.0),
-                    exit_price=ctx.get("exit_price", 0.0),
-                    stop_loss=ctx.get("stop_loss", 0.0),
+        from ..persistence import get_review_store
+
+        store = get_review_store()
+        if store is not None:
+            for rec in store.recent(limit=5000):
+                if not isinstance(rec, dict):
+                    continue
+                rows.append(
+                    {
+                        "r_multiple": rec.get("r_multiple"),
+                        "closed_at": rec.get("closed_at"),
+                    }
                 )
-            if r is None:
-                # Backfill: try the entry-context registry for the initial SL.
-                r = _r_from_entry_context(record, ctx)
-            closed_at = getattr(record, "closed_at", None)
-            rows.append({"r_multiple": r, "closed_at": closed_at})
-    except Exception:  # noqa: BLE001 - no data is better than fake data
-        pass
+                durable_added += 1
+    except Exception:  # noqa: BLE001 - durable store is best-effort
+        durable_added = 0
+
+    # 2) In-process history — only when the durable store had nothing (avoids
+    #    double counting once reviews have been flushed to disk).
+    if durable_added == 0:
+        try:
+            from ..review.auto_trigger import get_auto_trigger
+
+            for record in get_auto_trigger().recent(limit=2000):
+                r = getattr(record, "r_multiple", None)
+                ctx = getattr(record, "trade_result", None) or {}
+                if r is None:
+                    r = compute_r_multiple(
+                        direction=ctx.get("direction", ""),
+                        entry_price=ctx.get("entry_price", 0.0),
+                        exit_price=ctx.get("exit_price", 0.0),
+                        stop_loss=ctx.get("stop_loss", 0.0),
+                    )
+                if r is None:
+                    # Backfill: try the entry-context registry for the initial SL.
+                    r = _r_from_entry_context(record, ctx)
+                closed_at = getattr(record, "closed_at", None)
+                rows.append({"r_multiple": r, "closed_at": closed_at})
+        except Exception:  # noqa: BLE001 - no data is better than fake data
+            pass
     return rows
 
 
@@ -1000,7 +1034,22 @@ def _overall_r(trades: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _total_review_count() -> int:
-    """Count ALL closed-trade reviews (with or without a usable R)."""
+    """Count ALL closed-trade reviews (with or without a usable R).
+
+    Prefers the durable review store (survives restart, spec §3.6); falls back
+    to the in-process auto-review history when the store is empty/unavailable.
+    """
+    durable = 0
+    try:
+        from ..persistence import get_review_store
+
+        store = get_review_store()
+        if store is not None:
+            durable = store.size()
+    except Exception:  # noqa: BLE001
+        durable = 0
+    if durable > 0:
+        return durable
     try:
         from ..review.auto_trigger import get_auto_trigger
 

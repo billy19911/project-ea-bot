@@ -1747,23 +1747,147 @@ class TradingPipeline:
                     exec_side = str(result.execution_result.get("side") or "").strip().upper()
                 direction = exec_side if exec_side in ("BUY", "SELL") else ""
 
+            # Take-profit (spec §3.2): captured so the *planned* RR can be
+            # recorded explicitly instead of being inferred later (never from a
+            # trailed SL). Prefer the completed proposal's take_profit.
+            take_profit = 0.0
+            for candidate in (
+                proposal.get("take_profit"),
+                proposal.get("tp"),
+                (validation.get("proposal") or {}).get("take_profit"),
+                getattr(exec_result, "take_profit", None),
+            ):
+                try:
+                    if candidate:
+                        take_profit = float(candidate)
+                        if take_profit > 0:
+                            break
+                except (TypeError, ValueError):
+                    continue
+
+            # Explicit risk geometry (spec §3.2): risk = |entry - initial SL|,
+            # reward = |initial TP - entry|, planned_rr = reward / risk. Computed
+            # HERE from the ORIGINAL SL (never a trailing SL) and only when the
+            # geometry is well-formed; otherwise left 0 / absent (no fabrication).
+            risk_distance = 0.0
+            reward_distance = 0.0
+            planned_rr = 0.0
+            if direction in ("BUY", "SELL") and price > 0 and stop_loss > 0:
+                risk_distance = abs(price - stop_loss)
+                if take_profit > 0:
+                    reward_distance = abs(take_profit - price)
+                if risk_distance > 0 and reward_distance > 0:
+                    planned_rr = round(reward_distance / risk_distance, 4)
+
+            # Volume actually requested for this order (ledger field §3.1).
+            volume = 0.0
+            for candidate in (
+                proposal.get("size"),
+                proposal.get("volume"),
+                (validation.get("proposal") or {}).get("size"),
+                getattr(exec_result, "volume", None),
+            ):
+                try:
+                    if candidate:
+                        volume = float(candidate)
+                        if volume > 0:
+                            break
+                except (TypeError, ValueError):
+                    continue
+
+            entry_ctx = {
+                "symbol": str(result.symbol or proposal.get("symbol") or ""),
+                "direction": direction,
+                "agent_outputs": agent_outputs,
+                "news_events": news_events,
+                "regime": regime,
+                "entry_price": float(price),
+                "stop_loss": float(stop_loss),
+                "take_profit": float(take_profit),
+                "risk_distance": float(risk_distance),
+                "reward_distance": float(reward_distance),
+                "planned_rr": float(planned_rr),
+                "ts": time.time(),
+            }
+
             from review.entry_context import remember_entry_context
 
-            remember_entry_context(
-                ticket,
-                {
-                    "symbol": str(result.symbol or proposal.get("symbol") or ""),
-                    "direction": direction,
-                    "agent_outputs": agent_outputs,
-                    "news_events": news_events,
-                    "regime": regime,
-                    "entry_price": float(price),
-                    "stop_loss": float(stop_loss),
-                    "ts": time.time(),
-                },
-            )
+            remember_entry_context(ticket, entry_ctx)
+
+            # Canonical trade ledger (spec §3.1): persist the trade's entry
+            # snapshot + risk geometry durably so performance/R views and the
+            # close path read from a stable record that survives restarts.
+            self._record_trade_ledger_entry(ticket, result, proposal, validation, entry_ctx, volume)
         except Exception as exc:  # noqa: BLE001 - capture is best-effort
             logger.debug("Entry context capture skipped: %s", exc)
+
+    def _record_trade_ledger_entry(
+        self,
+        ticket: Any,
+        result: Any,
+        proposal: dict[str, Any],
+        validation: dict[str, Any],
+        entry_ctx: dict[str, Any],
+        volume: float,
+    ) -> None:
+        """Write the opening snapshot to the durable trade ledger (spec §3.1).
+
+        Fail-safe: a missing ledger or any error is a no-op — the trade path is
+        never broken by bookkeeping.
+        """
+        try:
+            from persistence import get_trade_ledger
+            from persistence.trade_ledger import _now_iso
+
+            ledger = get_trade_ledger()
+            if ledger is None or ticket is None:
+                return
+            now = _now_iso()
+            direction = str(entry_ctx.get("direction") or "")
+            entry_price = float(entry_ctx.get("entry_price") or 0.0)
+            initial_sl = float(entry_ctx.get("stop_loss") or 0.0)
+            initial_tp = float(entry_ctx.get("take_profit") or 0.0)
+            risk_money = 0.0
+            try:
+                # initial_risk_money = risk price distance * volume (approx, in
+                # quote currency) — recorded when both are known.
+                risk_money = float(entry_ctx.get("risk_distance") or 0.0) * float(volume or 0.0)
+            except (TypeError, ValueError):
+                risk_money = 0.0
+            ledger.add_trade(
+                {
+                    "trade_id": ticket,
+                    "symbol": entry_ctx.get("symbol") or "",
+                    "direction": direction,
+                    "volume": float(volume or 0.0),
+                    "entry_price": entry_price,
+                    "initial_stop_loss": initial_sl,
+                    "initial_take_profit": initial_tp,
+                    "initial_risk_price_distance": float(entry_ctx.get("risk_distance") or 0.0),
+                    "initial_risk_money": risk_money,
+                    "target_rr": float(entry_ctx.get("planned_rr") or 0.0),
+                    "opened_at": now,
+                    "broker_position_ticket": ticket,
+                    "broker_order_ticket": getattr(result, "order_ticket", None)
+                    or (
+                        result.execution_result.get("order_ticket")
+                        if isinstance(getattr(result, "execution_result", None), dict)
+                        else None
+                    ),
+                    "broker_deal_ticket": getattr(result, "deal_ticket", None)
+                    or (
+                        result.execution_result.get("deal_ticket")
+                        if isinstance(getattr(result, "execution_result", None), dict)
+                        else None
+                    ),
+                    "status": "OPEN",
+                    "review_status": "PENDING",
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 - bookkeeping is best-effort
+            logger.debug("Trade ledger entry capture skipped: %s", exc)
 
     def _risk_fraction(self) -> float:
         """Resolve ``default_risk_pct`` to a FRACTION of equity (0.01 = 1%).

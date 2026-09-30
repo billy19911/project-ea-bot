@@ -145,6 +145,8 @@ class PositionCloseDetector:
                     record["close_price_source"] = "deal_history"
                     if deal.get("profit") is not None:
                         record["pnl"] = float(deal["profit"])
+                    if deal.get("ticket") is not None:
+                        record["broker_deal_ticket"] = deal["ticket"]
                     # Real close time (MT5 epoch seconds) → ISO string for bucketing.
                     raw_time = deal.get("time")
                     if raw_time:
@@ -165,6 +167,35 @@ class PositionCloseDetector:
             ctx = get_entry_context(position.get("ticket"))
         except Exception:  # noqa: BLE001 - the bridge is best-effort
             ctx = {}
+        # Close reason (spec §3.1): infer from the close context when explicit —
+        # SL hit / TP hit is detected by comparing the exit price against the
+        # entry-time SL/TP bands; explicit close_reason on the input position is
+        # preferred when present. Never fabricated: "unknown" when indeterminate.
+        if not record.get("close_reason"):
+            explicit = str(position.get("close_reason") or position.get("reason") or "").strip()
+            if explicit:
+                record["close_reason"] = explicit[:64]
+            else:
+                try:
+                    sl_ctx = float((ctx or {}).get("stop_loss") or 0.0)
+                    tp_ctx = float((ctx or {}).get("take_profit") or 0.0)
+                    exit_px = float(record.get("close_price") or 0.0)
+                    inferred = ""
+                    if (
+                        sl_ctx > 0
+                        and exit_px > 0
+                        and abs(exit_px - sl_ctx) / max(exit_px, 1e-9) < 0.0005
+                    ):
+                        inferred = "STOP_LOSS"
+                    elif (
+                        tp_ctx > 0
+                        and exit_px > 0
+                        and abs(exit_px - tp_ctx) / max(exit_px, 1e-9) < 0.0005
+                    ):
+                        inferred = "TAKE_PROFIT"
+                    record["close_reason"] = inferred or "unknown"
+                except (TypeError, ValueError, ZeroDivisionError):
+                    record["close_reason"] = "unknown"
         if ctx:
             if not record.get("symbol") and ctx.get("symbol"):
                 record["symbol"] = ctx["symbol"]
@@ -182,6 +213,23 @@ class PositionCloseDetector:
                 record["entry_price"] = float(ctx["entry_price"])
             if ctx.get("stop_loss"):
                 record["stop_loss"] = float(ctx["stop_loss"])
+            # Take-profit / planned RR (spec §3.2) — carried for the ledger close
+            # record so the exit snapshot keeps the entry-time plan intact.
+            if ctx.get("take_profit"):
+                try:
+                    record["take_profit"] = float(ctx["take_profit"])
+                except (TypeError, ValueError):
+                    pass
+            if ctx.get("planned_rr"):
+                try:
+                    record["planned_rr"] = float(ctx["planned_rr"])
+                except (TypeError, ValueError):
+                    pass
+            if ctx.get("risk_distance"):
+                try:
+                    record["risk_distance"] = float(ctx["risk_distance"])
+                except (TypeError, ValueError):
+                    pass
         return record
 
     def _fire(self, record: dict[str, Any]) -> None:

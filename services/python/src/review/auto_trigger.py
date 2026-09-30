@@ -178,6 +178,7 @@ class ReviewRecord:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the record to a plain dict."""
+        ctx = self.trade_result or {}
         return {
             "trade_id": self.trade_id,
             "outcome": self.review.outcome,
@@ -191,6 +192,17 @@ class ReviewRecord:
             "root_cause_confidence": self.root_cause.confidence,
             "root_cause_secondary": list(self.root_cause.secondary_causes),
             "summary": self.review.summary,
+            # Close-side context (spec §3.1) — carried so the durable trade
+            # ledger can be completed at close time without the caller needing
+            # the raw close record.
+            "symbol": ctx.get("symbol"),
+            "direction": ctx.get("direction"),
+            "entry_price": ctx.get("entry_price"),
+            "exit_price": ctx.get("exit_price"),
+            "stop_loss": ctx.get("stop_loss"),
+            "take_profit": ctx.get("take_profit"),
+            "close_reason": ctx.get("close_reason"),
+            "close_price_source": ctx.get("close_price_source"),
         }
 
 

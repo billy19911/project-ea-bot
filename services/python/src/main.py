@@ -64,6 +64,66 @@ async def _risk_monitor_wrapper(monitor: Any) -> None:
 _STARTED_AT = time.time()
 
 
+def _persist_review_and_ledger(record: Any) -> None:
+    """Persist an auto-triggered review to ReviewStore + update TradeLedger.
+
+    Fail-safe: every lookup is defensive; a missing store or malformed record
+    is a no-op. Never raises — callers wrap it in try/except as well.
+    """
+    try:
+        payload = record.to_dict() if hasattr(record, "to_dict") else record
+    except Exception:
+        return
+    if not isinstance(payload, dict):
+        return
+    trade_id = payload.get("trade_id")
+    if trade_id is None:
+        return
+    closed_at = payload.get("closed_at")
+    try:
+        from persistence import get_review_store, get_trade_ledger
+
+        review_store = get_review_store()
+        if review_store is not None:
+            review_store.add_review(
+                {
+                    "trade_id": trade_id,
+                    "outcome": payload.get("outcome"),
+                    "pnl": payload.get("pnl"),
+                    "r_multiple": payload.get("r_multiple"),
+                    "decision_quality_score": payload.get("decision_quality_score"),
+                    "execution_quality_score": payload.get("execution_quality_score"),
+                    "timing_score": payload.get("timing_score"),
+                    "root_cause_primary": payload.get("root_cause"),
+                    "root_cause_confidence": payload.get("root_cause_confidence"),
+                    "secondary_causes": payload.get("root_cause_secondary", []),
+                    "summary": payload.get("summary"),
+                    "closed_at": closed_at,
+                }
+            )
+        ledger = get_trade_ledger()
+        if ledger is not None:
+            ledger.update_trade(
+                trade_id,
+                {
+                    "symbol": payload.get("symbol"),
+                    "direction": payload.get("direction"),
+                    "entry_price": payload.get("entry_price"),
+                    "initial_stop_loss": payload.get("stop_loss"),
+                    "initial_take_profit": payload.get("take_profit"),
+                    "exit_price": payload.get("exit_price"),
+                    "closed_at": closed_at,
+                    "pnl": payload.get("pnl"),
+                    "r_multiple": payload.get("r_multiple"),
+                    "close_reason": payload.get("close_reason"),
+                    "status": "CLOSED",
+                    "review_status": "REVIEWED",
+                },
+            )
+    except Exception:
+        return
+
+
 def register_default_agents() -> list[str]:
     """Register the default analyst agents; returns newly added names.
 
@@ -262,6 +322,15 @@ async def lifespan(app: FastAPI):
             except Exception:  # noqa: BLE001 - learning must never break review
                 logger.warning("Learning Engine v2 recording failed (review continues)")
 
+            # Persistent review store (§3.5/§3.6) + trade ledger update. Both are
+            # durable across restarts and idempotent (review_id = hash of
+            # trade_id + closed_at). Fail-safe: a persistence error must never
+            # break the review/close path.
+            try:
+                _persist_review_and_ledger(record)
+            except Exception:  # noqa: BLE001 - persistence must never break review
+                logger.warning("Review persistence failed (review continues)")
+
         set_lesson_store(JsonlLessonStore())
         # max_history raised (500 → 2000) so the R-multiple performance view can
         # aggregate a meaningful number of closed trades. Each record is small;
@@ -283,6 +352,10 @@ async def lifespan(app: FastAPI):
             KillSwitchStateStore,
             OrderStateStore,
             PositionReconciliationStore,
+            ReviewStore,
+            TradeLedger,
+            set_review_store,
+            set_trade_ledger,
         )
         from review.entry_context import set_entry_context_store
         from risk.kill_switch import set_kill_switch_store
@@ -306,9 +379,18 @@ async def lifespan(app: FastAPI):
         # orchestration/runtime.py where the monitor is constructed.
         PositionReconciliationStore()  # noqa: F841 - instantiate to verify import
 
+        # Persistent trade ledger (§3.1 / §3.2): append-only JSONL with bounded cache.
+        ledger_store = TradeLedger()
+        set_trade_ledger(ledger_store)
+
+        # Persistent review store (§3.5 / §3.6): durable auto-triggered reviews
+        # that survive restarts.
+        review_persist = ReviewStore()
+        set_review_store(review_persist)
+
         logger.info(
             "Durable state persistence wired: order ledger, intents, kill switch, "
-            "position reconciliation, entry context"
+            "position reconciliation, entry context, trade ledger, review store"
         )
     except Exception:  # pragma: no cover - defensive, never block startup
         logger.exception("Durable state persistence wiring failed (system continues)")

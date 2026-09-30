@@ -39,6 +39,12 @@ _PERSISTED_FIELDS = (
     "direction",
     "entry_price",
     "stop_loss",
+    # take_profit + explicit RR snapshot (spec §3.2) — persisted so the close
+    # path / performance view can report planned RR without re-deriving it.
+    "take_profit",
+    "risk_distance",
+    "reward_distance",
+    "planned_rr",
     "regime",
     "ts",
 )

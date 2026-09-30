@@ -197,12 +197,32 @@ export default function PerformancePage() {
             {rError && <div className={styles.error}>{rError}</div>}
             {rLoading && rRows.length === 0 ? (
               <LoadingState rows={5} />
-            ) : rRows.length === 0 ? (
+            ) : rError || rData?.status === 'UNAVAILABLE' ? (
+              // (3) API unavailable — the fetch failed or the backend reported it
+              // could not build the R view at all.
               <p className={styles.empty}>
-                Belum ada trade dengan R. R dihitung saat posisi ditutup menggunakan
+                R-performance API tidak tersedia. Data R tidak bisa dimuat saat ini —
+                coba refresh; jika tetap gagal, periksa log service Python.
+              </p>
+            ) : rRows.length === 0 && (rData?.reviews_total ?? 0) > 0 ? (
+              // (2) Ada trade yang ditutup tapi R belum bisa dihitung (initial SL
+              // hilang) — bedakan dari "belum ada trade ditutup".
+              <p className={styles.empty}>
+                {rData!.reviews_total} trade sudah ditutup, tetapi R belum bisa dihitung
+                (stop-loss awal tidak tersimpan — mis. entry manual / context hilang).
+                Tidak ada trade valid-R untuk diagregasi.
+              </p>
+            ) : rRows.length === 0 && (rData?.reviews_total ?? 0) === 0 && count > 0 ? (
+              // (4) Ada trade ditutup tapi review pipeline belum memproses close.
+              <p className={styles.empty}>
+                Ada trade yang ditutup, tetapi pipeline review belum memproses event close
+                (auto-review belum jalan). R muncul setelah review close diproses.
+              </p>
+            ) : rRows.length === 0 ? (
+              // (1) Belum ada trade ditutup sama sekali.
+              <p className={styles.empty}>
+                Belum ada trade yang ditutup. R dihitung saat posisi ditutup menggunakan
                 stop-loss awal + harga close nyata dari riwayat deal MT5.
-                {(rData?.r_unavailable ?? 0) > 0 &&
-                  ` ${rData!.r_unavailable} trade ditutup tapi R belum bisa dihitung (stop-loss awal tidak tersimpan — mis. entry manual atau context hilang sebelum fitur persist aktif).`}
               </p>
             ) : (
               <>
