@@ -621,11 +621,11 @@ class OrchestrationRuntime:
         except (TypeError, ValueError):
             max_positions = 5
         # Operator-tunable max spread (in "pips", i.e. price delta / pip_size).
-        # Default 50000 is deliberately wide: BTC spread ≈ 4000 pips with
-        # pip_size = point*10 = 0.01, so the legacy 5.0 default would reject
-        # every BTC signal. Anomalous spreads are still caught (e.g. 15000
-        # pips when the operator sets MAX_SPREAD_PIPS=8000). Fail-safe:
-        # missing/invalid env keeps the wide default.
+        # Phase 1 Item #4: symbol-aware spread limits. The global gate limit
+        # stays wide enough for BTC (~4000 pips normal) and is tightened via the
+        # env var. Default 50000 remains for backwards compatibility; the
+        # symbol-specific thresholds below are exposed for future per-symbol
+        # gating (Phase 2) and documented for operators.
         max_spread_pips = 50000.0
         try:
             import os
@@ -635,11 +635,32 @@ class OrchestrationRuntime:
                 max_spread_pips = 50000.0
         except (TypeError, ValueError):
             max_spread_pips = 50000.0
+
+        # Phase 1 Item #4: symbol-aware spread LIMITS (documented + used by
+        # future symbol-aware gate). Values are conservative per class.
+        _symbol_spread_limits = {
+            "BTC": 8000.0,
+            "XAU": 200.0,
+            "FX": 5.0,
+        }
+        for _key, _env in (
+            ("BTC", "MAX_SPREAD_BTC"),
+            ("XAU", "MAX_SPREAD_XAU"),
+            ("FX", "MAX_SPREAD_FX"),
+        ):
+            try:
+                _v = float(os.getenv(_env, "") or _symbol_spread_limits[_key])
+                if _v > 0:
+                    _symbol_spread_limits[_key] = _v
+            except (TypeError, ValueError):
+                pass
         risk_gate = RiskGate(
             RiskEngine(max_positions=max_positions),
             MoneyManager(),
             max_spread_pips=max_spread_pips,
+            symbol_spread_limits=_symbol_spread_limits,
         )
+
         # No MT5 connector is wired in the default runtime, so the engine keeps
         # its existing paper behaviour — but ONLY via an explicit, clearly
         # labelled simulation (audit P0-2). Without this flag a missing broker
@@ -647,10 +668,35 @@ class OrchestrationRuntime:
         # Audit B-3: require a gate-issued approval_token so the deterministic
         # Risk Gate is enforced by the executor itself (fail-closed for any
         # direct/ungated caller), not merely by the pipeline's calling discipline.
+        # Phase 1 Item #5: inject an order_locator so a lost broker response is
+        # ADOPTED (matched by symbol/volume/magic) instead of blindly retried —
+        # prevents duplicate live orders on timeout/uncertain sends.
+        def _order_locator_for_request(request: Any) -> Optional[dict]:
+            try:
+                from mt5 import connector
+
+                want_vol = float(getattr(request, "volume", 0.0) or 0.0)
+                if want_vol <= 0:
+                    return None
+                for pos in connector.positions() or []:
+                    p_d = dict(pos) if not isinstance(pos, dict) else pos
+                    sym_match = str(p_d.get("symbol") or "").upper() == str(request.symbol).upper()
+                    vol_match = abs(float(p_d.get("volume") or 0.0) - want_vol) < 1e-6
+                    magic_match = int(p_d.get("magic") or 0) == int(
+                        getattr(request, "magic", 0) or 0
+                    )
+                    if sym_match and vol_match and magic_match:
+                        return {"ticket": int(p_d.get("ticket"))}
+                return None
+            except Exception as exc:  # noqa: BLE001 - locator error → retry normally
+                logger.debug("order_locator lookup failed: %s", exc)
+                return None
+
         execution_engine = ExecutionEngine(
             mt5_connector=None,
             simulation_mode=True,
             require_approval=True,
+            order_locator=_order_locator_for_request,
         )
         # Audit P1-4: normalise volume to the broker's lot step and round prices
         # to the symbol digits when a spec is available. Fail-safe: a spec lookup

@@ -496,12 +496,9 @@ def _risk_limits_snapshot() -> dict[str, Any]:
     engine = getattr(gate, "_engine", None)
     thresholds = getattr(engine, "_thresholds", None)
     if isinstance(thresholds, dict):
-        # ``max_position_size`` is defined on RiskEngine but NEVER enforced by
-        # the gate (``check_position_size`` has no caller on the order path).
-        # Showing it read-only implies it is active — it is not — so we omit it
-        # to keep the "Batas risiko" panel honest. Only limits the gate really
-        # checks are shown.
-        _not_enforced = {"max_position_size"}
+        # Phase 1: ``max_position_size`` IS now enforced by the gate
+        # (``max_position_size`` check in ``RiskGate.validate_proposal``),
+        # so it is shown alongside the other real limits.
         for key, value in thresholds.items():
             # RiskThreshold.MAX_DRAWDOWN -> "max_drawdown"
             name = getattr(key, "name", None)
@@ -509,8 +506,6 @@ def _risk_limits_snapshot() -> dict[str, Any]:
                 name = getattr(key, "value", None)
             if isinstance(name, str):
                 lowered = name.lower()
-                if lowered in _not_enforced:
-                    continue
                 limits[lowered] = value
 
     return {"available": True, "limits": limits}

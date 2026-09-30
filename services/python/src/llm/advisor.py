@@ -297,19 +297,76 @@ class LLMAdvisor:
         guardrails["budget_ok"] = True
         guardrails["estimate_tokens"] = DEFAULT_ESTIMATE_TOKENS
 
-        # G4 — the call itself, with hard caps
-        prompt = self._build_prompt(role, market)
+        # G4 — the call itself, with hard caps, routed through the canonical
+        # Phase 6 router (task taxonomy + budget + provenance). The injected
+        # client (if any) is wired as the router's backing client so tests and
+        # custom transports keep working. (The router builds the versioned
+        # prompt internally; no local prompt is needed here.)
         started = time.monotonic()
         try:
-            client = self._ensure_client()
-            response = client.generate(
-                prompt,
+            from .canonical import ModelRequest, TaskType
+            from .router import CanonicalModelRouter, RouterConfig
+
+            router = CanonicalModelRouter(client=self._client, config=RouterConfig())
+            captured: dict[str, Any] = {}
+
+            def _capture(raw: Any) -> None:
+                captured["raw"] = raw
+
+            record, parsed_text = router.execute(
+                ModelRequest(
+                    request_id=uuid.uuid4().hex[:12],
+                    agent_role=f"llm_advisor:{role}",
+                    task_type=TaskType.MARKET_SUMMARY,
+                    cycle_id="advisor",
+                    input_context={"market": market},
+                    max_tokens=MAX_TOKENS,
+                    max_latency_s=REQUEST_TIMEOUT_S,
+                ),
                 system_prompt=(
                     "Anda asisten analisis. Keluaran Anda bersifat saran untuk "
                     "manusia; Anda tidak dapat mengeksekusi order."
                 ),
-                max_tokens=MAX_TOKENS,
+                raw_sink=_capture,
             )
+            if parsed_text is None:
+                raise RuntimeError(
+                    router.last_error
+                    or f"router returned no output (status={record.output_status})"
+                )
+            content_text = parsed_text if isinstance(parsed_text, str) else str(parsed_text)
+
+            class _Resp:
+                pass
+
+            response = _Resp()
+            response.content = content_text
+            response.model = record.model_id or "unknown"
+            response.is_fallback = bool(record.fallback_used)
+
+            class _Usage:
+                pass
+
+            # Prefer the REAL backing-client usage when available (test doubles
+            # report exact tokens/cost); fall back to the router record.
+            raw_resp = captured.get("raw")
+            raw_usage = getattr(raw_resp, "usage", None)
+            usage_obj = _Usage()
+            if raw_usage is not None:
+                usage_obj.prompt_tokens = int(getattr(raw_usage, "prompt_tokens", 0) or 0)
+                usage_obj.completion_tokens = int(getattr(raw_usage, "completion_tokens", 0) or 0)
+                usage_obj.total_tokens = int(getattr(raw_usage, "total_tokens", 0) or 0)
+                usage_obj.cost_usd = getattr(raw_usage, "cost_usd", None)
+                response.latency_s = float(getattr(raw_resp, "latency_s", 0.0) or 0.0)
+                response.model = str(getattr(raw_resp, "model", "") or response.model)
+                response.is_fallback = bool(getattr(raw_resp, "is_fallback", False))
+            else:
+                usage_obj.prompt_tokens = int(record.input_tokens or 0)
+                usage_obj.completion_tokens = 0
+                usage_obj.total_tokens = int(record.input_tokens or 0)
+                usage_obj.cost_usd = record.cost
+                response.latency_s = float(record.latency_s or 0.0)
+            response.usage = usage_obj
         except Exception as exc:
             logger.warning("advisor: panggilan LLM gagal: %s", exc)
             return _refuse(

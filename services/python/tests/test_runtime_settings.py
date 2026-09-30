@@ -220,17 +220,18 @@ class TestApplyToRuntime:
         assert snap["limits"]["daily_loss_limit"] is not None
         assert snap["limits"]["max_spread_pips"] is not None
 
-    def test_risk_limits_snapshot_omits_unenforced_limits(self) -> None:
-        """Only limits the gate really enforces are shown.
+    def test_risk_limits_snapshot_includes_all_enforced_limits(self) -> None:
+        """Every limit the gate enforces is shown after the Phase 1 fixes.
 
-        ``max_position_size`` is defined on RiskEngine but never checked on the
-        order path — displaying it read-only implied it was active. It must be
-        omitted so the panel is honest.
+        ``max_position_size`` IS now enforced by the gate (per-trade size ceiling
+        checked in ``RiskGate.validate_proposal``), so it is displayed alongside
+        the other real limits. The old expectation that it be omitted reflects
+        pre-Phase-1 behaviour and is superseded.
         """
         from src.system.endpoints import _risk_limits_snapshot
 
         snap = _risk_limits_snapshot()
-        assert "max_position_size" not in snap["limits"]
+        assert "max_position_size" in snap["limits"]
 
 
 class TestSettingsEndpoint:

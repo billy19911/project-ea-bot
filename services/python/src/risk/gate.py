@@ -55,11 +55,29 @@ class RiskGate:
         money_manager: MoneyManager,
         max_spread_pips: float = 5.0,
         min_rr: float = 1.5,
+        symbol_spread_limits: dict[str, float] | None = None,
     ) -> None:
         self._engine = risk_engine
         self._mm = money_manager
         self._max_spread_pips = max_spread_pips
         self._min_rr = min_rr
+        # Phase 1 Item #4: symbol-aware spread limits. Keys are symbol-class
+        # prefixes ("BTC", "XAU", "FX"); a proposal whose symbol contains the
+        # key uses that limit instead of the global default. Empty/None keeps
+        # the global-limit-only behaviour (backward compatible).
+        self._symbol_spread_limits = dict(symbol_spread_limits or {})
+
+    def _max_spread_for_symbol(self, symbol: str) -> float:
+        """Return the applicable max spread (pips) for ``symbol`` (Phase 1 #4).
+
+        Matches on a case-insensitive substring of a configured key (e.g.
+        "XAUUSD" → "XAU"). Falls back to the global limit when no key matches.
+        """
+        sym = str(symbol or "").upper()
+        for key, limit in self._symbol_spread_limits.items():
+            if key.upper() in sym:
+                return float(limit)
+        return float(self._max_spread_pips)
 
     def validate_proposal(
         self,
@@ -110,13 +128,31 @@ class RiskGate:
 
         # ── 4. Max exposure breached ────────────────────────────────────────
         max_exp = self._engine.get_threshold(RiskThreshold.MAX_EXPOSURE)
-        exp_check = self._engine.check_exposure(current_positions, max_exposure=max_exp)
-        checks["max_exposure"] = exp_check
-        portfolio_risk = self._engine.calculate_portfolio_risk(
-            current_positions, account_state.get("equity", 0.0)
+        prop_dir = str(proposal.get("direction", "")).upper()
+        prop_price = float(
+            market_info.get("ask" if prop_dir == "BUY" else "bid")
+            or proposal.get("entry_price", 0.0)
+            or 0.0
         )
+        prop_size = float(proposal.get("size") or 0.0)
+        real_equity = float(account_state.get("equity", account_state.get("balance", 0.0)))
+        ok, cur_pct, proj_pct = self._engine.check_projected_exposure(
+            positions=current_positions,
+            account_state={"equity": real_equity},
+            proposed_trade=(
+                {"size": prop_size, "current_price": prop_price}
+                if prop_size > 0 and prop_price > 0
+                else None
+            ),
+            max_exposure=max_exp,
+        )
+        exp_check = ok
+        checks["max_exposure"] = exp_check
+        portfolio_risk = self._engine.calculate_portfolio_risk(current_positions, real_equity)
         metrics["total_exposure_pct"] = portfolio_risk["total_exposure_pct"]
         metrics["max_exposure"] = max_exp
+        metrics["current_exposure_pct"] = cur_pct
+        metrics["projected_exposure_pct"] = proj_pct
 
         # ── 5. Margin call / low margin level ───────────────────────────────
         margin_thresh = self._engine.get_threshold(RiskThreshold.MARGIN_THRESHOLD)
@@ -127,12 +163,41 @@ class RiskGate:
         metrics["margin_used_pct"] = used_margin / equity if equity > 0 else 1.0
         metrics["margin_threshold"] = margin_thresh
 
-        # ── 6. Spread too wide ──────────────────────────────────────────────
-        spread_pips = float(market_info.get("spread_pips", 0.0))
-        spread_check = spread_pips <= self._max_spread_pips
+        # ── 6. Spread too wide (symbol-aware, hardening §5) ─────────────────
+        # Canonical: spread_price = ask - bid. The gate compares in PIPS, so a
+        # missing spread_pips is DERIVED from bid/ask + point when possible —
+        # never silently treated as 0 (safe-looking). Missing bid/ask with no
+        # usable spread → fail-closed (blocked), because spread is unknowable.
+        prop_sym = proposal.get("symbol") or market_info.get("symbol", "")
+        max_spread_for_this_symbol = self._max_spread_for_symbol(prop_sym)
+        spread_pips_raw = market_info.get("spread_pips")
+        try:
+            spread_pips = float(spread_pips_raw) if spread_pips_raw is not None else 0.0
+        except (TypeError, ValueError):
+            spread_pips = 0.0
+        spread_known = spread_pips_raw is not None and spread_pips > 0
+        if not spread_known:
+            try:
+                bid = float(market_info.get("bid") or 0.0)
+                ask = float(market_info.get("ask") or 0.0)
+                spread_price = float(market_info.get("spread_price") or 0.0)
+                point = float(market_info.get("point_value") or 0.0)
+                if spread_price <= 0 and bid > 0 and ask > 0 and ask >= bid:
+                    spread_price = ask - bid
+                if spread_price > 0 and point > 0:
+                    spread_pips = spread_price / (point * 10.0)
+                    spread_known = spread_pips > 0
+            except (TypeError, ValueError):
+                pass
+        if spread_known:
+            spread_check = spread_pips <= max_spread_for_this_symbol
+        else:
+            spread_check = False  # unknown spread → fail-closed
         checks["spread"] = spread_check
         metrics["spread_pips"] = spread_pips
-        metrics["max_spread_pips"] = self._max_spread_pips
+        metrics["max_spread_pips"] = max_spread_for_this_symbol
+        metrics["symbol_specific_max_spread"] = max_spread_for_this_symbol
+        metrics["spread_known"] = spread_known
 
         # ── 7. Invalid R:R ratio (< min threshold) ──────────────────────────
         entry = float(proposal.get("entry_price", 0.0))
@@ -155,6 +220,25 @@ class RiskGate:
         checks["stop_loss"] = sl_check
         metrics["stop_loss"] = sl
         metrics["entry_price"] = entry
+
+        # ── 9. Max position size (per-trade notional ceiling) ───────────────
+        # Phase 1 Item #2: explicitly enforce the hard per-trade max position
+        # size (fraction of equity). Previously defined on RiskEngine but never
+        # enforced by the gate. Fail-closed on missing/zero account data.
+        max_pos_size = self._engine.get_threshold(RiskThreshold.MAX_POSITION_SIZE)
+        proposed_size = float(proposal.get("size") or 0.0)
+        proposed_price = float(proposal.get("entry_price") or market_info.get("price") or 0.0)
+        equity_for_size = float(account_state.get("equity", account_state.get("balance", 0.0)))
+        if equity_for_size > 0 and proposed_price > 0 and proposed_size > 0:
+            position_pct = (proposed_size * proposed_price) / equity_for_size
+            size_ok = position_pct <= max_pos_size
+        else:
+            # Missing data → fail-closed (cannot prove size is safe).
+            position_pct = 0.0
+            size_ok = False
+        checks["max_position_size"] = size_ok
+        metrics["position_size_pct"] = position_pct
+        metrics["max_position_size"] = max_pos_size
 
         # ── Determine overall result ────────────────────────────────────────
         all_passed = all(checks.values())

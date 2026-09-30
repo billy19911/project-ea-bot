@@ -7,6 +7,7 @@ Phase 14 deterministic trading engine component for MetaTrader 5 order execution
 from __future__ import annotations
 
 import logging
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -219,6 +220,10 @@ class ExecutionEngine:
         # In-memory tracking for pending and completed orders
         self._pending_orders: dict[str, float] = {}
         self._completed_orders: dict[str, ExecutionResult] = {}
+        # Hardening §8: guards the duplicate-check + record-pending sequence so
+        # two concurrent calls with the same idempotency key cannot BOTH pass
+        # duplicate detection and both dispatch an order.
+        self._registry_lock = threading.RLock()
         # Monotonic counter for simulated ticket generation (audit B8): two
         # simulated fills within the same millisecond must not collide on the
         # same ticket number.
@@ -294,15 +299,47 @@ class ExecutionEngine:
     def _is_duplicate(self, idempotency_key: str) -> bool:
         """Check if an order with the given idempotency key is already pending or completed.
 
+        Phase 1 Item #6: also consults the DURABLE order-state ledger (state
+        machine's attached store) so a process restart does NOT forget an
+        already-submitted order. A key with a persisted record in a
+        non-intent state (i.e. it was actually dispatched) is treated as a
+        duplicate.
+
         Args:
             idempotency_key: Order uniqueness key.
 
         Returns:
-            True if key exists in pending or completed order registries.
+            True if key exists in pending/completed registries OR the durable ledger.
         """
         if not idempotency_key:
             return False
-        return idempotency_key in self._pending_orders or idempotency_key in self._completed_orders
+        with self._registry_lock:
+            if idempotency_key in self._pending_orders or idempotency_key in self._completed_orders:
+                return True
+            # Durable check: survives restart (Phase 1 Item #6).
+            try:
+                from .state_machine import OrderState, get_order, get_store
+
+                store = get_store()
+                if store is not None:
+                    record = store.get_order(idempotency_key)
+                    if record:
+                        state = str(record.get("state", "")).lower()
+                        # Any state beyond the fresh intent marker means this order
+                        # already moved toward the broker → treat as duplicate.
+                        if state and state != OrderState.INTENT_CREATED.value:
+                            return True
+                # In-memory ledger check (fallback when no durable store attached).
+                try:
+                    record = get_order(idempotency_key)
+                    state = str(record.get("state", "")).lower()
+                    if state and state != OrderState.INTENT_CREATED.value:
+                        return True
+                except KeyError:
+                    pass
+            except Exception as exc:  # noqa: BLE001 - durability check is best-effort
+                logger.debug("Durable duplicate check skipped: %s", exc)
+            return False
 
     def _record_pending(self, idempotency_key: str) -> None:
         """Record an idempotency key as pending execution.

@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Tests for committee conflict handling (audit P2-4).
+"""Tests for committee conflict handling (audit P2-4 + Phase 2).
 
-An unresolved committee conflict with only a weak winner must NOT be forced into
-a trade — the supervisor suppresses the proposal so the pipeline yields
-WAIT/NO_TRADE.
+Phase 2 HARDENING: an unresolved committee conflict must NEVER be forced into
+a trade, regardless of confidence. This SUPERSEDES the pre-Phase-2 behaviour
+(where a high-confidence conflict still proposed). An unresolved conflict now
+always suppresses the directional proposal → WAIT/NO_TRADE.
 """
 
 from __future__ import annotations
@@ -25,20 +26,22 @@ def _outputs(*, unresolved: bool, signal: str, confidence: float) -> dict:
 
 def test_unresolved_conflict_weak_consensus_suppresses_proposal():
     sup = SupervisorAgent()
-    sup._has_unresolved_conflict  # sanity: attribute exists
     results = _outputs(unresolved=True, signal="BULLISH", confidence=0.5)
     synthesis, proposal = sup._synthesise("BREAKOUT", {"symbol": "EURUSD"}, results)
-    # A BUY consensus exists but the conflict + weak confidence suppresses it.
+    # A BUY consensus exists but the unresolved conflict suppresses it.
     assert proposal is None
 
 
-def test_unresolved_conflict_strong_consensus_still_proposes():
+def test_unresolved_conflict_strong_consensus_also_suppresses():
+    """Phase 2: even strong confidence CANNOT trade through an unresolved conflict.
+
+    (Supersedes the pre-Phase-2 test that allowed a high-confidence conflict to
+    propose — unresolved conflicts must never become an automatic trade.)
+    """
     sup = SupervisorAgent()
     results = _outputs(unresolved=True, signal="BULLISH", confidence=0.9)
     synthesis, proposal = sup._synthesise("BREAKOUT", {"symbol": "EURUSD"}, results)
-    # Strong agreement overrides the recorded conflict.
-    assert proposal is not None
-    assert proposal["direction"] == "BUY"
+    assert proposal is None
 
 
 def test_no_conflict_weak_consensus_proposes():

@@ -9,19 +9,19 @@ client = TestClient(app)
 
 REQUIRED_KEYS = {
     "symbol",
-    "digits",
+    "asset_class",
     "point",
+    "digits",
     "tick_size",
     "tick_value",
     "contract_size",
     "volume_min",
     "volume_max",
     "volume_step",
-    "stops_level",
-    "freeze_level",
-    "filling_mode",
-    "margin_mode",
-    "spread",
+    "spread_limit",
+    "commission",
+    "commission_source",
+    "source",
 }
 
 

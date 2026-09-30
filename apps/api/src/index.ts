@@ -1216,6 +1216,124 @@ app.get('/system/health', async (req, res) => {
   });
 });
 
+// Phase 7 ops read-model proxies — UI reaches Python /ops/* through these.
+// All are read-only GETs except alert-acknowledge (audited, no trading state).
+// Unavailable Python service surfaces 503 with source 'unavailable' — never fabricated.
+app.get('/ops/overview', async (req, res) => {
+  (req as any).log.info('ops.overview');
+  await sendProxy(res, '/ops/overview', undefined, req);
+});
+
+app.get('/ops/health', async (req, res) => {
+  (req as any).log.info('ops.health');
+  await sendProxy(res, '/ops/health', undefined, req);
+});
+
+app.get('/ops/market', async (req, res) => {
+  (req as any).log.info('ops.market');
+  const symbol = typeof req.query.symbol === 'string' ? req.query.symbol : 'XAUUSD';
+  await sendProxy(res, `/ops/market?symbol=${encodeURIComponent(symbol)}`, undefined, req);
+});
+
+app.get('/ops/setups', async (req, res) => {
+  (req as any).log.info('ops.setups');
+  const symbol = typeof req.query.symbol === 'string' ? req.query.symbol : '';
+  await sendProxy(res, `/ops/setups?symbol=${encodeURIComponent(symbol)}`, undefined, req);
+});
+
+app.get('/ops/setups/:setupId/trace', async (req, res) => {
+  (req as any).log.info('ops.setup.trace');
+  await sendProxy(res, `/ops/setups/${encodeURIComponent(req.params.setupId)}/trace`, undefined, req);
+});
+
+app.get('/ops/decisions/:decisionId', async (req, res) => {
+  (req as any).log.info('ops.decision');
+  await sendProxy(res, `/ops/decisions/${encodeURIComponent(req.params.decisionId)}`, undefined, req);
+});
+
+app.get('/ops/trades/:tradeId', async (req, res) => {
+  (req as any).log.info('ops.trade');
+  await sendProxy(res, `/ops/trades/${encodeURIComponent(req.params.tradeId)}`, undefined, req);
+});
+
+app.get('/ops/explain', async (req, res) => {
+  (req as any).log.info('ops.explain');
+  const qs = new URLSearchParams();
+  if (typeof req.query.setup_id === 'string') qs.set('setup_id', req.query.setup_id);
+  if (typeof req.query.event_id === 'string') qs.set('event_id', req.query.event_id);
+  await sendProxy(res, `/ops/explain?${qs.toString()}`, undefined, req);
+});
+
+app.get('/ops/risk', async (req, res) => {
+  (req as any).log.info('ops.risk');
+  await sendProxy(res, '/ops/risk', undefined, req);
+});
+
+app.get('/ops/executions', async (req, res) => {
+  (req as any).log.info('ops.executions');
+  const limit = typeof req.query.limit === 'string' ? req.query.limit : '25';
+  await sendProxy(res, `/ops/executions?limit=${encodeURIComponent(limit)}`, undefined, req);
+});
+
+app.get('/ops/positions', async (req, res) => {
+  (req as any).log.info('ops.positions');
+  await sendProxy(res, '/ops/positions', undefined, req);
+});
+
+app.get('/ops/models', async (req, res) => {
+  (req as any).log.info('ops.models');
+  await sendProxy(res, '/ops/models', undefined, req);
+});
+
+app.get('/ops/budget', async (req, res) => {
+  (req as any).log.info('ops.budget');
+  await sendProxy(res, '/ops/budget', undefined, req);
+});
+
+app.get('/ops/providers', async (req, res) => {
+  (req as any).log.info('ops.providers');
+  await sendProxy(res, '/ops/providers', undefined, req);
+});
+
+app.get('/ops/alerts', async (req, res) => {
+  (req as any).log.info('ops.alerts');
+  await sendProxy(res, '/ops/alerts', undefined, req);
+});
+
+app.post('/ops/alerts/:alertId/acknowledge', authenticate, async (req, res) => {
+  (req as any).log.info('ops.alert.acknowledge');
+  const alertId = String(req.params.alertId);
+  await sendPostProxy(res, `/ops/alerts/${encodeURIComponent(alertId)}/acknowledge`, req, req.body ?? {});
+});
+
+app.get('/ops/audit', async (req, res) => {
+  (req as any).log.info('ops.audit');
+  await sendProxy(res, '/ops/audit', undefined, req);
+});
+
+app.get('/ops/research', async (req, res) => {
+  (req as any).log.info('ops.research');
+  await sendProxy(res, '/ops/research', undefined, req);
+});
+
+app.get('/ops/strategies', async (req, res) => {
+  (req as any).log.info('ops.strategies');
+  await sendProxy(res, '/ops/strategies', undefined, req);
+});
+
+app.get('/ops/search', async (req, res) => {
+  (req as any).log.info('ops.search');
+  const qs = new URLSearchParams();
+  if (typeof req.query.kind === 'string') qs.set('kind', req.query.kind);
+  if (typeof req.query.query === 'string') qs.set('query', req.query.query);
+  await sendProxy(res, `/ops/search?${qs.toString()}`, undefined, req);
+});
+
+app.get('/ops/activity', async (req, res) => {
+  (req as any).log.info('ops.activity');
+  await sendProxy(res, '/ops/activity', undefined, req);
+});
+
 app.get('/ai/providers', async (req, res) => {
   const log = (req as any).log;
   log.info('ai.providers');

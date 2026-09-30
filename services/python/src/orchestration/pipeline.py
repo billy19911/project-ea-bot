@@ -349,6 +349,8 @@ class TradingPipeline:
         # zero-arg callable (live dashboard toggle).
         self._zone_entry_enabled_provider = _as_toggle(zone_entry_enabled, default=False)
         self.zone_entry_gate = zone_entry_gate
+        # Phase 4.5 §18 shadow comparator store (observability only).
+        self._last_shadow_verdicts: dict[str, dict[str, Any]] = {}
         self.order_builder = order_builder if order_builder is not None else OrderBuilder()
         self.strategy_version = strategy_version
         # Risk-% sizing knob: fraction of equity risked when the proposal does
@@ -960,6 +962,10 @@ class TradingPipeline:
             proposal["symbol"] = analysis["symbol"]
         if not proposal.get("proposal_id") and analysis.get("proposal_id"):
             proposal["proposal_id"] = analysis["proposal_id"]
+        # P2 audit: best-effort setup_id passthrough so Phase 5 lineage can
+        # trace proposal → setup → review → research (no behavior change when absent).
+        if not proposal.get("setup_id") and analysis.get("setup_id"):
+            proposal["setup_id"] = analysis["setup_id"]
         # Alias the synthesiser's SL/TP key names (target_sl/target_tp) to the
         # ones the risk gate/order builder expects (stop_loss/take_profit).
         if proposal.get("stop_loss") is None and proposal.get("target_sl") is not None:
@@ -1309,6 +1315,11 @@ class TradingPipeline:
             point_value, contract_size = self._resolve_point_contract(proposal, market_info)
             sl_distance = abs(entry - sl)
             sl_pips = sl_distance / point_value if point_value > 0 else 0.0
+            # Phase 1 Item #3: include spread + commission cost allowances so the
+            # expected loss at SL (INCLUDING costs) stays within the risk budget.
+            spread_cost_per_lot, commission_per_lot = self._cost_allowances(
+                proposal, market_info, entry, sl_pips, point_value, contract_size
+            )
             if sl_pips > 0 and equity > 0:
                 try:
                     sizing = self.money_manager.calculate_lot_size(
@@ -1318,6 +1329,8 @@ class TradingPipeline:
                         point_value=point_value,
                         contract_size=contract_size,
                         equity=equity,
+                        commission_per_lot=commission_per_lot,
+                        spread_cost_per_lot=spread_cost_per_lot,
                     )
                     lot = float(getattr(sizing, "lot_size", 0.0) or 0.0)
                     if lot > 0:
@@ -1329,22 +1342,118 @@ class TradingPipeline:
         # Safety cap: never exceed the per-trade lot cap (fail-safe).
         self._cap_lot(proposal)
 
-    def _cap_lot(self, proposal: dict[str, Any]) -> None:
-        """Clamp ``proposal['size']`` to the per-trade cap (fail-safe).
+    def _cost_allowances(
+        self,
+        proposal: dict[str, Any],
+        market_info: dict[str, Any],
+        entry: float,
+        sl_pips: float,
+        point_value: float,
+        contract_size: float,
+    ) -> tuple[float, float]:
+        """Return ``(spread_cost_per_lot, commission_per_lot)`` in account currency.
 
-        The cap is the last line of defence for money safety: it must run on
-        EVERY path that could carry a size, including early returns. If the cap
-        computation itself fails, we FAIL CLOSED by forcing the size to the cap
-        value — never leaving an uncapped order.
+        Phase 1 Item #3 + Hardening §3: deterministic cost allowances with an
+        EXPLICIT commission policy so sizing stays honest. Commission precedence:
+
+        1. BROKER — ``market_info["commission_per_lot"]`` when a broker/connector
+           surface actually reports it;
+        2. CONFIG — ``proposal["commission_per_lot"]`` (operator/config);
+        3. UNKNOWN — recorded (``0.0`` + ``commission_source="UNKNOWN"``); the
+           assumption is logged, never silently pretended.
+
+        Spread cost = ``spread_price × contract_size``. Fail-safe: any error →
+        ``(0.0, 0.0)`` and an UNKNOWN commission source.
+        """
+        spread_cost = 0.0
+        commission = 0.0
+        try:
+            spread_price = float(market_info.get("spread_price") or 0.0)
+            if spread_price > 0 and contract_size > 0:
+                spread_cost = spread_price * contract_size
+        except (TypeError, ValueError):
+            spread_cost = 0.0
+        # Commission policy (BROKER → CONFIG → UNKNOWN).
+        source = "UNKNOWN"
+        try:
+            broker_commission = market_info.get("commission_per_lot")
+            if broker_commission is not None:
+                commission = max(float(broker_commission), 0.0)
+                source = "BROKER"
+            else:
+                cfg_commission = proposal.get("commission_per_lot")
+                if cfg_commission is not None:
+                    commission = max(float(cfg_commission), 0.0)
+                    source = "CONFIG"
+                else:
+                    # Ask the canonical SymbolSpecification: a real broker or
+                    # operator CONFIG value there is authoritative; a fallback
+                    # spec stays UNKNOWN (never invent a commission number).
+                    try:
+                        try:
+                            from market.symbol_spec import get_symbol_specification
+                        except ImportError:
+                            from src.market.symbol_spec import (  # type: ignore
+                                get_symbol_specification,
+                            )
+                        _spec = get_symbol_specification(
+                            str(proposal.get("symbol") or market_info.get("symbol") or "")
+                        )
+                        _src = str(getattr(_spec, "commission_source", "UNKNOWN"))
+                        if _src in ("BROKER", "CONFIG"):
+                            commission = max(float(getattr(_spec, "commission", 0.0) or 0.0), 0.0)
+                            source = _src
+                        else:
+                            commission = 0.0
+                            source = "UNKNOWN"
+                    except Exception:  # noqa: BLE001 - spec is best-effort
+                        commission = 0.0
+                        source = "UNKNOWN"
+        except (TypeError, ValueError):
+            commission = 0.0
+            source = "UNKNOWN"
+        if source == "UNKNOWN":
+            logger.info(
+                "Commission UNKNOWN for %s — sizing assumes 0.0 (recorded, not silent).",
+                proposal.get("symbol") or market_info.get("symbol") or "?",
+            )
+        proposal["commission_source"] = source
+        return spread_cost, commission
+
+    def _cap_lot(self, proposal: dict[str, Any]) -> None:
+        """Clamp ``proposal['size']`` to the FINAL deterministic volume (fail-safe).
+
+        Hardening (§2): this is the single deterministic safety boundary the AI
+        can never bypass. Order of enforcement:
+
+        1. operator ``max_lot_per_trade`` ceiling;
+        2. broker ``max_volume`` (the broker ceiling always wins);
+        3. broker ``volume_step`` snap-down (never rounded UP);
+        4. broker ``volume_min``: a snapped size below minimum → 0.0 (reject,
+           never silently lift to minimum — that would invent volume);
+        5. invalid/non-positive size → 0.0 (rejected downstream by the gate).
+
+        Missing broker constraints fail safely: no spec (``point<=0`` or no
+        volume metadata) keeps the operator cap only, never invents broker
+        values. If any computation fails, we FAIL CLOSED to the operator cap.
         """
         try:
             raw_size = float(proposal.get("size") or 0.0)
         except (TypeError, ValueError):
             raw_size = 0.0
+        import math
+
+        # NaN/±inf/<=0 are never valid volumes → 0.0 (rejected downstream).
+        if not (raw_size > 0) or not math.isfinite(raw_size):
+            proposal["size"] = 0.0
+            return
         try:
             capped = self.money_manager.cap_lot_size(
                 raw_size,
                 max_lot_per_trade=self.max_lot_per_trade,
+            )
+            capped = self._apply_broker_volume_constraints(
+                float(capped or 0.0), str(proposal.get("symbol") or "")
             )
             proposal["size"] = round(float(capped or 0.0), 2)
         except Exception as exc:  # noqa: BLE001 - fail-CLOSED, never uncapped
@@ -1353,8 +1462,43 @@ class TradingPipeline:
                 exc,
                 self.max_lot_per_trade,
             )
-            # A non-positive raw size stays 0; otherwise clamp hard to the cap.
             proposal["size"] = round(min(raw_size, float(self.max_lot_per_trade)), 2)
+
+    def _apply_broker_volume_constraints(self, lot: float, symbol: str) -> float:
+        """Snap ``lot`` down to broker min/max/step (hardening §2, fail-safe).
+
+        Missing spec (broker unknown) → returns ``lot`` unchanged (operator cap
+        already applied). Never raises: any error returns 0.0 (reject).
+        """
+        if lot <= 0:
+            return 0.0
+        try:
+            try:
+                from market.symbol_spec import get_symbol_specification
+            except ImportError:  # pragma: no cover - alternate import identity
+                from src.market.symbol_spec import get_symbol_specification  # type: ignore
+            spec = get_symbol_specification(symbol)
+        except Exception:  # noqa: BLE001 - spec lookup is best-effort
+            return lot
+        try:
+            broker_max = float(getattr(spec, "max_volume", 0.0) or 0.0)
+            broker_min = float(getattr(spec, "min_volume", 0.0) or 0.0)
+            step = float(getattr(spec, "volume_step", 0.0) or 0.0)
+            is_broker_spec = str(getattr(spec, "source", "")) == "broker"
+            if not is_broker_spec:
+                return lot
+            if broker_max > 0:
+                lot = min(lot, broker_max)
+            if step > 0:
+                import math
+
+                lot = math.floor(lot / step) * step
+                lot = round(lot, 8)
+            if broker_min > 0 and lot < broker_min:
+                return 0.0
+            return max(lot, 0.0)
+        except Exception:  # noqa: BLE001 - fail-CLOSED
+            return 0.0
 
     def _own_position_ticket(self, positions: Any) -> Optional[str]:
         """Return the ticket of one of OUR positions (matched by magic), else None.
@@ -1642,7 +1786,15 @@ class TradingPipeline:
         proposal: dict[str, Any],
         market_info: dict[str, Any],
     ) -> tuple[float, float]:
-        """Resolve ``(point_value, contract_size)`` — market_info, spec, defaults."""
+        """Resolve ``(point_value, contract_size)`` — market_info, broker, else fail-closed.
+
+        Hardening §10: unknown point/contract NEVER falls back to invented
+        global defaults (``DEFAULT_POINT_VALUE``/``DEFAULT_CONTRACT_SIZE``) for
+        sizing. Returning ``(0.0, 0.0)`` makes the sizing path skip (``sl_pips``
+        uncomputable) so the order is deterministically rejected by the gate
+        instead of sized from fictional values. Only ``market_info`` or a real
+        broker ``SymbolSpecification`` (``source="broker"``) supplies values.
+        """
         try:
             point_value = float(market_info.get("point_value") or 0.0)
         except (TypeError, ValueError):
@@ -1652,27 +1804,29 @@ class TradingPipeline:
         except (TypeError, ValueError):
             contract_size = 0.0
         if point_value <= 0 or contract_size <= 0:
-            # Broker symbol spec fallback (local import — fail-safe).
             try:
-                from market.symbol_spec import get_symbol_spec
+                from market.symbol_spec import get_symbol_specification
             except ImportError:  # pragma: no cover - alternate import identity
                 try:
-                    from src.market.symbol_spec import get_symbol_spec  # type: ignore
+                    from src.market.symbol_spec import get_symbol_specification  # type: ignore
                 except Exception:  # noqa: BLE001 - spec lookup is best-effort
-                    get_symbol_spec = None  # type: ignore
-            if get_symbol_spec is not None:
+                    get_symbol_specification = None  # type: ignore
+            if get_symbol_specification is not None:
                 try:
-                    spec = get_symbol_spec(str(proposal.get("symbol") or ""))
-                    if point_value <= 0:
-                        point_value = float(spec.get("point") or 0.0)
-                    if contract_size <= 0:
-                        contract_size = float(spec.get("contract_size") or 0.0)
+                    spec = get_symbol_specification(str(proposal.get("symbol") or ""))
+                    # Only a REAL broker spec is trustworthy; the asset-class
+                    # fallback carries point 0.0 and is ignored here.
+                    if str(getattr(spec, "source", "")) == "broker":
+                        if point_value <= 0:
+                            point_value = float(getattr(spec, "point", 0.0) or 0.0)
+                        if contract_size <= 0:
+                            contract_size = float(getattr(spec, "contract_size", 0.0) or 0.0)
                 except Exception as exc:  # noqa: BLE001 - spec lookup is best-effort
                     logger.debug("Symbol spec lookup skipped: %s", exc)
-        if point_value <= 0:
-            point_value = DEFAULT_POINT_VALUE
-        if contract_size <= 0:
-            contract_size = DEFAULT_CONTRACT_SIZE
+        if point_value < 0:
+            point_value = 0.0
+        if contract_size < 0:
+            contract_size = 0.0
         return point_value, contract_size
 
     def _zone_entry_plan(
@@ -1751,7 +1905,47 @@ class TradingPipeline:
                     want,
                 )
                 return None, f"arah zona {plan_dict.get('direction')} != sinyal {want}"
-            return plan_dict, "harga di zona OB/FVG"
+            # Phase 4.5 §A1: canonical trigger gate. Zone presence alone is NOT
+            # entry — the deterministic Trigger Engine must confirm. A zone
+            # plan WITHOUT trigger confirmation yields WAIT_TRIGGER (None +
+            # reason), never an executable plan.
+            trig_ok, trig_reason, trig_assessment = self._evaluate_canonical_trigger(
+                symbol=symbol,
+                direction=str(plan_dict.get("direction") or want),
+                zone_top=float(plan_dict.get("zone_top") or 0.0),
+                zone_bottom=float(plan_dict.get("zone_bottom") or 0.0),
+                zone_highs=zone_highs,
+                zone_lows=zone_lows,
+                zone_opens=zone_opens,
+                atr=atr,
+                market=market,
+                analysis_context=ctx,
+            )
+            # Shadow comparator (§18): record legacy-vs-canonical agreement for
+            # observability. Canonical is authoritative; legacy never overrides.
+            try:
+                verdict = "MATCH" if trig_ok else "CONFLICT"
+                logger.info(
+                    "Phase4.5 shadow: symbol=%s legacy=READY canonical=%s verdict=%s (%s)",
+                    symbol,
+                    "READY" if trig_ok else "WAIT",
+                    verdict,
+                    trig_reason,
+                )
+                result_shadow = getattr(self, "_last_shadow_verdicts", None)
+                if isinstance(result_shadow, dict):
+                    result_shadow[symbol] = {
+                        "legacy": "READY",
+                        "canonical": "READY" if trig_ok else "WAIT",
+                        "verdict": verdict,
+                        "reason": trig_reason,
+                    }
+            except Exception:  # noqa: BLE001 - observability must never break
+                pass
+            if not trig_ok:
+                return None, f"menunggu trigger entry: {trig_reason}"
+            plan_dict["trigger_assessment"] = trig_assessment
+            return plan_dict, "harga di zona OB/FVG + trigger terkonfirmasi"
         except Exception as exc:  # noqa: BLE001 - never break the cycle
             logger.debug("Zone entry plan skipped for %s: %s", symbol, exc)
             return None, "gagal menghitung zona"
@@ -1787,6 +1981,96 @@ class TradingPipeline:
             )
         except Exception:  # noqa: BLE001
             return "menunggu harga masuk zona OB/FVG"
+
+    def _evaluate_canonical_trigger(
+        self,
+        *,
+        symbol: str,
+        direction: str,
+        zone_top: float,
+        zone_bottom: float,
+        zone_highs: list[float],
+        zone_lows: list[float],
+        zone_opens: list[float],
+        atr: float,
+        market: dict[str, Any],
+        analysis_context: dict[str, Any],
+    ) -> tuple[bool, str, dict[str, Any]]:
+        """Evaluate the deterministic Trigger Engine for a zone plan (Phase 4.5).
+
+        Returns ``(trigger_ok, reason, assessment_dict)``. Fail-CLOSED: any
+        error, missing data, or unconfirmed trigger → ``(False, reason, {})``.
+        This is the authoritative gate between "price at zone" and an
+        executable plan.
+        """
+        try:
+            from trading.entry_adapter import adapt_trigger_to_assessment
+            from trading.trigger_engine import evaluate_triggers
+
+            opens = list(analysis_context.get("trigger_opens") or zone_opens or [])
+            highs = list(analysis_context.get("trigger_highs") or zone_highs or [])
+            lows = list(analysis_context.get("trigger_lows") or zone_lows or [])
+            closes = list(analysis_context.get("trigger_closes") or zone_highs or [])
+            if len(closes) < 3 or len(opens) < 3 or len(highs) < 3 or len(lows) < 3:
+                # Fall back to zone_highs acting as closes when no explicit
+                # trigger series is provided (best-effort; may still fail-closed).
+                closes = list(zone_highs)
+            if len(highs) < 3:
+                return False, "data trigger tidak cukup", {}
+
+            is_closed = bool(analysis_context.get("candle_closed", True))
+            # Spread normalized to ATR where available (fail-closed when unknown
+            # handled inside the engine via blocking conditions).
+            spread_atr = 0.0
+            try:
+                spread_price = float(market.get("spread_price") or 0.0)
+                if spread_price > 0 and atr > 0:
+                    spread_atr = spread_price / atr
+            except (TypeError, ValueError):
+                spread_atr = 0.0
+            news_state = str(analysis_context.get("news_state") or "").upper()
+            structure_invalidated = bool(analysis_context.get("structure_invalidated", False))
+
+            result = evaluate_triggers(
+                direction=direction,
+                zone_top=zone_top,
+                zone_bottom=zone_bottom,
+                opens=opens,
+                highs=highs,
+                lows=lows,
+                closes=closes,
+                atr=atr if atr > 0 else 1e-9,
+                timeframe=str(analysis_context.get("trigger_timeframe") or "M5"),
+                is_closed=is_closed,
+                spread_atr=spread_atr,
+                news_blocked=(news_state in ("HIGH_IMPACT", "HIGH", "CRITICAL")),
+                structure_invalidated=structure_invalidated,
+            )
+            setup_id = str(
+                analysis_context.get("setup_id") or f"{symbol}:{direction}:{round(zone_top, 5)}"
+            )
+            assessment = adapt_trigger_to_assessment(
+                setup_id=setup_id,
+                symbol=symbol,
+                direction=direction,
+                zone=None,
+                trigger=result,
+                setup_type=str(analysis_context.get("setup_type") or "CONTINUATION"),
+            )
+            ok = assessment.trigger_status == "ENTRY_READY"
+            if ok:
+                return True, "trigger terkonfirmasi", assessment.to_dict()
+            missing = ",".join(assessment.missing_triggers or [])
+            blocking = ",".join(assessment.blocking_conditions or [])
+            reason = (
+                f"{assessment.trigger_status}"
+                + (f" missing={missing}" if missing else "")
+                + (f" blocked={blocking}" if blocking else "")
+            )
+            return False, reason, assessment.to_dict()
+        except Exception as exc:  # noqa: BLE001 - fail-CLOSED, never fallopen
+            logger.warning("Canonical trigger evaluation failed (blocked): %s", exc)
+            return False, f"trigger error: {exc}", {}
 
     def _zone_bars(self, symbol: str, ctx: dict[str, Any]) -> dict[str, Any]:
         """Fetch MTF bars for the zone gate (bias/zones/atr) — fail-safe {}."""

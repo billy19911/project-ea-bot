@@ -62,3 +62,30 @@ def _isolate_signal_registry():
     reset_signal_registry()
     yield
     reset_signal_registry()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_order_state_ledger(tmp_path, monkeypatch):
+    """Isolate the process-wide order-state ledger between tests.
+
+    Phase 1 Item #6 made ``ExecutionEngine._is_duplicate`` also consult the
+    durable order-state store so a restarted process does NOT forget an
+    already-submitted order. That store is intentionally process-wide in
+    production, so without isolation a test that dispatches an order leaks a
+    "duplicate" marker into the next test (and would read the operator's real
+    ``logs/order_state.jsonl``).
+
+    This fixture points the store path at a throwaway file and detaches/resets
+    the module-level ledger before AND after every test.
+    """
+    monkeypatch.setenv("ORDER_STATE_PATH", str(tmp_path / "order_state.jsonl"))
+    try:
+        from execution.state_machine import reset_store, set_store
+    except Exception:  # pragma: no cover - import identity fallback
+        from src.execution.state_machine import reset_store, set_store  # type: ignore
+
+    reset_store()
+    set_store(None)
+    yield
+    reset_store()
+    set_store(None)

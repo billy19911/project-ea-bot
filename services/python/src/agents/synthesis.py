@@ -99,6 +99,11 @@ class SynthesisResult:
     conflicts_found: list[str] = field(default_factory=list)
     agent_count: int = 0
     skipped_agents: list[str] = field(default_factory=list)
+    # Phase 2: absolute directional evidence weight (NOT a headcount score).
+    # Confidence is the share; evidence_strength is the magnitude. Escalation
+    # uses the magnitude so a single weak agent is not mistaken for strong
+    # unanimity (share would be 1.0 with one agent).
+    evidence_strength: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to plain dict."""
@@ -108,6 +113,7 @@ class SynthesisResult:
             "conflicts_found": self.conflicts_found,
             "agent_count": self.agent_count,
             "skipped_agents": self.skipped_agents,
+            "evidence_strength": self.evidence_strength,
         }
 
 
@@ -190,6 +196,41 @@ class AgentSynthesizer:
             return plan
 
         return default_plan
+
+    def _evidence_weight(self, output: dict[str, Any]) -> float:
+        """Evidence weight for one agent output (NOT a headcount vote).
+
+        weight = confidence x evidence_quality x data_freshness_factor.
+
+        ``confidence`` is treated as a Self-reported quality signal, NOT a
+        probability of profit. Outputs with ``evidence`` lists get a quality
+        boost; outputs that explicitly flag ``unresolved_conflict`` or
+        ``data_quality == 0`` contribute less. This lets strong evidence from
+        one specialist outweigh weak headcount from many.
+        """
+        try:
+            confidence = float(output.get(self.CONFIDENCE_KEY, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = min(1.0, max(0.0, confidence))
+
+        quality = output.get("evidence_quality", output.get("data_quality", None))
+        try:
+            quality_factor = float(quality) if quality is not None else 0.5
+        except (TypeError, ValueError):
+            quality_factor = 0.5
+        quality_factor = min(1.0, max(0.0, quality_factor))
+
+        freshness_factor = 1.0
+        if str(output.get("freshness", "fresh")).lower() == "stale":
+            freshness_factor = 0.25
+        if output.get("unresolved_conflict"):
+            freshness_factor *= 0.5
+
+        evidence_list = output.get("evidence")
+        evidence_boost = 1.2 if isinstance(evidence_list, list) and evidence_list else 1.0
+
+        return confidence * quality_factor * freshness_factor * evidence_boost
 
     def aggregate_signals(self, agent_outputs: dict[str, dict[str, Any]]) -> dict[str, Any]:
         """Aggregate raw agent outputs into a unified signal map.
@@ -290,6 +331,32 @@ class AgentSynthesizer:
 
         return conflicts
 
+    def _has_severe_conflict(self, agent_outputs: dict[str, dict[str, Any]]) -> bool:
+        """True when conflicting evidence exists with high confidence and unresolved."""
+        for out in agent_outputs.values():
+            if str(out.get("signal", "NEUTRAL")).upper() in ("BULLISH", "BEARISH"):
+                conf = float(out.get(self.CONFIDENCE_KEY, 0) or 0)
+                if conf >= 0.75 and out.get("unresolved_conflict"):
+                    return True
+        # Also true when multiple opposing agents each have high confidence.
+        bulls = [
+            o
+            for o in agent_outputs.values()
+            if str(o.get(self.SIGNAL_KEY)).upper() in self.BULLISH_SIGNALS
+        ]
+        bears = [
+            o
+            for o in agent_outputs.values()
+            if str(o.get(self.SIGNAL_KEY)).upper() in self.BEARISH_SIGNALS
+        ]
+        if (
+            bulls
+            and bears
+            and all(float(o.get(self.CONFIDENCE_KEY, 0)) >= 0.7 for o in (bulls + bears))
+        ):
+            return True
+        return False
+
     def generate_proposal(
         self,
         event: dict[str, Any] | None,
@@ -326,35 +393,64 @@ class AgentSynthesizer:
                 agent_count=0,
             )
 
-        # Detect conflicts
+        # Detect conflicts (structural: opposing evidence domains)
         conflicts = self.detect_conflicts(agent_outputs)
 
-        # Calculate agreement score: fraction of agents aligned with majority
-        bullish = agg["bullish_count"]
-        bearish = agg["bearish_count"]
-        neutral = agg["neutral_count"]
+        # ── Evidence-weighted synthesis (NOT majority headcount) ────────
+        # Each agent contributes a weight = confidence × evidence_quality ×
+        # freshness, NOT a unit vote. A single strong piece of evidence can
+        # outweigh several weak/neutral ones, and contradictory evidence is
+        # surfaced as a conflict rather than outvoted.
+        bullish_weight = 0.0
+        bearish_weight = 0.0
+        bullish_count = agg["bullish_count"]
+        bearish_count = agg["bearish_count"]
+        neutral_count = agg["neutral_count"]
         total = agg["total_agents"]
 
-        majority = max(bullish, bearish, neutral)
+        for s in signals:
+            sig = str(s.get("signal", "NEUTRAL")).upper()
+            raw_output = agent_outputs.get(s["agent"], {})
+            w = self._evidence_weight(raw_output)
+            if sig in self.BULLISH_SIGNALS:
+                bullish_weight += w
+            elif sig in self.BEARISH_SIGNALS:
+                bearish_weight += w
+
+        total_dir_weight = bullish_weight + bearish_weight
+        # agreement_score retained as OBSERVABILITY only (non-authoritative).
+        majority = max(bullish_count, bearish_count, neutral_count)
         agreement_score = majority / total if total > 0 else 0.0
 
-        # Determine consensus direction
-        if bullish > bearish and bullish >= neutral:
+        # Decision rule: direction requires a DOMINANT evidence weight AND no
+        # severe unresolved conflict. Otherwise HOLD (WAIT/NO_TRADE).
+        severe_conflict = self._has_severe_conflict(agent_outputs)
+        directional_edge = 0.0
+        if total_dir_weight > 0:
+            directional_edge = abs(bullish_weight - bearish_weight) / total_dir_weight
+
+        if bullish_weight > 0 and bullish_weight > bearish_weight and not severe_conflict:
             direction = TradeDirection.BUY
-            weighted_confidence = agg["weighted_bullish"] / bullish if bullish > 0 else 0.0
-        elif bearish > bullish and bearish >= neutral:
+            weighted_confidence = bullish_weight / max(total_dir_weight, 1e-9)
+        elif bearish_weight > 0 and bearish_weight > bullish_weight and not severe_conflict:
             direction = TradeDirection.SELL
-            weighted_confidence = agg["weighted_bearish"] / bearish if bearish > 0 else 0.0
+            weighted_confidence = bearish_weight / max(total_dir_weight, 1e-9)
         else:
+            # No dominance, or severe conflict → no directional trade.
             direction = TradeDirection.HOLD
             weighted_confidence = agg["avg_confidence"]
 
         # Build reasoning summary
         reasoning_parts = [
-            f"Konsensus: {direction.value} ({bullish}B/{bearish}S/{neutral}N)",
-            f"Kesepakatan: {agreement_score:.0%}",
-            f"Keyakinan rata-rata: {agg['avg_confidence']:.2f}",
+            f"Sintesis berbasis bukti: {direction.value}",
+            (
+                f"bobot bukti bull={bullish_weight:.2f} bear={bearish_weight:.2f} "
+                f"(edge={directional_edge:.0%})"
+            ),
+            f"Kesepakatan (observability): {agreement_score:.0%}",
         ]
+        if severe_conflict:
+            reasoning_parts.append("konflik bukti belum terselesaikan → tanpa trade arah")
         if conflicts:
             reasoning_parts.append(f"Konflik: {len(conflicts)}")
 
@@ -389,6 +485,7 @@ class AgentSynthesizer:
                 agreement_score=agreement_score,
                 conflicts_found=conflicts,
                 agent_count=total,
+                evidence_strength=max(bullish_weight, bearish_weight),
             )
         )
 
@@ -408,6 +505,7 @@ class AgentSynthesizer:
             agreement_score=round(agreement_score, 3),
             conflicts_found=conflicts,
             agent_count=total,
+            evidence_strength=max(bullish_weight, bearish_weight),
         )
 
     def check_escalation(self, synthesis_result: SynthesisResult) -> bool:
@@ -429,8 +527,11 @@ class AgentSynthesizer:
 
         prop = synthesis_result.proposal
 
-        # Low confidence escalation
-        if prop.confidence < self.escalation_confidence_threshold:
+        # Low evidence escalation (ABSOLUTE magnitude, not share): a single
+        # weak agent yields evidence_strength < threshold → escalate, even
+        # when its directional share is 1.0.
+        evidence_strength = float(getattr(synthesis_result, "evidence_strength", 0.0) or 0.0)
+        if evidence_strength < self.escalation_confidence_threshold:
             return True
 
         # High conflict escalation

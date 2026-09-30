@@ -69,10 +69,14 @@ class ExecutionQualityAnalytics:
 
     high_slippage_threshold: float = 0.0005
     high_rejection_rate: float = 0.10
+    max_records: int = 2000
     _records: list[ExecutionRecord] = field(default_factory=list, repr=False)
 
     def record(self, rec: ExecutionRecord) -> ExecutionRecord:
         self._records.append(rec)
+        # Phase 8 hardening: bound the store (no unbounded long-run growth).
+        if len(self._records) > self.max_records:
+            del self._records[: len(self._records) - self.max_records]
         return rec
 
     def records(self) -> list[ExecutionRecord]:

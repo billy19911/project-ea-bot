@@ -169,24 +169,30 @@ class TestRiskEngine:
         assert result["sector_concentration"] == 2 / 3  # 2 forex, 1 tech
 
     def test_check_exposure_pass(self) -> None:
-        """Test exposure check passes within limit."""
+        """Test exposure check passes within limit (explicit real equity)."""
         positions = [
-            {"size": 1.0, "current_price": 100.0, "entry_price": 100.0, "account_equity": 10000.0},
-            {"size": 1.0, "current_price": 200.0, "entry_price": 200.0, "account_equity": 10000.0},
+            {"size": 1.0, "current_price": 100.0, "entry_price": 100.0},
+            {"size": 1.0, "current_price": 200.0, "entry_price": 200.0},
         ]
-        assert self.engine.check_exposure(positions, max_exposure=0.30) is True
+        assert (
+            self.engine.check_exposure(positions, max_exposure=0.30, account_equity=10000.0) is True
+        )
 
     def test_check_exposure_fail(self) -> None:
-        """Test exposure check fails over limit."""
+        """Test exposure check fails over limit (explicit real equity)."""
         positions = [
-            {
-                "size": 100.0,
-                "current_price": 100.0,
-                "entry_price": 100.0,
-                "account_equity": 10000.0,
-            },
+            {"size": 100.0, "current_price": 100.0, "entry_price": 100.0},
         ]
+        assert (
+            self.engine.check_exposure(positions, max_exposure=0.30, account_equity=10000.0)
+            is False
+        )
+
+    def test_check_exposure_without_equity_fails_closed(self) -> None:
+        """Hardening §6: missing equity is fail-closed (never positions[0]/1.0)."""
+        positions = [{"size": 1.0, "current_price": 100.0, "entry_price": 100.0}]
         assert self.engine.check_exposure(positions, max_exposure=0.30) is False
+        assert self.engine.check_exposure([], max_exposure=0.30) is False
 
     def test_check_margin_pass(self) -> None:
         """Test margin check passes."""

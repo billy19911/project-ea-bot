@@ -82,7 +82,7 @@ def test_detect_conflicts_ignores_neutral_signal():
 
 
 def test_generate_buy_proposal_from_bullish_consensus():
-    """Bullish majority emits BUY proposal with full agreement."""
+    """Bearish-free bullish evidence emits BUY with full directional evidence share."""
     result = AgentSynthesizer().generate_proposal(
         {"symbol": "EURUSD"},
         {"structure": _output("BULLISH", 0.8), "momentum": _output("STRONG_BULLISH", 0.9)},
@@ -91,7 +91,9 @@ def test_generate_buy_proposal_from_bullish_consensus():
     assert result.proposal is not None
     assert result.proposal.symbol == "EURUSD"
     assert result.proposal.direction == TradeDirection.BUY
-    assert result.proposal.confidence == 0.85
+    # Phase 2: confidence = share of directional evidence weight (all bullish → 1.0),
+    # NOT a majority headcount / probability of profit.
+    assert result.proposal.confidence == 1.0
     assert result.agreement_score == 1.0
     assert result.conflicts_found == []
 
@@ -145,12 +147,14 @@ def test_empty_outputs_return_no_proposal_and_escalate():
 
 
 def test_low_confidence_proposal_requires_escalation():
-    """Weak consensus requires manual review."""
+    """Evidence weight < 0.5 triggers escalation (non-authoritative but advisory)."""
     result = AgentSynthesizer().generate_proposal(
         {"symbol": "EURUSD"}, {"structure": _output("BULLISH", 0.4)}
     )
 
     assert result.proposal is not None
+    # Phase 2: single bullish with weak evidence weight still produces proposal
+    # but flags escalation because weight share is below threshold.
     assert result.proposal.requires_escalation is True
 
 

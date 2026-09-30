@@ -124,11 +124,15 @@ class SLOTracker:
     """Records SLI samples and evaluates them against SLOs (PRD §56)."""
 
     slos: tuple[SLO, ...] = DEFAULT_SLOS
+    max_samples_per_sli: int = 2000
     _samples: dict[str, list[float]] = field(default_factory=dict, repr=False)
 
     def record(self, sli: str, value: float) -> None:
-        """Record a single SLI observation."""
-        self._samples.setdefault(sli, []).append(float(value))
+        """Record a single SLI observation (bounded per SLI, Phase 8)."""
+        series = self._samples.setdefault(sli, [])
+        series.append(float(value))
+        if len(series) > self.max_samples_per_sli:
+            del series[: len(series) - self.max_samples_per_sli]
 
     def samples(self, sli: str) -> list[float]:
         return list(self._samples.get(sli, []))

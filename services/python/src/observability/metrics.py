@@ -18,7 +18,13 @@ def _label_key(labels: Optional[Dict[str, Any]]) -> LabelKey:
 
 
 class MetricsRegistry:
-    """In-memory metrics registry with labeled counters, gauges, histograms."""
+    """In-memory metrics registry with labeled counters, gauges, histograms.
+
+    Phase 8 hardening: histogram series are BOUNDED per label (no long-run
+    growth); oldest samples are evicted first.
+    """
+
+    MAX_HISTOGRAM_SAMPLES = 2000
 
     def __init__(self) -> None:
         self._counters: Dict[str, Dict[LabelKey, float]] = {}
@@ -43,9 +49,10 @@ class MetricsRegistry:
         return self._gauges.get(name, {}).get(_label_key(labels))
 
     def observe(self, name: str, value: float, labels: Optional[Dict[str, Any]] = None) -> None:
-        self._histograms.setdefault(name, {}).setdefault(_label_key(labels), []).append(
-            float(value)
-        )
+        series = self._histograms.setdefault(name, {}).setdefault(_label_key(labels), [])
+        series.append(float(value))
+        if len(series) > self.MAX_HISTOGRAM_SAMPLES:
+            del series[: len(series) - self.MAX_HISTOGRAM_SAMPLES]
 
     def get_histogram(self, name: str, labels: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         values = self._histograms.get(name, {}).get(_label_key(labels), [])

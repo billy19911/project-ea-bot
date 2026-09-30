@@ -52,11 +52,18 @@ class MoneyManager:
         point_value: float,
         contract_size: float = 100000,
         equity: float | None = None,
+        commission_per_lot: float = 0.0,
+        spread_cost_per_lot: float = 0.0,
     ) -> PositionSizeResult:
         """Calculate lot size from a fixed risk percentage of account funds.
 
-        Formula: ``lot = (base * risk_pct) / (sl_pips * point_value * contract_size)``
-        where ``base`` is ``equity`` when provided, else ``balance``.
+        Formula: ``lot = (base * risk_pct) / (sl_pips * point_value * contract_size
+        + commission_per_lot + spread_cost_per_lot)`` where ``base`` is ``equity``
+        when provided, else ``balance``.
+
+        The per-lot cost allowances (commission + spread) shrink the affordable
+        lot so expected loss at SL *including costs* stays within the risk
+        budget. Zero defaults preserve legacy behaviour.
 
         Args:
             balance: Account balance in account currency.
@@ -65,6 +72,8 @@ class MoneyManager:
             point_value: Value of one point/pip in account currency per unit.
             contract_size: Units of the base asset per 1.0 lot (default 100,000).
             equity: Optional account equity; overrides balance when provided.
+            commission_per_lot: Round-turn commission in account currency per 1.0 lot.
+            spread_cost_per_lot: Estimated spread cost in account currency per 1.0 lot.
 
         Returns:
             PositionSizeResult with lot_size, risk_amount, sl_pips.
@@ -81,7 +90,13 @@ class MoneyManager:
         if risk_amount <= 0:
             return PositionSizeResult(lot_size=0.0, risk_amount=0.0, sl_pips=sl_pips)
 
-        loss_per_lot = sl_pips * point_value * contract_size
+        loss_per_lot = (
+            sl_pips * point_value * contract_size
+            + max(float(commission_per_lot or 0.0), 0.0)
+            + max(float(spread_cost_per_lot or 0.0), 0.0)
+        )
+        if loss_per_lot <= 0:
+            return PositionSizeResult(lot_size=0.0, risk_amount=0.0, sl_pips=sl_pips)
         lot_size = risk_amount / loss_per_lot
 
         return PositionSizeResult(

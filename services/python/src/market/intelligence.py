@@ -685,12 +685,15 @@ class MarketLead(BaseAgent):
         return "NEUTRAL"
 
     def analyze(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Run the regime-weighted committee and return a Supervisor dict.
+        """Run the regime-weighted evidence synthesis and return a Supervisor dict.
 
         Each production specialist is executed defensively (a failing
-        specialist never breaks the cycle). Directional votes are aggregated
-        by ``regime_weight × specialist_confidence`` — never by headcount —
-        and any dissenting specialist is recorded for explainability.
+        specialist never breaks the cycle). Directional EVIDENCE is aggregated
+        by ``regime_weight × specialist_confidence × evidence_quality`` —
+        never by headcount — and any dissenting specialist is recorded for
+        explainability. NO majority voting: the output carries the full
+        evidence map (per-direction weights, contributing specialists, quality
+        factors) so the synthesizer can build a canonical MarketAssessment.
         """
         regime = self.detect_regime(context)
         weights = self.get_adaptive_weights(regime)
@@ -739,17 +742,37 @@ class MarketLead(BaseAgent):
             except (TypeError, ValueError):
                 confidence = 0.0
             confidence = min(1.0, max(0.0, confidence))
-            weight = max(0.0, weights.get(name, 0.0) * confidence)
+            # Evidence weight (not a unit vote): regime_weight × confidence ×
+            # evidence_quality. A specialist may carry evidence_quality; default 1.0.
+            try:
+                quality = float(result.get("evidence_quality", 1.0) or 1.0)
+            except (TypeError, ValueError):
+                quality = 1.0
+            quality = min(1.0, max(0.0, quality))
+            weight = max(0.0, weights.get(name, 0.0) * confidence * quality)
             if weight <= 0:
                 continue
             votes[direction] = votes.get(direction, 0.0) + weight
             contributors.setdefault(direction, []).append(name)
 
+        # Evidence synthesis: pick the direction with the dominant evidence
+        # weight ONLY when it is also a MAJORITY of the directional weight.
+        # A near-tie (no dominance) yields NEUTRAL — it is NOT resolved by
+        # headcount or by marginally-larger weight.
+        un_resolved = len(votes) > 1
+        dominance_ratio = 1.0
         if votes:
-            priority = {"BULLISH": 0, "BEARISH": 1}
-            winner = sorted(votes.items(), key=lambda kv: (-kv[1], priority.get(kv[0], 99)))[0][0]
+            total_weight = sum(votes.values())
+            ordered = sorted(votes.items(), key=lambda kv: -kv[1])
+            winner, winner_weight = ordered[0]
+            dominance_ratio = winner_weight / total_weight if total_weight > 0 else 0.0
+        if votes and not (un_resolved and dominance_ratio < 0.6):
+            winner = sorted(
+                votes.items(), key=lambda kv: (-kv[1], {"BULLISH": 0, "BEARISH": 1}.get(kv[0], 99))
+            )[0][0]
             total_weight = sum(votes.values())
             signal = winner
+            # Confidence = share of directional evidence weight (NOT P(profit)).
             confidence = (votes[winner] / total_weight) if total_weight > 0 else 0.0
             dissent = [
                 name
@@ -760,17 +783,23 @@ class MarketLead(BaseAgent):
             reasons = [
                 f"Regime pasar terdeteksi: {regime}",
                 (
-                    f"{winner} dipilih berdasarkan bobot bukti adaptif "
-                    f"({votes[winner]:.3f} dari {total_weight:.3f})"
+                    f"{winner} didukung bobot bukti terbesar "
+                    f"({votes[winner]:.3f} dari {total_weight:.3f}, "
+                    f"dominasi={dominance_ratio:.0%})"
                 ),
             ]
         else:
             signal = "NEUTRAL"
             confidence = 0.0
-            dissent = []
+            dissent = [n for names in contributors.values() for n in names]
             reasons = [
                 f"Regime pasar terdeteksi: {regime}",
-                "Tidak ada bukti arah; konsensus NEUTRAL",
+                (
+                    "Bukti arah bertentangan tanpa dominasi; konsensus NEUTRAL "
+                    "(tidak ada voting mayoritas)"
+                    if un_resolved
+                    else "Tidak ada bukti arah; konsensus NEUTRAL"
+                ),
             ]
 
         for name in dissent:

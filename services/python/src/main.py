@@ -27,6 +27,7 @@ from .market.intelligence import MarketLead
 from .mt5 import connector
 from .mt5.endpoints import router as mt5_router
 from .observability.sampler import get_trend_sampler
+from .ops.router import router as ops_router
 from .orchestration.endpoints import router as orchestration_router
 from .orchestration.runtime import get_runtime
 from .reports.endpoints import router as reports_router
@@ -160,6 +161,14 @@ async def lifespan(app: FastAPI):
                 record_review_lesson(get_lesson_store(), record)
             except Exception:  # noqa: BLE001 - persistence must never break review
                 logger.warning("Review lesson recording failed (review continues)")
+            # Integration audit P1-1: bridge the live review into the canonical
+            # Phase 5 learning store (best-effort, fail-closed, never blocks).
+            try:
+                from .learning.review_bridge import bridge_review_record
+
+                bridge_review_record(record)
+            except Exception:  # noqa: BLE001 - bridging must never break review
+                logger.debug("Canonical review bridge skipped", exc_info=True)
             try:
                 try:
                     from telegram.signal_lifecycle import get_signal_lifecycle
@@ -377,6 +386,26 @@ async def lifespan(app: FastAPI):
         logger.info("Runtime settings applied at startup: %s", pushed)
     except Exception:  # pragma: no cover - defensive, never block startup
         logger.exception("Gagal menerapkan runtime settings saat startup")
+
+    # Phase 8 H3: startup safety-config gate (fail-early for safety-critical
+    # values; invalid → safe default + audit log, never a dangerous default).
+    try:
+        from system.startup_checks import run_startup_safety_gate
+
+        gate_report = run_startup_safety_gate()
+        logger.info("Startup safety gate: %s", gate_report.get("summary"))
+    except Exception:  # pragma: no cover - defensive, never block startup
+        logger.exception("Startup safety gate failed (startup continues)")
+
+    # Phase 8 H4: execution recovery — reconcile UNKNOWN/SUBMITTING ledger
+    # intents against the broker at boot (adopt, never blind-retry).
+    try:
+        from system.startup_checks import run_execution_recovery
+
+        recovery_report = run_execution_recovery()
+        logger.info("Execution recovery at startup: %s", recovery_report.get("summary"))
+    except Exception:  # pragma: no cover - defensive, never block startup
+        logger.exception("Execution recovery failed (startup continues)")
 
     # Autonomous scheduler (PRD_V2 §10.3, §32.17) — optional, non-blocking.
     scheduler_task = None
@@ -680,6 +709,9 @@ app.include_router(strategy_router)
 app.include_router(reports_router)
 app.include_router(research_router)
 app.include_router(market_router)
+# Phase 7 ops read-model router — mounted at module level (independent of the
+# auth branch above) so /ops/* is always available like the other routers.
+app.include_router(ops_router)
 
 
 @app.get("/health")

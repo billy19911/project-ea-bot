@@ -248,12 +248,22 @@ class TestRuntimeSpreadThresholdWiring:
         assert decision.checks_passed["spread"] is False
 
     def test_runtime_gate_default_is_wide_for_btc(self, monkeypatch):
-        """Tanpa env, default 50000 → spread BTC 10000 pips diterima."""
+        """Tanpa env dan tanpa symbol match: global limit 50000 → BTC 10000 pips diterima.
+
+        Phase 1 #4: dengan ``symbol_spread_limits={"BTC":8000,...}``, sebuah proposal
+        "BTCUSD" akan mencocokkan key "BTC" sehingga batasnya menjadi 8000 pips
+        (bukan global 50000). Spread 10000 pips **ditolak** oleh gate karena melebihi
+        symbol-specific limit BTC = 8000. Jika Anda ingin menguji perilaku global yang
+        lebar, gunakan simbol yang tidak memiliki key match (misal "TESTSYMBOL") atau
+        turunkan MAX_SPREAD_PIPS di env override.
+        """
         from orchestration.runtime import OrchestrationRuntime
 
         monkeypatch.delenv("MAX_SPREAD_PIPS", raising=False)
         runtime = OrchestrationRuntime()
         gate = runtime.pipeline.risk_gate
 
+        # Dengan symbol-spred limits, BTCUSD menggunakan limit 8000 → spread 10000 ditolak
         decision = gate.validate_proposal(self._PROPOSAL, self._ACCOUNT, [], self._MARKET)
-        assert decision.checks_passed["spread"] is True
+        # Symbol-specific BTC limit = 8000 < spread 10000 → rejected
+        assert decision.checks_passed["spread"] is False

@@ -657,11 +657,11 @@ class SupervisorAgent(BaseAgent):
                 # HOLD / NEUTRAL → no actionable proposal (pipeline → NO_TRADE).
                 return synthesis_dict, None
 
-            # Audit P2-4: an unresolved committee conflict with only a weak
-            # winner must NOT be forced into a trade. If any department lead
-            # reported unresolved_conflict and the consensus is not strong, we
-            # suppress the proposal so the pipeline yields WAIT/NO_TRADE.
-            if self._has_unresolved_conflict(results) and self._is_weak_consensus(raw):
+            # Audit P2-4 (Phase 2 HARDENING): an unresolved committee conflict
+            # must NEVER be forced into a trade, irrespective of confidence.
+            # This supersedes the original weak-consensus-only gate: any BUY/SELL
+            # with unresolved_conflict=true is suppressed (WAIT/NO_TRADE).
+            if self._has_unresolved_conflict(results):
                 logger.info(
                     "Committee conflict unresolved and consensus weak — suppressing "
                     "proposal (WAIT/NO_TRADE)."
@@ -683,6 +683,10 @@ class SupervisorAgent(BaseAgent):
                     context.get("close") or context.get("price") or context.get("entry_price")
                 ),
                 "requires_escalation": raw.get("requires_escalation", False),
+                # Phase 2: traceability refs for the canonical proposal boundary
+                # (evidence-linked; NOT extra execution payload).
+                "reason_codes": [f"evidence_agreement:{synthesis.agreement_score:.2f}"],
+                "evidence_refs": sorted((raw.get("agent_signals") or {}).keys()),
             }
             return synthesis_dict, proposal
         except Exception as exc:  # noqa: BLE001 - synthesis must never break a cycle

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from .base import RiskLevel, RiskMetrics, RiskThreshold
 
@@ -123,15 +123,18 @@ class RiskEngine:
             account_equity: Total account equity for exposure calculation.
 
         Returns:
-            Dict with total_exposure_pct, correlation_risk, sector_concentration, leverage_used.
+            Dict with total_exposure_pct, correlation_risk, sector_concentration, leverage_used,
+            total_notional, projected_exposure_if_added.
         """
-        if not positions:
+        if not positions or account_equity <= 0:
             return {
                 "total_exposure_pct": 0.0,
                 "correlation_risk": 0.0,
                 "sector_concentration": 0.0,
                 "leverage_used": 0.0,
                 "total_notional": 0.0,
+                "projected_exposure_pct": 0.0,
+                "projected_exposure_if_added": 0.0,
             }
 
         total_notional = sum(
@@ -140,8 +143,7 @@ class RiskEngine:
         )
 
         total_exposure_pct = 0.0
-        if account_equity > 0:
-            total_exposure_pct = total_notional / account_equity
+        total_exposure_pct = total_notional / account_equity
 
         leverage_used = total_exposure_pct
 
@@ -162,19 +164,83 @@ class RiskEngine:
             "sector_concentration": sector_concentration,
             "leverage_used": leverage_used,
             "total_notional": total_notional,
+            "projected_exposure_pct": total_exposure_pct,  # Current without proposal
+            "projected_exposure_if_added": total_exposure_pct,  # Will be updated by caller
         }
 
-    def check_exposure(self, positions: list[dict[str, Any]], max_exposure: float = 0.3) -> bool:
+    def check_projected_exposure(
+        self,
+        positions: list[dict[str, Any]],
+        account_state: dict[str, Any],
+        proposed_trade: Optional[dict[str, Any]] = None,
+        max_exposure: float = 0.30,
+    ) -> tuple[bool, float, float]:
+        """Check if current AND projected exposure (including proposed trade) stay within limits.
+
+        Required behavior: existing exposure + proposed trade exposure =
+        projected exposure <= configured maximum
+
+        Args:
+            positions: List of currently open position dicts.
+            account_state: Dict with key 'equity' — REAL-TIME source, NEVER derived from positions.
+            proposed_trade: Optional dict with keys: size (lots), current_price (or entry_price).
+            max_exposure: Maximum allowed exposure as percentage (0.0-1.0).
+
+        Returns:
+            Tuple of (within_limits, current_exposure_pct, projected_exposure_pct).
+            If no proposed_trade: projected equals current.
+            If proposed_trade given: projected = current + (proposed_lot × price / equity).
+        """
+        equity = float(account_state.get("equity", 0.0))
+        if equity <= 0:
+            return False, 0.0, 0.0
+
+        # Calculate current exposure
+        current_result = self.calculate_portfolio_risk(positions, equity)
+        current_exposure = current_result["total_exposure_pct"]
+
+        # Calculate projected exposure if a new trade is added
+        projected_exposure = current_exposure
+        if proposed_trade is not None and float(proposed_trade.get("size", 0)) > 0:
+            proposed_size = float(proposed_trade.get("size", 0))
+            proposed_price = float(
+                proposed_trade.get("current_price", proposed_trade.get("entry_price", 0))
+            )
+            if proposed_price > 0:
+                proposed_notional = proposed_size * proposed_price
+                projected_exposure = (current_result["total_notional"] + proposed_notional) / equity
+
+        within_limits = projected_exposure <= max_exposure
+        return within_limits, current_exposure, projected_exposure
+
+    def check_exposure(
+        self,
+        positions: list[dict[str, Any]],
+        max_exposure: float = 0.3,
+        account_equity: Optional[float] = None,
+    ) -> bool:
         """Check if total portfolio exposure is within limits.
+
+        Hardening §6: the ``positions[0]``-derived equity fallback is REMOVED.
+        Callers MUST pass the real account equity; ``None`` is fail-closed
+        (blocked) because exposure cannot be proven safe without equity.
+        The gate calls :meth:`check_projected_exposure` with
+        ``account_state["equity"]`` — this legacy shim exists only for unit-test
+        callers that already pass explicit equity.
 
         Args:
             positions: List of position dicts.
             max_exposure: Maximum allowed exposure as percentage (0.0-1.0).
+            account_equity: REAL account equity. ``None`` → False (blocked).
 
         Returns:
             True if exposure within limit, False otherwise.
         """
-        account_equity = float(positions[0].get("account_equity", 1.0)) if positions else 1.0
+        if account_equity is None:
+            return False
+        account_equity = float(account_equity)
+        if account_equity <= 0:
+            return False
         portfolio_risk = self.calculate_portfolio_risk(positions, account_equity)
         return portfolio_risk["total_exposure_pct"] <= max_exposure
 
