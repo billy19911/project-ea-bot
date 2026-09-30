@@ -1,5 +1,5 @@
 {
-  "_comment": "Registry terminal MT5 untuk mode multi-terminal (Run 24). 'execution: true' hanya menandai terminal sebagai KANDIDAT penerima order nyata \u2014 eksekusi tetap harus di-arm eksplisit dari dashboard dan selalu mulai OFF. Semua default false (aman).",
+  "_comment": "Registry terminal MT5 untuk mode multi-terminal (Run 24). 'execution: true' hanya menandai terminal sebagai KANDIDAT penerima order nyata — eksekusi tetap harus di-arm eksplisit dari dashboard dan selalu mulai OFF. Semua default false (aman).",
   "terminals": [
     {
       "id": "vito1",
@@ -11,7 +11,9 @@
       "id": "vito2",
       "label": "VITO 2",
       "path": "E:\\MT5 XYNN EA\\MetaTrader 5 VITO 2\\terminal64.exe",
-      "execution": false
+      "execution": false,
+      "fixed_lot": 0.01,
+      "risk_per_trade_pct": 1.0
     },
     {
       "id": "bil1",
@@ -23,7 +25,9 @@
       "id": "bil2",
       "label": "BIL 2",
       "path": "E:\\MT5 XYNN EA\\MetaTrader 5 BIL 2\\terminal64.exe",
-      "execution": true
+      "execution": true,
+      "risk_per_trade_pct": 1.0,
+      "fixed_lot": 0.05
     },
     {
       "id": "dapit",

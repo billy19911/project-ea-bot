@@ -3,6 +3,54 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Phase 3: Committee & Debate Engine (COMPLETE)
+- `src/agents/roles.py`: 8 canonical roles (regime/structure/liquidity/momentum/volatility/news/entry/challenger) dengan `RoleOutput` ternormalisasi.
+- `src/agents/debate.py`: `DebateEngine` bounded (max 2 rounds, max 3 challenges/cycle) + `DebateRecord` traceable.
+- `src/agents/event_dispatch.py`: trigger taxonomy (BOS/CHOCH/LIQUIDITY_SWEEP/NEWS_HIGH_IMPACT/VOLATILITY_SPIKE/ZONE_TOUCH/SETUP_FORMED) + level analisis.
+- `src/agents/orchestrator.py`: `CommitteeOrchestrator` additive — path supervisor/synthesis lama tetap jalan.
+- Prinsip: specialists beri evidence → lead bentuk hipotesis → challenger serang → committee resolve → Risk Gate menegakkan. Unresolved HIGH/CRITICAL → WAIT/NO_TRADE (fail-closed).
+- Verifikasi: 46 test Phase 3; full Python 2690 passed; Node 61 passed. Lihat `PHASE3_COMPLETE.md`.
+
+### Added — Phase 4: Entry Engine (COMPLETE)
+- `src/trading/entry_config.py`, `entry_zones.py`, `entry_detectors.py`, `trigger_engine.py`, `entry_lifecycle.py`: OB strict (displacement ≥0.5 ATR), FVG 3-candle (gap ≥0.1 ATR), 5 trigger (rejection/displacement/micro_bos/momentum_shift/candle_close), lifecycle CANDIDATE→ARMED→WAITING_TRIGGER→ENTRY_READY/INVALID/EXPIRED, klaim idempoten thread-safe.
+- Multi-timeframe: konteks M15 / trigger M5 / mikro M1; timeframe kontradiktif tidak di-average — `structure_invalidated` memblokir.
+- Safety: zone touch ≠ entry; trigger engine otoritatif (AI tak bisa force ENTRY_READY); RiskGate tetap otoritatif; no MT5 import di modul Phase 4.
+- Verifikasi: 52 test Phase 4; full Python 2742 passed; Node 61 passed. Lihat `PHASE4_COMPLETE.md`. Live trading tetap DISABLED.
+
+### Added — Phases 1-9 canonical trading architecture + ops UI integration
+- Arsitektur canonical Phases 1-9 ter-wire ke dashboard ops (Ruang Komite, Entry, Risk, Research, Learning).
+- Lihat `ARCHITECTURE_MAP.md` untuk checklist per-EPIC.
+
+### Added — Agent callsigns + REVIEW-LEAD everywhere
+- Setiap agent kini punya `display_name` human-friendly (callsign) tampil di seluruh UI (komite, trace, analytics).
+- `ReviewLead` tampil di semua surface review/learning (dulu hanya backend).
+
+### Added — Multi-terminal fan-out + Entry OB/FVG live + Settings toggles
+- `fan-out`: 1 analisa → N terminal MT5 (`vito1`/`bil1`/`dapit`) via `mt5_terminals.json`.
+- Entry OB/FVG multi-timeframe yang sebelumnya terlalu ketat kini dilonggarkan agar sinyal benar-benar tereksekusi.
+- Halaman Settings: toggle live `fan_out_enabled` + `entry_obfvg_enabled` tanpa restart.
+- Uncommitted saat ini: `vito1` tambah `fixed_lot: 0.01` + `risk_per_trade_pct: 1.0`; `bil1` (`execution: true`) tambah `risk_per_trade_pct: 1.0` + `fixed_lot: 0.05`.
+
+### Added — Global ops alert banner + sidebar search + daily-flow shortcuts
+- Banner alert global untuk status ops kritis (arm-live, disconnect, risk block).
+- Sidebar: search + shortcut alur harian (Market → Committee → Entry → Risk → Execution).
+
+### Changed — Sidebar & tabel: accordion, zebra, token-ifikasi
+- Sidebar: grup collapsible, auto-scroll, collapse rail, animasi smooth collapse/expand; hanya grup aktif terbuka.
+- Semua tabel data-heavy: zebra + hover + sticky header; warna/font/mono/radius di-token-ifikasi (`globals.css`).
+- Halaman Ruang Komite: emoji diganti ikon SVG + polish premium.
+
+### Fixed — Research Monte Carlo kosong + siklus manual salah simbol
+- `metrics.monte_carlo` kini diisi agar halaman Monte Carlo menampilkan hasil.
+- Siklus manual pakai XAUUSD (bukan EURUSD); cegah sinyal stuck di cooldown.
+- Instrumen utama = gold (XAUUSD); crypto hanya fallback akhir pekan.
+
+### Fixed — R-multiple, lot input, System pages, pagination, SIMULATED flag
+- `close price` dari deal MT5 + persist entry-context → deteksi win/R akurat.
+- Web: fix input lot, rename Control Panel, tabel AI rapi, chart Price Now + crosshair horizontal.
+- System pages diperbaiki + UI tokens/eyebrow dinormalisasi; pagination default 10 + newest-first di halaman high-volume.
+- Data pasar simulasi kini di-flag `SIMULATED` eksplisit (tidak lagi disamarkan sebagai live); `lessons` cleaner buang placeholder id-only.
+
 ### Fixed — startup: seeding SLTP gagal karena field settings di-rename
 - **Gejala:** log menampilkan `Gagal menerapkan runtime settings saat startup` (AttributeError) setiap boot → **seluruh** blok seed + `_apply_to_runtime` **dibatalkan**, sehingga cap lot/risiko & knob SLTP tidak pernah diterapkan saat startup.
 - **Sebab:** `main.py` masih membaca `settings.sltp_progressive_enabled` yang sudah di-rename menjadi `sltp_tp1_lock_enabled` saat SLTP diubah ke model ladder.

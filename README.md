@@ -32,45 +32,61 @@ AI **tidak pernah** langsung mengirim order ke MT5. Setiap keputusan melewati va
 
 ## Arsitektur
 
-### Alur Sistem
+### Alur Sistem (V2 - Committee & Entry Engine)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Kontrol Layer                          │
-│  Dashboard (Next.js) │ API (Node.js / TypeScript)           │
-└────────────────────────────┬────────────────────────────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              ▼              ▼              ▼
-        Event Manager   Agent Router   State Manager
-              │              │              │
-              └──────────────┼──────────────┘
-                             ▼
-                    ┌───────────────────┐
-                    │   SUPERVISOR      │
-                    │   AGENT           │
-                    └─────────┬─────────┘
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        ▼                     ▼                     ▼
-┌──────────────┐    ┌──────────────────┐    ┌──────────────┐
-│ Market       │    │ Risk Department  │    │ Research      │
-│ Intelligence │    │ (Deterministic)  │    │ Department   │
-└──────┬───────┘    └────────┬─────────┘    └──────┬───────┘
-       │                     │                     │
-       └─────────────────────┼─────────────────────┘
-                             ▼
-                    ┌───────────────────┐
-                    │   RISK GATE       │
-                    │   (HARD LIMITS)   │
-                    └─────────┬─────────┘
-                              ▼
-                    ┌───────────────────┐
-                    │   EXECUTION       │
-                    │   ENGINE          │
-                    └─────────┬─────────┘
-                              ▼
-                          MT5
+┌─────────────────────────────────────────────────────────────────────┐
+│                    DASHBOARD CONTROL PLANE                          │
+│  Next.js Web · PostgreSQL · Redis · Telegram Bot                    │
+└──────────────────────────────────┬──────────────────────────────────┘
+                                   │
+                       ┌───────────┴───────────┐
+                       ▼                       ▼
+            ┌─────────────────┐    ┌──────────────────┐
+            │   Supervisor    │    │  COMMITTEE ORCHE│
+            │     ROUTER      │    │ (Phase 3-4 Canon.)│
+            └────────┬────────┘    └─────────┬────────┘
+                     │                        │
+        ┌────────────┼────────────┐          ▼
+        ▼            ▼            ▼    ┌───────────────────────┐
+┌────────────┐ ┌────────────┐ ┌──────────────┐  • Roles: Regime│
+│Market Lead │ │Risk Lead  │ │Research Lead │  Structure/Liq/Mom│
+└─────┬──────┘ └─────┬──────┘ └──────┬───────┘  News/Vol/Entry   │
+      │              │              │                │            │
+      └──────────────┴──────┬──────┘                ▼            │
+                            ▼             ┌──────────────────────┐
+                     ┌─────────────────┐  │ ENTRY ASSESSMENT      │
+                     │  EVENT CLASSIF. │  ├─ Zones: OB/FVG        │
+                     └────────┬────────┘ ├─ Triggers: Reject/Dsp │
+                            ┌─▼─────────┐ └──────────┬───────────┘
+                            │  DEBATE  │              │
+                            │  ENGINE  │              │
+                            └────┬─────┘              │
+                                 │                    │
+                 ┌───────────────┼──────────────────┐ │
+                 ▼               ▼                  ▼ │
+         ┌──────────────┐  ┌────────────┐  ┌──────────────┐
+         │  EntryRole   │  │Challenger  │  │Multi-Timeframe│
+         │ (M1/M5/M15)  │  │  Role      │  │ Bias Filter   │
+         └──────┬───────┘  └─────┬──────┘  └───────┬──────┘
+                │                │                 │
+                └────────────────┼─────────────────┘
+                                 ▼
+                     ┌───────────────────┐
+                     │   RISK GATE       │
+                     │   (HARD LIMITS)   │
+                     │ max_lot/RR/margin │
+                     └─────────┬─────────┘
+                               ▼
+                     ┌───────────────────┐
+                     │ EXECUTION ENGINE  │
+                     │ Fan-out to N terminals│
+                     └─────────┬─────────┘
+                               ▼
+                         ┌──────────────┐
+                         │  MT5 Terminals│
+                         │ vito1/bil1/dapit│
+                         └──────────────┘
 ```
 
 ### Struktur Monorepo
@@ -88,17 +104,30 @@ project-ea-bot/
 │   └── python/                 # FastAPI service
 │       └── src/
 │           ├── agents/         # Supervisor, analysts, synthesis
+│           │   ├── roles.py            # 8 canonical roles (Phase 3)
+│           │   ├── debate.py           # Debate engine (Phase 3)
+│           │   ├── event_dispatch.py   # Trigger taxonomy (Phase 3)
+│           │   └── orchestrator.py     # CommitteeOrchestrator (Phase 3)
 │           ├── trading/        # Event engine, market regime, indicators
+│           │   ├── entry_config.py     # Config zone/trigger/TF (Phase 4)
+│           │   ├── entry_zones.py      # Zone + lifecycle (Phase 4)
+│           │   ├── entry_detectors.py  # OB/FVG strict detectors (Phase 4)
+│           │   ├── trigger_engine.py   # 5 trigger detectors (Phase 4)
+│           │   └── entry_lifecycle.py  # Setup registry + idempotency (Phase 4)
 │           ├── risk/            # Risk engine, money management, risk gate
-│           ├── execution/      # Execution engine
-│           ├── mt5/             # MT5 connector & connection manager
+│           ├── execution/      # Execution engine (fan-out multi-terminal)
+│           ├── mt5/             # MT5 connector, connections, terminals
 │           ├── llm/             # 9Router LLM gateway
-│           ├── monitoring/      # Position monitor
+│           ├── monitoring/      # Position monitor, trade manager
 │           ├── research/        # Research engine
 │           ├── paper/           # Paper trading simulation
 │           ├── demo/            # Demo trading & stability
 │           ├── memory/          # Trade memory
-│           ├── review/          # Trade review
+│           ├── learning/        # Learning engine v2 + lesson store
+│           ├── review/          # Trade review + R-multiple
+│           ├── reports/         # Daily reports (deals MT5)
+│           ├── market/          # Market intelligence + news feed
+│           ├── telegram/        # Telegram notifier + transport
 │           └── live_readiness/  # Live readiness evaluator & gate
 ├── packages/
 │   ├── eslint-config/          # Shared lint config
@@ -142,7 +171,18 @@ project-ea-bot/
 
 ## Status
 
-Platform sedang dalam tahap *pre-release*: core trading, AI, risk, dan observability sudah terimplementasi dan teruji. Lihat [`CHANGELOG.md`](./CHANGELOG.md) untuk riwayat perubahan dan [`ARCHITECTURE_MAP.md`](./ARCHITECTURE_MAP.md) untuk status per-EPIC.
+Platform sedang dalam tahap *pre-release*: core trading, AI, risk, dan observability sudah terimplementasi dan teruji.
+
+**Canonical engine (baru):**
+- **Phase 3 — Committee & Debate Engine (COMPLETE)**: 8 canonical roles, targeted bounded debate (max 2 rounds), trigger taxonomy, `CommitteeOrchestrator` additive. Unresolved HIGH/CRITICAL conflict → WAIT/NO_TRADE (fail-closed). Lihat [`PHASE3_COMPLETE.md`](./PHASE3_COMPLETE.md).
+- **Phase 4 — Entry Engine (COMPLETE)**: strict OB/FVG detection (displacement/quality gated), 5 trigger detectors, zone lifecycle + idempotent claims, multi-timeframe (M15/M5/M1). Lihat [`PHASE4_COMPLETE.md`](./PHASE4_COMPLETE.md).
+- **Multi-terminal fan-out**: 1 analisa → N terminal MT5, arm/disarm per terminal, `fixed_lot` + `risk_per_trade_pct` per terminal di `services/python/mt5_terminals.json`.
+
+> ⚠️ **Live trading tetap DISABLED.** Phase 3/4 canonical engine bersifat *additive* — operator opt-in; jalur runtime legacy tetap menjadi default.
+
+Verifikasi terakhir: **Python 2742 passed**, **Node/API 61 passed**, Web `tsc` + lint bersih.
+
+Lihat [`CHANGELOG.md`](./CHANGELOG.md) untuk riwayat perubahan dan [`ARCHITECTURE_MAP.md`](./ARCHITECTURE_MAP.md) untuk status per-EPIC.
 
 ---
 
@@ -360,8 +400,13 @@ Satu proses Python hanya bisa attach ke **satu** terminal MT5 (batasan paket
 | Dokumen | Deskripsi |
 |---------|-----------|
 | [`PRD_V1_...md`](./PRD_V1_Autonomous_Multi_Agent_Trading_Research_Platform.md) | Spesifikasi arsitektur lengkap (PRD V1) |
+| [`PRD_V2.md`](./PRD_V2.md) | Spesifikasi upgrade produksi autonomous trading (PRD V2) |
+| [`PHASE3_COMPLETE.md`](./PHASE3_COMPLETE.md) | Committee & Debate Engine — status, tes, safety, limitasi |
+| [`PHASE4_COMPLETE.md`](./PHASE4_COMPLETE.md) | Entry Engine — OB/FVG, trigger, lifecycle, safety |
+| [`ARCHITECTURE_MAP.md`](./ARCHITECTURE_MAP.md) | Checklist & diagram EPIC 00–30 |
 | [`docs/logging.md`](./docs/logging.md) | Panduan structured logging (pino / structlog) |
 | [`docs/development-setup.md`](./docs/development-setup.md) | Panduan install dependensi manual (Windows) |
+| [`docs/audit/RELEASE_READINESS_REPORT.md`](./docs/audit/RELEASE_READINESS_REPORT.md) | Laporan kesiapan rilis (audit RC) |
 | [`CHANGELOG.md`](./CHANGELOG.md) | Riwayat versi & perubahan |
 | [`CONSTRAINTS.md`](./CONSTRAINTS.md) | Kendala environment & rekomendasi solusi |
 
