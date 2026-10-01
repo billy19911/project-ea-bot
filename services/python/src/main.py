@@ -831,6 +831,7 @@ async def health_check() -> dict:
                 "signal_counts": {},
                 "avg_confidence": None,
                 "status": "idle",
+                "last_error": None,
             }
             entry.update(metrics)
     except Exception:  # noqa: BLE001 - health must never fail on metrics

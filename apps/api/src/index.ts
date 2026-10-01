@@ -29,6 +29,13 @@ import {
 import { attachLiveStream } from './liveStream';
 // Run 18: honest supervisor status (real uptime; no fabricated zeros).
 import { buildSupervisorStatus, buildUsageRows } from './supervisorStatus.js';
+// TASK 04: AI Control error taxonomy — never label a 503 as a generic agent error.
+import {
+  classify,
+  classifyProxyFailure,
+  normalizeIncoming,
+  type ClassifiedError,
+} from './errorTaxonomy';
 import {
   mapTradingOverview,
   mapMarketOverview,
@@ -393,13 +400,18 @@ app.get('/ai-control/status', async (req, res) => {
   const log = (req as any).log;
   log.info('ai-control.status');
 
+  // TASK 04: propagate a single trace id across every downstream probe so a
+  // failing layer can be correlated end-to-end (invariant 18/19).
+  const traceId = traceIdFromRequest(req) || randomUUID();
+  const traceHeader = { 'X-Trace-Id': traceId };
+
   const [health, scheduler, tasksResult, modelsResult, advisorResult, supervisorResult] = await Promise.all([
-    getJson<any>('/health'),
-    getJson<any>('/scheduler/status'),
-    getJson<any>('/tasks'),
-    getJson<any>('/ai/models'),
-    getJson<any>('/ai/advisor/status'),
-    getJson<any>('/supervisor/status'),
+    getJson<any>('/health', undefined, traceHeader),
+    getJson<any>('/scheduler/status', undefined, traceHeader),
+    getJson<any>('/tasks', undefined, traceHeader),
+    getJson<any>('/ai/models', undefined, traceHeader),
+    getJson<any>('/ai/advisor/status', undefined, traceHeader),
+    getJson<any>('/supervisor/status', undefined, traceHeader),
   ]);
 
   const relevant = {
@@ -411,13 +423,45 @@ app.get('/ai-control/status', async (req, res) => {
     supervisor: supervisorResult,
   };
   const available = Object.entries(relevant).filter(([, result]) => result.ok);
+
+  // TASK 04: build a *classified* error for every failed probe so the UI shows
+  // the real failing layer (python_service vs python_endpoint vs llm_provider)
+  // instead of a generic "agent error". Each entry carries the full field set.
+  const probeErrors: ClassifiedError[] = [];
+  const degraded: Record<string, string> = {};
+  for (const [name, result] of Object.entries(relevant)) {
+    if (result.ok) continue;
+    const classified = result.taxonomy
+      ? result.taxonomy
+      : classifyProxyFailure(
+          { error: (result as any).error ?? 'python_service_unavailable', status: (result as any).status ?? 503 },
+          { endpoint: `/ai-control/status → ${name}`, trace_id: traceId },
+        );
+    const withTrace: ClassifiedError = { ...classified, trace_id: classified.trace_id ?? traceId };
+    probeErrors.push(withTrace);
+    degraded[name] = withTrace.code;
+  }
+
+  // All probes failed → the Python SERVICE itself is unavailable. Return a
+  // classified 503 (never a generic body) so the UI can name the layer.
   if (available.length === 0) {
-    res.status(503).json({ error: 'python_service_unavailable', source: 'unavailable' });
+    res.status(503).json({
+      error: 'python_service_unavailable',
+      source: 'unavailable',
+      trace_id: traceId,
+      taxonomy: classify({
+        code: 'PYTHON_SERVICE_UNAVAILABLE',
+        message: 'Python analysis service is unreachable — all AI Control probes failed.',
+        service: 'python_service',
+        endpoint: '/ai-control/status',
+        status_code: 503,
+        trace_id: traceId,
+      }),
+      errors: probeErrors,
+      subsystems: buildSubsystemTiles({ allProbesFailed: true, probeErrors }),
+    });
     return;
   }
-  const degraded = Object.fromEntries(
-    Object.entries(relevant).filter(([, result]) => !result.ok).map(([name]) => [name, 'unavailable']),
-  );
 
   const healthData = health.ok ? health.data : {};
   const schedulerData = scheduler.ok ? scheduler.data : {};
@@ -443,13 +487,17 @@ app.get('/ai-control/status', async (req, res) => {
         lastActive: a.last_active ?? null,
         last_event_type: a.last_event_type ?? null,
         signalCounts: a.signal_counts ?? {},
+        // TASK 04: per-agent attributed error (from the agent activity tracker's
+        // last_error, when the Python side recorded one). Taxonomised on the
+        // Node side so provider/model/trace are populated.
+        lastError: classifyAgentError(a.last_error, traceId),
       }))
     : [];
 
   // Usage rows come from the LLM advisor's REAL per-model counters — only
   // models that were actually called appear. Previously this table listed
   // every registry model padded with hard-coded zeros, which read as a
-  // "usage" report while containing no usage data at all.
+  // "usage report" while containing no usage data at all.
   const registryModels = modelsResult.ok && Array.isArray(modelsResult.data.models)
     ? modelsResult.data.models
     : [];
@@ -474,6 +522,43 @@ app.get('/ai-control/status', async (req, res) => {
   const activeCount = agents.filter((a: any) => a.status === 'active').length;
   activeAgents.set(activeCount);
 
+  // TASK 04: collect agent-attributed errors (per-agent last_error) plus the
+  // API-level probe failures. The UI groups by agent and shows the cause.
+  const agentErrors: ClassifiedError[] = agents
+    .filter((a: any) => a.lastError)
+    .map((a: any) => a.lastError as ClassifiedError);
+
+  const apiErrors: ClassifiedError[] = getRecentErrors(10).map((e) =>
+    classify({
+      code: (e.code as any) ?? 'NODE_API_UNAVAILABLE',
+      message: e.message,
+      trace_id: e.traceId ?? traceId,
+      service: e.service ?? e.source ?? 'node_api',
+      endpoint: e.endpoint ?? e.path ?? null,
+      status_code: e.statusCode ?? null,
+      agent: e.agent ?? null,
+      event_id: e.eventId ?? null,
+      model: e.model ?? null,
+      provider: e.provider ?? null,
+      timestamp: e.timestamp,
+    }),
+  );
+
+  // Django-style: errors is the union, richest-first (agent-attributed first).
+  const errors: ClassifiedError[] = [...agentErrors, ...probeErrors, ...apiErrors];
+
+  // Subsystem health tiles — each derived from a REAL probe. `llm_gateway` and
+  // `nine_router` are derived from the advisor probe + provider health, never
+  // fabricated. Partially-available subsystems keep the page usable.
+  const subsystems = buildSubsystemTiles({
+    healthOk: health.ok,
+    advisorOk: advisorResult.ok,
+    advisorData: advisorResult.ok ? advisorResult.data : undefined,
+    providerHealth: supervisorResult.ok ? supervisorResult.data?.provider_health : undefined,
+    agents,
+    probeErrors,
+  });
+
   res.json({
     supervisor: {
       status: supervisor.status,
@@ -487,24 +572,162 @@ app.get('/ai-control/status', async (req, res) => {
     models,
     tasks: Array.isArray(tasksData.tasks) ? tasksData.tasks : [],
     activity: buildActivityRows(Array.isArray(tasksData.tasks) ? tasksData.tasks : []),
-    errors: getRecentErrors(10).map((e) => ({
-      id: e.id,
-      timestamp: e.timestamp,
-      agent: e.source,
-      message: e.message,
-      severity: e.severity,
-    })),
+    errors,
+    subsystems,
+    trace_id: traceId,
     source: 'live',
     degraded: Object.keys(degraded).length > 0 ? degraded : undefined,
   });
 });
 
+/**
+ * TASK 04: classify an agent's `last_error` (Python-recorded) into the taxonomy.
+ * Prefers an explicit `code` from Python (already-classified) and otherwise
+ * infers from the message, defaulting to AGENT_EXCEPTION (never a generic
+ * "agent error" without a cause). Returns null when there is no error.
+ */
+function classifyAgentError(raw: any, traceId: string): ClassifiedError | null {
+  if (!raw) return null;
+  const normalized = normalizeIncoming(raw);
+  if (normalized) return { ...normalized, trace_id: normalized.trace_id ?? traceId };
+  const message = typeof raw === 'string' ? raw : String(raw?.message ?? raw);
+  const agent = typeof raw === 'object' ? raw?.agent ?? null : null;
+  const model = typeof raw === 'object' ? raw?.model ?? null : null;
+  const provider = typeof raw === 'object' ? raw?.provider ?? null : null;
+  const statusCode = typeof raw === 'object' && typeof raw?.status_code === 'number' ? raw.status_code : null;
+  const lower = message.toLowerCase();
+  let code: ClassifiedError['code'] = 'AGENT_EXCEPTION';
+  if (lower.includes('timeout') || lower.includes('timed out')) code = 'AGENT_TIMEOUT';
+  else if (statusCode === 503 || lower.includes('503')) code = 'LLM_PROVIDER_503';
+  else if (statusCode && statusCode >= 500) code = 'LLM_PROVIDER_5XX';
+  else if (statusCode && statusCode >= 400) code = 'LLM_PROVIDER_4XX';
+  else if (lower.includes('model') && lower.includes('unavailable')) code = 'MODEL_UNAVAILABLE';
+  else if (lower.includes('auth') || lower.includes('unauthor')) code = 'AUTH_FAILURE';
+  else if (lower.includes('guard') || lower.includes('missing data')) code = 'DATA_GUARD_FAILURE';
+  return classify({
+    code,
+    message,
+    service: 'agent',
+    endpoint: null,
+    status_code: statusCode,
+    agent,
+    model,
+    provider,
+    trace_id: traceId,
+  });
+}
+
+interface SubsystemTile {
+  name: 'supervisor' | 'python' | 'llm_gateway' | 'nine_router';
+  status: 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | 'ACTIVE' | 'IDLE';
+  detail: string | null;
+  code: ClassifiedError['code'] | null;
+}
+
+/**
+ * TASK 04: build the AI Control subsystem tiles from REAL probe outcomes.
+ * Unknown → UNAVAILABLE (never fabricated HEALTHY). Partial failures keep the
+ * tiles useful (invariant: page remains usable with partial subsystem failure).
+ */
+function buildSubsystemTiles(input: {
+  healthOk?: boolean;
+  advisorOk?: boolean;
+  advisorData?: any;
+  providerHealth?: any;
+  agents?: Array<{ status?: string; errors?: number }>;
+  probeErrors: ClassifiedError[];
+  allProbesFailed?: boolean;
+}): SubsystemTile[] {
+  const {
+    healthOk = false,
+    advisorOk = false,
+    advisorData,
+    providerHealth,
+    agents = [],
+    probeErrors,
+    allProbesFailed = false,
+  } = input;
+
+  const codeFor = (name: string): ClassifiedError['code'] | null => {
+    const hit = probeErrors.find((e) => (e.endpoint ?? '').includes(name) || e.service === name);
+    return hit ? hit.code : null;
+  };
+
+  const pythonOk = healthOk && !allProbesFailed;
+  const pythonTile: SubsystemTile = pythonOk
+    ? { name: 'python', status: 'HEALTHY', detail: null, code: null }
+    : {
+        name: 'python',
+        status: 'UNAVAILABLE',
+        detail: 'Python analysis service unreachable',
+        code: codeFor('health') ?? (allProbesFailed ? 'PYTHON_SERVICE_UNAVAILABLE' : 'PYTHON_ENDPOINT_5XX'),
+      };
+
+  // LLM Gateway / 9Router: derive from the advisor probe + (when available)
+  // the supervisor's provider health snapshot. Unknown → UNAVAILABLE honestly.
+  const providerState =
+    typeof providerHealth?.state === 'string' ? String(providerHealth.state).toUpperCase() : null;
+
+  let llmTile: SubsystemTile;
+  if (!advisorOk) {
+    llmTile = {
+      name: 'llm_gateway',
+      status: 'UNAVAILABLE',
+      detail: 'Advisor/LLM status probe failed',
+      code: codeFor('advisor') ?? 'PYTHON_SERVICE_UNAVAILABLE',
+    };
+  } else if (providerState === 'DEGRADED') {
+    llmTile = { name: 'llm_gateway', status: 'DEGRADED', detail: 'Provider errors recorded', code: 'LLM_PROVIDER_5XX' };
+  } else {
+    const enabled = advisorData?.enabled === true;
+    llmTile = {
+      name: 'llm_gateway',
+      status: 'HEALTHY',
+      detail: enabled ? null : 'Advisor disabled (opt-in)',
+      code: null,
+    };
+  }
+
+  const nineTile: SubsystemTile =
+    providerState === 'HEALTHY'
+      ? { name: 'nine_router', status: 'HEALTHY', detail: null, code: null }
+      : providerState === 'DEGRADED'
+        ? { name: 'nine_router', status: 'DEGRADED', detail: 'Upstream errors recorded', code: 'LLM_PROVIDER_5XX' }
+        : {
+            name: 'nine_router',
+            status: advisorOk ? 'HEALTHY' : 'UNAVAILABLE',
+            detail: advisorOk ? null : 'No provider health source',
+            code: advisorOk ? null : 'PYTHON_SERVICE_UNAVAILABLE',
+          };
+
+  const supervisorActive =
+    agents.length > 0 && agents.some((a) => a.status === 'active');
+  const supervisorTile: SubsystemTile = {
+    name: 'supervisor',
+    status: allProbesFailed ? 'UNAVAILABLE' : supervisorActive ? 'ACTIVE' : 'IDLE',
+    detail: null,
+    code: allProbesFailed ? 'PYTHON_SERVICE_UNAVAILABLE' : null,
+  };
+
+  return [supervisorTile, pythonTile, llmTile, nineTile];
+}
+
 app.get('/ai-control/reasoning', async (req, res) => {
   const log = (req as any).log;
   log.info('ai-control.reasoning');
-  const result = await getJson<any>('/decisions');
+  const traceId = traceIdFromRequest(req) || randomUUID();
+  const result = await getJson<any>('/decisions', undefined, { 'X-Trace-Id': traceId });
   if (!result.ok) {
-    res.status(503).json({ error: 'python_service_unavailable', source: 'unavailable' });
+    const taxonomy = result.taxonomy ?? classifyProxyFailure(
+      { error: (result as any).error ?? 'python_service_unavailable', status: (result as any).status ?? 503 },
+      { endpoint: '/ai-control/reasoning → decisions', trace_id: traceId },
+    );
+    res.status(taxonomy.code === 'AUTH_FAILURE' ? 502 : 503).json({
+      error: taxonomy.code,
+      source: 'unavailable',
+      trace_id: traceId,
+      taxonomy,
+    });
     return;
   }
   const decisions = Array.isArray(result.data.decisions) ? result.data.decisions : [];

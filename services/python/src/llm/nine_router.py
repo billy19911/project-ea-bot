@@ -11,6 +11,7 @@ from typing import Any, Iterator
 from openai import OpenAI
 
 from src.llm.base import BaseLLMProvider, LLMResponse, TokenUsage
+from src.llm.errors import classify_llm_exception
 from src.llm.registry import ModelRegistry
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,9 @@ class NineRouterClient(BaseLLMProvider):
         self.backoff_factor = backoff_factor
         self.initial_retry_delay = initial_retry_delay
         self.registry = registry or ModelRegistry()
+        # TASK 04: last provider failure classified into the error taxonomy so a
+        # 503/timeout is never hidden behind the rule-based mock.
+        self.last_classified_error: dict[str, Any] | None = None
 
         if client is not None:
             self.client = client
@@ -152,6 +156,16 @@ class NineRouterClient(BaseLLMProvider):
                     if attempt < self.max_retries:
                         time.sleep(delay)
                         delay *= self.backoff_factor
+
+        # TASK 04: classify the terminal provider failure so callers/UI can show
+        # LLM_PROVIDER_503 / LLM_TIMEOUT instead of an opaque "agent error".
+        if last_error is not None:
+            try:
+                self.last_classified_error = classify_llm_exception(
+                    last_error, model=primary_model, provider="9router"
+                )
+            except Exception:  # noqa: BLE001 - classification must never break generate()
+                self.last_classified_error = None
 
         logger.error("All models failed. Falling back to rule-based mock: %s", last_error)
         return self._rule_based_fallback(prompt, system_prompt, str(last_error))

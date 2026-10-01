@@ -15,6 +15,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import { URL } from 'node:url';
+import { classifyProxyFailure, type ClassifiedError } from './errorTaxonomy';
 
 /** Default Python service base URL when `PYTHON_SERVICE_URL` is unset. */
 export const DEFAULT_PYTHON_SERVICE_URL = 'http://127.0.0.1:8787';
@@ -52,6 +53,12 @@ export interface PythonProxyFailure {
   upstreamStatus?: number;
   /** Parsed upstream JSON body for non-2xx responses, when parseable. */
   upstreamBody?: unknown;
+  /**
+   * TASK 04: fully-classified error (code/layer/service/endpoint/status_code/
+   * retryable/...). Lets callers label the REAL failing layer instead of a
+   * generic "unavailable" that the UI would blame on an agent.
+   */
+  taxonomy?: ClassifiedError;
 }
 
 export type PythonProxyResult<T = unknown> = PythonProxySuccess<T> | PythonProxyFailure;
@@ -158,12 +165,17 @@ function request<T>(
     try {
       target = new URL(`${resolveBaseUrl()}${path}`);
     } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
       resolve({
         ok: false,
         source: 'unavailable',
         status: 502,
         error: 'python_service_invalid_url',
-        detail: err instanceof Error ? err.message : String(err),
+        detail,
+        taxonomy: classifyProxyFailure(
+          { error: 'python_service_invalid_url', status: 502, detail },
+          { endpoint: path, trace_id: headers['X-Trace-Id'] ?? null },
+        ),
       });
       return;
     }
@@ -227,6 +239,10 @@ function request<T>(
               detail: `upstream ${status}`,
               upstreamStatus: status,
               upstreamBody,
+              taxonomy: classifyProxyFailure(
+                { error: 'python_service_error', status: 502, detail: `upstream ${status}`, upstreamStatus: status },
+                { endpoint: path, trace_id: headers['X-Trace-Id'] ?? null },
+              ),
             });
             return;
           }
@@ -235,12 +251,17 @@ function request<T>(
             const data = (bodyText ? JSON.parse(bodyText) : {}) as T;
             finish({ ok: true, source: 'live', status, data });
           } catch (err) {
+            const detail = err instanceof Error ? err.message : String(err);
             finish({
               ok: false,
               source: 'unavailable',
               status: 502,
               error: 'python_service_invalid_json',
-              detail: err instanceof Error ? err.message : String(err),
+              detail,
+              taxonomy: classifyProxyFailure(
+                { error: 'python_service_invalid_json', status: 502, detail },
+                { endpoint: path, trace_id: headers['X-Trace-Id'] ?? null },
+              ),
             });
           }
         });
@@ -254,6 +275,10 @@ function request<T>(
         source: 'unavailable',
         status: 504,
         error: 'python_service_timeout',
+        taxonomy: classifyProxyFailure(
+          { error: 'python_service_timeout', status: 504 },
+          { endpoint: path, trace_id: headers['X-Trace-Id'] ?? null },
+        ),
       });
     });
 
@@ -264,6 +289,10 @@ function request<T>(
         status: 503,
         error: 'python_service_unavailable',
         detail: err.message,
+        taxonomy: classifyProxyFailure(
+          { error: 'python_service_unavailable', status: 503, detail: err.message },
+          { endpoint: path, trace_id: headers['X-Trace-Id'] ?? null },
+        ),
       });
     });
 

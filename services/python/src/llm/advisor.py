@@ -78,6 +78,9 @@ class AdvisorResult:
     cost_usd: float = 0.0
     latency_s: float = 0.0
     guardrails: dict[str, Any] = field(default_factory=dict)
+    # TASK 04: taxonomy-classified failure cause (dict) or None. Lets the UI show
+    # LLM_PROVIDER_503 / LLM_TIMEOUT instead of a generic "agent error".
+    classified_error: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for the API layer."""
@@ -87,6 +90,7 @@ class AdvisorResult:
             "content": self.content,
             "model": self.model,
             "is_fallback": self.is_fallback,
+            "classified_error": self.classified_error,
             "usage": {
                 "prompt_tokens": self.prompt_tokens,
                 "completion_tokens": self.completion_tokens,
@@ -260,7 +264,13 @@ class LLMAdvisor:
             "timeout_s": REQUEST_TIMEOUT_S,
         }
 
-        def _refuse(reason: str, *, fallback: bool = False, error: str = "") -> AdvisorResult:
+        def _refuse(
+            reason: str,
+            *,
+            fallback: bool = False,
+            error: str = "",
+            classified: dict[str, Any] | None = None,
+        ) -> AdvisorResult:
             self._refusals += 1
             self._record_telemetry(
                 role=role,
@@ -272,7 +282,9 @@ class LLMAdvisor:
                 error=error,
                 valid=False,
             )
-            return AdvisorResult(ok=False, reason=reason, guardrails=guardrails)
+            return AdvisorResult(
+                ok=False, reason=reason, guardrails=guardrails, classified_error=classified
+            )
 
         if role not in _ALLOWED_ROLES:
             return _refuse(f"Peran tidak diizinkan: {role!r} (hanya {', '.join(_ALLOWED_ROLES)}).")
@@ -369,9 +381,18 @@ class LLMAdvisor:
             response.usage = usage_obj
         except Exception as exc:
             logger.warning("advisor: panggilan LLM gagal: %s", exc)
+            try:
+                from .errors import classify_llm_exception
+
+                classified = classify_llm_exception(
+                    exc, agent=f"llm_advisor:{role}", endpoint="/ai/advisor/advise"
+                )
+            except Exception:  # noqa: BLE001 - classification must never break advise()
+                classified = None
             return _refuse(
                 f"Panggilan LLM gagal: {exc}",
                 error=str(exc),
+                classified=classified,
             )
         elapsed = time.monotonic() - started
 

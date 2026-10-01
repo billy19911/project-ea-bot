@@ -43,14 +43,29 @@ class AgentActivity:
     _confidence_n: int = 0
     recent: deque = field(default_factory=lambda: deque(maxlen=20))
     last_event_type: Optional[str] = None
+    # TASK 04: structured, taxonomy-classified error (dict) or None when the
+    # agent's most recent run succeeded. Lets the UI show LLM_PROVIDER_503 /
+    # AGENT_EXCEPTION / etc. instead of a generic "agent error".
+    last_error: Any = None
 
     def record(
-        self, signal: str, confidence: float, error: bool = False, event_type: str = ""
+        self,
+        signal: str,
+        confidence: float,
+        error: bool = False,
+        event_type: str = "",
+        error_detail: Any = None,
     ) -> None:
         self.invocations += 1
         self.last_active = _now()
         if error:
             self.errors += 1
+            if error_detail is not None:
+                self.last_error = error_detail
+        else:
+            # A successful run clears the stale error so the UI never shows a
+            # fixed cause for an agent that has since recovered.
+            self.last_error = None
         key = (signal or "UNKNOWN").upper()
         self.signal_counts[key] = self.signal_counts.get(key, 0) + 1
         try:
@@ -86,6 +101,9 @@ class AgentActivity:
             "avg_confidence": self.avg_confidence,
             "recent": list(self.recent),
             "last_event_type": self.last_event_type,
+            # TASK 04: structured error cause (or None). The UI reads this to
+            # show the real failing layer.
+            "last_error": self.last_error,
             # `status` is derived from real activity, not a fixed string.
             "status": "active" if self.invocations > 0 else "idle",
         }
@@ -112,12 +130,17 @@ class AgentActivityTracker:
         confidence: float = 0.0,
         error: bool = False,
         event_type: str = "",
+        error_detail: Any = None,
     ) -> None:
         """Record one agent run (fail-safe: never raises)."""
         try:
             with self._lock:
                 self._get_or_create(name).record(
-                    signal, confidence, error=error, event_type=event_type
+                    signal,
+                    confidence,
+                    error=error,
+                    event_type=event_type,
+                    error_detail=error_detail,
                 )
         except Exception:  # noqa: BLE001 - observability must never break analysis
             pass

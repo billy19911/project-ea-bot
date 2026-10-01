@@ -9,6 +9,7 @@
  */
 
 import client from 'prom-client';
+import { classify, type ClassifiedError, type ErrorCode } from './errorTaxonomy';
 
 // ── Prometheus registry ─────────────────────────────────────────────────────
 export const register = new client.Registry();
@@ -99,16 +100,60 @@ export interface ErrorRecord {
   path?: string;
   statusCode?: number;
   traceId?: string;
+  /**
+   * TASK 04: the real failing layer. Optional so legacy callers keep working;
+   * when absent the record is treated as an unclassified API error and is NOT
+   * fabricated into a specific taxonomy code.
+   */
+  code?: ErrorCode;
+  layer?: string;
+  service?: string;
+  endpoint?: string;
+  agent?: string;
+  eventId?: string;
+  model?: string;
+  provider?: string;
+  retryable?: boolean;
 }
 
 const MAX_ERRORS = 100;
 const recentErrors: ErrorRecord[] = [];
 
+/**
+ * Classify an error into the taxonomy and attach the derived fields, then store
+ * it. Backwards-compatible: callers that pass a `code` get full attribution;
+ * callers that do not get `code: 'NODE_API_UNAVAILABLE'` only when they are an
+ * API-level failure (never an agent blame).
+ */
 export function recordError(error: Omit<ErrorRecord, 'id' | 'timestamp'>): void {
+  const classified: ClassifiedError = classify({
+    code: error.code ?? 'NODE_API_UNAVAILABLE',
+    message: error.message,
+    trace_id: error.traceId ?? null,
+    service: error.service ?? error.source ?? null,
+    endpoint: error.endpoint ?? error.path ?? null,
+    status_code: error.statusCode ?? null,
+    agent: error.agent ?? null,
+    event_id: error.eventId ?? null,
+    model: error.model ?? null,
+    provider: error.provider ?? null,
+  });
   const record: ErrorRecord = {
     id: `ERR-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    timestamp: new Date().toISOString(),
+    timestamp: classified.timestamp,
     ...error,
+    // Taxonomy-derived fields always override so the store is consistent.
+    code: classified.code,
+    layer: classified.layer,
+    service: classified.service ?? error.service,
+    endpoint: classified.endpoint ?? error.endpoint,
+    agent: classified.agent ?? error.agent,
+    eventId: classified.event_id ?? error.eventId,
+    model: classified.model ?? error.model,
+    provider: classified.provider ?? error.provider,
+    retryable: classified.retryable,
+    traceId: classified.trace_id ?? error.traceId,
+    statusCode: classified.status_code ?? error.statusCode,
   };
   recentErrors.unshift(record);
   if (recentErrors.length > MAX_ERRORS) {

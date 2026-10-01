@@ -28,6 +28,7 @@ from typing import Any, Callable, Optional
 
 from . import canonical as C
 from .base import LLMResponse
+from .errors import classify_llm_exception
 from .registry import ModelRegistry
 
 logger = logging.getLogger(__name__)
@@ -272,6 +273,8 @@ class CanonicalModelRouter:
         self.policy_version = policy_version
         self.record_sink = record_sink
         self._last_error = ""
+        # TASK 04: last classified provider failure (dict) for honest UI cause.
+        self._last_classified_error: Optional[dict[str, Any]] = None
         self._lock = threading.RLock()
         self._cycle_budgets: dict[str, C.BudgetLedger] = {}
         self._records: list[C.ModelDecisionRecord] = []
@@ -572,6 +575,7 @@ class CanonicalModelRouter:
         chain = [model] + [f for f in fallbacks[: self.config.max_escalations]]
         retries = 0
         last_error = ""
+        last_classified: Optional[dict[str, Any]] = None
         for idx, candidate in enumerate(chain):
             try:
                 kwargs: dict[str, Any] = {"max_tokens": request.max_tokens}
@@ -613,10 +617,16 @@ class CanonicalModelRouter:
             except Exception as exc:  # noqa: BLE001 - bounded fallback
                 retries += 1
                 last_error = str(exc)
+                last_classified = classify_llm_exception(
+                    exc,
+                    agent=request.agent_role or None,
+                    model=candidate,
+                )
                 self._health(False, 0.0)
                 logger.warning("model %s failed (%s); fallback %d", candidate, exc, idx)
                 continue
         self._last_error = last_error
+        self._last_classified_error = last_classified
         return None, "FAILED", "", retries, len(chain) > 1, {}
 
     def _model_supports_effort(self, model: str) -> bool:
@@ -657,6 +667,16 @@ class CanonicalModelRouter:
     def last_error(self) -> str:
         """Last bounded-call error message (for honest failure reporting)."""
         return getattr(self, "_last_error", "")
+
+    @property
+    def last_classified_error(self) -> Optional[dict[str, Any]]:
+        """TASK 04: last provider failure classified into the error taxonomy.
+
+        Returns the classified dict (code/layer/provider/model/retryable/...) or
+        None when the last call succeeded. Lets callers surface LLM_PROVIDER_503
+        rather than a generic agent error.
+        """
+        return getattr(self, "_last_classified_error", None)
 
     def _record(
         self,

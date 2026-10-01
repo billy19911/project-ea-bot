@@ -1,12 +1,40 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import styles from './page.module.css';
 import { apiFetch } from '../../lib/api';
 import { useAutoRefresh } from '../../lib/useAutoRefresh';
 import { fmtDateTime } from '../../lib/useApiData';
 import AppShell from '../../components/AppShell';
 import Pagination from '../../components/ui/pagination';
+import { isRetryable, causeLabel, type ErrorCode } from '../../lib/errorTaxonomy';
+
+// ── TASK 04 — error taxonomy (mirrors apps/api/src/errorTaxonomy.ts) ──────────
+// The 13 required classes. The UI must show the REAL failing layer, never a
+// generic "agent error" for a 503 (MASTER_PLAN invariants 18/19).
+
+type ClassifiedError = {
+  code: ErrorCode;
+  layer: string;
+  trace_id: string | null;
+  service: string | null;
+  endpoint: string | null;
+  status_code: number | null;
+  agent: string | null;
+  event_id: string | null;
+  model: string | null;
+  provider: string | null;
+  timestamp: string;
+  message: string;
+  retryable: boolean;
+};
+
+type SubsystemTile = {
+  name: 'supervisor' | 'python' | 'llm_gateway' | 'nine_router';
+  status: string;
+  detail: string | null;
+  code: ErrorCode | null;
+};
 
 type AgentStatus = 'active' | 'idle' | 'error';
 type AgentNode = {
@@ -24,28 +52,23 @@ type AgentNode = {
   lastActive: string | null;
   last_event_type?: string | null;
   signalCounts: Record<string, number>;
+  /** TASK 04: taxonomy-classified last error (or null when healthy). */
+  lastError?: ClassifiedError | null;
 };
-type ActivityLog = { 
-  id: string; 
-  timestamp: string; 
-  agent: string; 
-  action: string; 
+type ActivityLog = {
+  id: string;
+  timestamp: string;
+  agent: string;
+  action: string;
   status: 'success' | 'warning' | 'error';
   duration?: number;
 };
-type AgentError = {
-  id: string; 
-  timestamp: string; 
-  agent: string; 
-  message: string; 
-  severity: 'low' | 'medium' | 'high' | 'critical';
-};
-type ModelUsage = { 
-  model: string; 
-  provider: string; 
-  calls: number; 
-  promptTokens: number; 
-  completionTokens: number; 
+type ModelUsage = {
+  model: string;
+  provider: string;
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
   cost: number;
   isFree?: boolean;
 };
@@ -53,7 +76,9 @@ type SupervisorStatus = {
   supervisor: { status: string; routing_policy: string; max_concurrency: number | null; token_budget: number | null; token_used: number | null; uptime: number | null };
   agents: AgentNode[];
   models: ModelUsage[];
-  errors: AgentError[];
+  errors: ClassifiedError[];
+  subsystems?: SubsystemTile[];
+  trace_id?: string;
   activity?: ActivityLog[];
   degraded?: Record<string, string>;
   source?: SourceState;
@@ -108,6 +133,28 @@ function SourceBadge({ source }: { source: SourceState | undefined }) {
   );
 }
 
+// Status → css class for a subsystem tile value.
+function subsystemClass(status: string): string {
+  switch (status) {
+    case 'HEALTHY':
+    case 'ACTIVE':
+      return styles.subsystemHealthy;
+    case 'DEGRADED':
+      return styles.subsystemDegraded;
+    case 'UNAVAILABLE':
+      return styles.subsystemUnavailable;
+    default:
+      return '';
+  }
+}
+
+const SUBSYSTEM_LABEL: Record<SubsystemTile['name'], string> = {
+  supervisor: 'Supervisor',
+  python: 'Python',
+  llm_gateway: 'LLM Gateway',
+  nine_router: '9Router',
+};
+
 type AdvisorStatus = {
   enabled: boolean;
   calls: number;
@@ -124,6 +171,7 @@ type AdvisorResult = {
   content?: string;
   model?: string;
   is_fallback?: boolean;
+  classified_error?: ClassifiedError | null;
   usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number; cost_usd: number; latency_s: number };
   guardrails?: Record<string, unknown>;
 };
@@ -131,7 +179,9 @@ type AdvisorResult = {
 export default function AIControlPage() {
   const [agents, setAgents] = useState<AgentNode[]>([]);
   const [activity, setActivity] = useState<ActivityLog[]>([]);
-  const [errors, setErrors] = useState<AgentError[]>([]);
+  const [errors, setErrors] = useState<ClassifiedError[]>([]);
+  const [subsystems, setSubsystems] = useState<SubsystemTile[]>([]);
+  const [traceId, setTraceId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<number | null>(null);
   const [models, setModels] = useState<ModelUsage[]>([]);
   const [reasoning, setReasoning] = useState('');
@@ -140,6 +190,9 @@ export default function AIControlPage() {
   const [loading, setLoading] = useState(true);
   const [modelPage, setModelPage] = useState(1);
   const [modelPageSize, setModelPageSize] = useState(10);
+  // TASK 04: retry policy — only retryable errors may be retried.
+  const [retryBusy, setRetryBusy] = useState(false);
+  const [retriedAt, setRetriedAt] = useState<string | null>(null);
   // LLM Advisor (ide #1) — advisory-only, guardrail fail-closed.
   const [advisorStatus, setAdvisorStatus] = useState<AdvisorStatus | null>(null);
   const [advisorRole, setAdvisorRole] = useState('market');
@@ -153,12 +206,26 @@ export default function AIControlPage() {
         if (!res.ok) {
           setSource('unavailable');
           setLoadError(res.status);
+          // A 503 from the page endpoint carries a classified body — surface the
+          // real layer (Python unavailable / endpoint 5xx), never "agent error".
+          try {
+            const body = await res.json();
+            if (body?.taxonomy) {
+              setErrors([body.taxonomy as ClassifiedError]);
+              setTraceId(body.trace_id ?? body.taxonomy.trace_id ?? null);
+            }
+            if (Array.isArray(body?.subsystems)) setSubsystems(body.subsystems as SubsystemTile[]);
+          } catch {
+            /* body not JSON — keep the HTTP status */
+          }
         } else {
           const data = (await res.json()) as SupervisorStatus & { degraded?: Record<string, string> };
           setSupervisorStatus(data);
           setAgents(Array.isArray(data.agents) ? data.agents : []);
           setModels(Array.isArray(data.models) ? data.models : []);
           setErrors(Array.isArray(data.errors) ? data.errors : []);
+          setSubsystems(Array.isArray(data.subsystems) ? data.subsystems : []);
+          setTraceId(data.trace_id ?? null);
           setActivity(Array.isArray(data.activity) ? data.activity : []);
           setSource(data.source === 'live' ? 'live' : 'unavailable');
           setLoadError(null);
@@ -167,6 +234,24 @@ export default function AIControlPage() {
         console.error('Failed to fetch supervisor status:', err);
         setSource('unavailable');
         setLoadError(0);
+        // Network failure is a NODE_API-level (or Python) fault, not an agent.
+        setErrors([
+          {
+            code: 'NODE_API_UNAVAILABLE',
+            layer: 'node_api',
+            trace_id: null,
+            service: 'node_api',
+            endpoint: '/ai-control/status',
+            status_code: null,
+            agent: null,
+            event_id: null,
+            model: null,
+            provider: null,
+            timestamp: new Date().toISOString(),
+            message: 'Node control-plane API tidak terjangkau.',
+            retryable: true,
+          },
+        ]);
       }
 
       try {
@@ -200,6 +285,28 @@ export default function AIControlPage() {
 
   useAutoRefresh(load);
 
+  // Retry policy: only retryable errors may be retried. Auth/4xx/data-guard/
+  // model-unavailable errors are NOT retried (they need an operator fix).
+  // `isRetryable` is the authoritative policy; fall back to the backend flag
+  // when the code is present so the UI and backend can never disagree.
+  const retryableErrors = useMemo(
+    () => errors.filter((e) => (e.code ? isRetryable(e.code) && e.retryable : e.retryable)),
+    [errors],
+  );
+  const nonRetryableErrors = useMemo(() => errors.filter((e) => !retryableErrors.includes(e)), [errors, retryableErrors]);
+  const canRetry = retryableErrors.length > 0 && !retryBusy;
+
+  const onRetry = useCallback(async () => {
+    if (!canRetry) return;
+    setRetryBusy(true);
+    try {
+      await load();
+      setRetriedAt(new Date().toISOString());
+    } finally {
+      setRetryBusy(false);
+    }
+  }, [canRetry, load]);
+
   const totalTokens = models.reduce((sum, m) => sum + m.promptTokens + m.completionTokens, 0);
   const totalCost = models.reduce((sum, m) => sum + m.cost, 0);
   const totalCalls = models.reduce((sum, m) => sum + m.calls, 0);
@@ -207,6 +314,9 @@ export default function AIControlPage() {
   const modelPageCount = Math.max(1, Math.ceil(models.length / modelPageSize));
   const safeModelPage = Math.min(modelPage, modelPageCount);
   const visibleModels = models.slice((safeModelPage - 1) * modelPageSize, safeModelPage * modelPageSize);
+
+  const activeAgentCount = agents.filter((a) => a.status === 'active').length;
+  const errorAgentCount = agents.filter((a) => a.status === 'error' || a.errors > 0).length;
 
   return (
     <AppShell
@@ -217,7 +327,8 @@ export default function AIControlPage() {
     >
 
         <div className={styles.pageBody}>
-          {/* Load failure — explicit HTTP status + retry (never a silent empty UI) */}
+          {/* Load failure — explicit HTTP status + retry (never a silent empty UI).
+              The cause is the REAL layer: Python unavailable ≠ agent error. */}
           {loadError !== null && (
             <section className={styles.card}>
               <div className={styles.empty}>
@@ -231,12 +342,61 @@ export default function AIControlPage() {
             </section>
           )}
 
-          {/* Partial data notice (Node reports which upstreams are unavailable) */}
-          {supervisorStatus && 'degraded' in supervisorStatus && (supervisorStatus as { degraded?: Record<string, string> }).degraded ? (
+          {/* TASK 04 — subsystem health tiles. Every tile is derived from a REAL
+              probe; unknown → UNAVAILABLE (never a fabricated HEALTHY). */}
+          <section className={styles.card}>
+            <h2>Status subsistem</h2>
+            <div className={styles.subsystemGrid}>
+              {subsystems.length > 0 ? (
+                subsystems.map((tile) => (
+                  <div key={tile.name} className={styles.subsystemTile}>
+                    <span className={styles.subsystemTileLabel}>{SUBSYSTEM_LABEL[tile.name]}</span>
+                    <span className={`${styles.subsystemTileValue} ${subsystemClass(tile.status)}`}>
+                      {tile.status}
+                    </span>
+                    {tile.detail && <span className={styles.subsystemDetail}>{tile.detail}</span>}
+                    {tile.code && <span className={styles.subsystemCode}>{tile.code}</span>}
+                  </div>
+                ))
+              ) : (
+                <div className={styles.subsystemTile}>
+                  <span className={styles.subsystemTileLabel}>Subsistem</span>
+                  <span className={`${styles.subsystemTileValue} ${styles.subsystemUnavailable}`}>
+                    {loading ? '…' : 'UNAVAILABLE'}
+                  </span>
+                  <span className={styles.subsystemDetail}>Status subsistem belum tersedia.</span>
+                </div>
+              )}
+              {/* Agents tile — real active/error counts from the agent list. */}
+              <div className={styles.subsystemTile}>
+                <span className={styles.subsystemTileLabel}>Agents</span>
+                <span className={styles.subsystemTileValue}>
+                  <span className={styles.subsystemHealthy}>{activeAgentCount} active</span>
+                  {' / '}
+                  <span className={errorAgentCount > 0 ? styles.subsystemUnavailable : styles.subsystemHealthy}>
+                    {errorAgentCount} error
+                  </span>
+                </span>
+                <span className={styles.subsystemDetail}>{agents.length} terdaftar</span>
+              </div>
+            </div>
+            {/* Global trace id — visible whenever the page has a request trace. */}
+            <div className={styles.traceBar}>
+              <span>Trace:</span>
+              <code>{traceId ?? '—'}</code>
+              {retriedAt && <span>Retry terakhir: {fmtDateTime(retriedAt)}</span>}
+            </div>
+          </section>
+
+          {/* Partial data notice (Node reports which upstreams are unavailable).
+              Each value is now a taxonomy CODE, not the word "unavailable". */}
+          {supervisorStatus && 'degraded' in supervisorStatus && supervisorStatus.degraded ? (
             <section className={styles.card}>
               <div className={styles.empty}>
                 Sebagian subsistem tidak tersedia:{' '}
-                {Object.keys((supervisorStatus as { degraded: Record<string, string> }).degraded).join(', ')}
+                {Object.entries(supervisorStatus.degraded)
+                  .map(([k, v]) => `${k} (${v})`)
+                  .join(', ')}
               </div>
             </section>
           ) : null}
@@ -277,7 +437,7 @@ export default function AIControlPage() {
                       <small>{agent.type}</small>
                     </div>
                     <span className={`${styles.badge} ${
-                      agent.status === 'active' ? styles.success : 
+                      agent.status === 'active' ? styles.success :
                       agent.status === 'error' ? styles.danger : styles.muted
                     }`}>
                       {agent.status}
@@ -310,7 +470,58 @@ export default function AIControlPage() {
                     )}
                     {agent.errors > 0 && (
                       <span className={styles.errorBadge}>{agent.errors} error</span>
-                    )}                  </div>
+                    )}
+                  </div>
+                  {/* TASK 04 — if this agent errored, show the REAL cause, not
+                      a generic "agent error". Cause/Provider/Model/Retryable/
+                      Last event/Trace. */}
+                  {agent.lastError && (
+                    <dl className={styles.agentErrorDetail}>
+                      <dt>Status</dt>
+                      <dd>
+                        <span className={styles.errorBadge}>ERROR</span>
+                      </dd>
+                      <dt>Cause</dt>
+                      <dd>
+                        <span className={styles.causeChip}>{agent.lastError.code}</span>{' '}
+                        <span>{causeLabel(agent.lastError.code)}</span>
+                      </dd>
+                      <dt>Layer</dt>
+                      <dd><code>{agent.lastError.layer}</code></dd>
+                      {agent.lastError.provider && (
+                        <>
+                          <dt>Provider</dt>
+                          <dd><code>{agent.lastError.provider}</code></dd>
+                        </>
+                      )}
+                      {agent.lastError.model && (
+                        <>
+                          <dt>Model</dt>
+                          <dd><code>{agent.lastError.model}</code></dd>
+                        </>
+                      )}
+                      {agent.lastError.status_code !== null && (
+                        <>
+                          <dt>HTTP</dt>
+                          <dd><code>{agent.lastError.status_code}</code></dd>
+                        </>
+                      )}
+                      <dt>Retryable</dt>
+                      <dd className={agent.lastError.retryable ? styles.retryableYes : styles.retryableNo}>
+                        {agent.lastError.retryable ? 'YES' : 'NO'}
+                      </dd>
+                      {agent.lastError.event_id && (
+                        <>
+                          <dt>Last event</dt>
+                          <dd><code>{agent.lastError.event_id}</code></dd>
+                        </>
+                      )}
+                      <dt>Trace</dt>
+                      <dd><code>{agent.lastError.trace_id ?? traceId ?? '—'}</code></dd>
+                      <dt>Message</dt>
+                      <dd>{agent.lastError.message}</dd>
+                    </dl>
+                  )}
                 </div>
               ))}
             </div>
@@ -344,7 +555,7 @@ export default function AIControlPage() {
                       <td>{log.action}</td>
                       <td>
                         <span className={`${styles.statusBadge} ${
-                          log.status === 'success' ? styles.statusSuccess : 
+                          log.status === 'success' ? styles.statusSuccess :
                           log.status === 'warning' ? styles.statusWarning : styles.statusError
                         }`}>
                           {log.status}
@@ -365,29 +576,69 @@ export default function AIControlPage() {
             </div>
           </section>
 
-          {/* Agent Errors */}
+          {/* Errors — taxonomy-classified. Header is the real layer, NOT the
+              generic phrase "agent error". Each row shows cause/layer/provider/
+              model/HTTP/retryable/trace. */}
           {errors.length > 0 && (
             <section className={styles.card}>
-              <h2>Error agent</h2>
+              <h2>Error (terklasifikasi)</h2>
               <div className={styles.errorList}>
-                {errors.map((err) => (
-                  <div key={err.id} className={styles.errorItem}>
+                {errors.map((err, idx) => (
+                  <div key={`${err.code}-${err.timestamp}-${idx}`} className={styles.errorItem}>
                     <div className={styles.errorIcon}>!</div>
                     <div className={styles.errorContent}>
                       <div className={styles.errorHeader}>
-                        <strong>{err.agent}</strong>
+                        <strong>
+                          {err.agent ? callsignFor(err.agent) : err.layer}
+                          {' · '}
+                          <span className={styles.causeChip}>{err.code}</span>
+                        </strong>
                         <code>{fmtDateTime(err.timestamp)}</code>
                       </div>
                       <p>{err.message}</p>
+                      <dl className={styles.agentErrorDetail}>
+                        <dt>Layer</dt>
+                        <dd><code>{err.layer}</code></dd>
+                        {err.service && (<><dt>Service</dt><dd><code>{err.service}</code></dd></>)}
+                        {err.endpoint && (<><dt>Endpoint</dt><dd><code>{err.endpoint}</code></dd></>)}
+                        {err.status_code !== null && (<><dt>HTTP</dt><dd><code>{err.status_code}</code></dd></>)}
+                        {err.provider && (<><dt>Provider</dt><dd><code>{err.provider}</code></dd></>)}
+                        {err.model && (<><dt>Model</dt><dd><code>{err.model}</code></dd></>)}
+                        {err.event_id && (<><dt>Event</dt><dd><code>{err.event_id}</code></dd></>)}
+                        <dt>Retryable</dt>
+                        <dd className={err.retryable ? styles.retryableYes : styles.retryableNo}>
+                          {err.retryable ? 'YES' : 'NO'}
+                        </dd>
+                        <dt>Trace</dt>
+                        <dd><code>{err.trace_id ?? '—'}</code></dd>
+                      </dl>
                     </div>
-                    <span className={`${styles.badge} ${
-                      err.severity === 'high' || err.severity === 'critical' ? styles.danger : 
-                      err.severity === 'medium' ? styles.warning : styles.muted
-                    }`}>
-                      {err.severity}
+                    <span className={`${styles.badge} ${err.retryable ? styles.danger : styles.muted}`}>
+                      {causeLabel(err.code)}
                     </span>
                   </div>
                 ))}
+              </div>
+
+              {/* Retry policy — only retryable errors are retried. */}
+              <div className={styles.traceBar}>
+                <span>
+                  Retryable: <strong>{retryableErrors.length}</strong> · Tidak retryable:{' '}
+                  <strong>{nonRetryableErrors.length}</strong>
+                </span>
+                <button
+                  type="button"
+                  className={styles.retryButton}
+                  disabled={!canRetry}
+                  title={
+                    canRetry
+                      ? 'Coba ulang error yang retryable'
+                      : 'Tidak ada error retryable (auth/4xx/data-guard/model tidak di-retry)'
+                  }
+                  onClick={onRetry}
+                >
+                  {retryBusy ? 'Mencoba…' : 'Retry error retryable'}
+                </button>
               </div>
             </section>
           )}
@@ -494,6 +745,14 @@ export default function AIControlPage() {
               ) : (
                 <div className={styles.empty}>
                   Ditolak: {advisorResult.reason}
+                  {advisorResult.classified_error && (
+                    <small>
+                      {' '}Penyebab: <span className={styles.causeChip}>{advisorResult.classified_error.code}</span>{' '}
+                      ({advisorResult.classified_error.layer}) ·{' '}
+                      {advisorResult.classified_error.provider ?? '—'}/{advisorResult.classified_error.model ?? '—'} ·{' '}
+                      retryable={advisorResult.classified_error.retryable ? 'YES' : 'NO'}
+                    </small>
+                  )}
                   {advisorResult.guardrails && (
                     <small>
                       {' '}Guardrail: aktif={String(advisorResult.guardrails.enabled)} · budget={String(advisorResult.guardrails.budget_ok)} · data={String(advisorResult.guardrails.data_ok)}

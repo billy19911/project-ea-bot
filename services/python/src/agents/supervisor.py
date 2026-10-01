@@ -130,15 +130,95 @@ def build_display_agent_results(results: dict[str, Any]) -> dict[str, Any]:
 
 
 def _record_activity(
-    name: str, signal: str, confidence: float, error: bool = False, event_type: str = ""
+    name: str,
+    signal: str,
+    confidence: float,
+    error: bool = False,
+    event_type: str = "",
+    error_detail: Any = None,
 ) -> None:
     """Best-effort record of one agent run for realtime metrics (fail-safe)."""
     try:
         from .activity import get_activity_tracker
 
-        get_activity_tracker().record(name, signal, confidence, error=error, event_type=event_type)
+        get_activity_tracker().record(
+            name, signal, confidence, error=error, event_type=event_type, error_detail=error_detail
+        )
     except Exception:  # noqa: BLE001 - metrics must never break the pipeline
         pass
+
+
+def _classify_agent_exception(
+    exc: BaseException, agent_name: str, event_type: str
+) -> dict[str, Any]:
+    """Classify an agent-run exception into the TASK 04 taxonomy (fail-safe).
+
+    Distinguishes LLM provider failures (503/5xx/timeout) from a plain agent
+    exception so AI Control can name the real layer instead of "agent error".
+
+    Args:
+        exc: The exception raised while running the agent.
+        agent_name: Routing key of the agent that failed.
+        event_type: Event type that triggered the run (for context).
+
+    Returns:
+        A classified-error dict (never raises).
+    """
+    try:
+        from ..llm.errors import classify_llm_exception
+
+        message = str(exc) or exc.__class__.__name__
+        # LLM/provider-shaped exceptions carry a status code or a provider
+        # marker; a bare KeyError/ValueError is a plain agent exception.
+        looks_llm = (
+            _extract_exc_status(exc) is not None
+            or "llm" in exc.__class__.__name__.lower()
+            or "openai" in exc.__class__.__module__.lower()
+            or "timeout" in message.lower()
+            or "503" in message
+        )
+        if looks_llm:
+            return classify_llm_exception(exc, agent=agent_name, event_id=event_type or None)
+        from ..llm.errors import classify  # noqa: PLC0415 - lazy, fail-safe
+
+        if "timeout" in message.lower():
+            return classify(
+                "AGENT_TIMEOUT",
+                message=message,
+                service="agent",
+                agent=agent_name,
+                event_id=event_type or None,
+            )
+        return classify(
+            "AGENT_EXCEPTION",
+            message=message,
+            service="agent",
+            agent=agent_name,
+            event_id=event_type or None,
+        )
+    except Exception:  # noqa: BLE001 - classification must never break the pipeline
+        return {
+            "code": "AGENT_EXCEPTION",
+            "layer": "agent",
+            "agent": agent_name,
+            "event_id": event_type or None,
+            "message": str(exc) or exc.__class__.__name__,
+            "retryable": True,
+        }
+
+
+def _extract_exc_status(exc: BaseException) -> Optional[int]:
+    """Best-effort HTTP status extraction from a provider exception."""
+    for attr in ("status_code", "status"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, int):
+            return value
+    response = getattr(exc, "response", None)
+    if response is not None:
+        value = getattr(response, "status_code", None)
+        if isinstance(value, int):
+            return value
+    return None
 
 
 def _coerce_float(value: Any) -> Optional[float]:
@@ -558,7 +638,14 @@ class SupervisorAgent(BaseAgent):
                         "confidence": 0.0,
                         "reasons": [f"Error running agent: {exc}"],
                     }
-                    _record_activity(agent_name, "NEUTRAL", 0.0, error=True, event_type=event_type)
+                    _record_activity(
+                        agent_name,
+                        "NEUTRAL",
+                        0.0,
+                        error=True,
+                        event_type=event_type,
+                        error_detail=_classify_agent_exception(exc, agent_name, event_type),
+                    )
                 else:
                     result = normalize_agent_output(result, agent_name)
                     _record_activity(
