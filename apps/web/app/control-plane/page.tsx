@@ -1156,7 +1156,7 @@ function TabContent({ tab, data }: { tab: Tab; data: Record<string, unknown> }) 
 // ---------------------------------------------------------------------------
 // Lists configured + auto-detected terminals, lets the operator select the
 // active one and arm/disarm real execution for it. Honesty rules: statuses
-// come straight from the API (running/attached/eligible), arming is disabled
+// come straight from the API (running/attached), arming is disabled
 // without a token, and the arm button never claims success when the API
 // rejected the request. Accounts may be LIVE — arming stays a manual step.
 
@@ -1174,7 +1174,7 @@ type TerminalEntry = {
   id: string;
   label?: string;
   folder?: string;
-  execution_allowed?: boolean;
+  armable?: boolean;
   source?: string;
   running?: boolean;
   pid?: number | null;
@@ -1467,27 +1467,20 @@ function TerminalPanel({
                     </button>
                   </td>
                   <td>
-                    {t.execution_allowed ? (
-                      <span className={`${s.badge} ${s.warning}`}>eligible</span>
-                    ) : (
-                      <span className={`${s.badge} ${s.muted}`}>data-only</span>
-                    )}{' '}
                     {t.armed && <span className={`${s.badge} ${s.danger}`}>ARMED</span>}{' '}
                     {/* B-9: toggle arm per terminal (banyak terminal bisa armed
-                        sekaligus). Nonaktif bila execution:false / tidak jalan. */}
+                        sekaligus). B-10: nonaktif hanya bila terminal tidak berjalan (execution flag diabaikan). */}
                     <button
                       className={s.tab}
-                      disabled={busy || !hasToken || !t.running || !t.execution_allowed}
+                      disabled={busy || !hasToken || !t.running}
                       title={
                         !hasToken
                           ? 'Membutuhkan token di localStorage (ea-bot-token)'
                           : !t.running
                             ? 'Terminal tidak berjalan'
-                            : !t.execution_allowed
-                              ? 'Terminal tidak diizinkan eksekusi (execution: false di mt5_terminals.json)'
-                              : t.armed
-                                ? `Matikan arm untuk terminal ${t.id}`
-                                : `Izinkan eksekusi order nyata untuk terminal ${t.id}`
+                            : t.armed
+                              ? `Matikan arm untuk terminal ${t.id}`
+                              : `Izinkan eksekusi order nyata untuk terminal ${t.id}`
                       }
                       onClick={() =>
                         post(
@@ -1548,7 +1541,7 @@ function TerminalPanel({
       )}
 
       {/* Zona berbahaya: hanya aksi yang mengizinkan eksekusi order nyata. */}
-      {selected?.execution_allowed && (
+      {selected?.running && (
         <div className={s.dangerZone}>
           <strong>Zona berbahaya</strong>
           <button

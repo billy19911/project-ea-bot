@@ -927,7 +927,7 @@ class TestScenarioLLiveDisarmed:
         # No explicit ARM → stays disarmed.
         view = terminals_mod.list_terminals()
         entry = next(e for e in view["terminals"] if e["id"] == "vito2")
-        assert entry["execution_allowed"] is True
+        assert entry["armable"] is True
         assert entry["armed"] is False
         assert terminals_mod.is_execution_armed() is False
         assert terminals_mod.get_fanout_targets() == []

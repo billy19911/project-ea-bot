@@ -6,7 +6,7 @@ Covers the safety model end to end, without a real MT5 terminal:
 - config parsing (missing/malformed files degrade safely),
 - terminal listing merged with auto-detected running processes,
 - selection re-attaches the binding but does NOT change any arm state (B-9),
-- arming requires: running + execution-enabled (attach NOT required, B-9),
+- arming requires: running only (attach NOT required; execution flag ignored, B-10),
 - ``execution_permitted()`` is the final gate consulted by the engine,
 - ``/mt5/terminals`` endpoints report the registry honestly.
 
@@ -136,16 +136,16 @@ class TestListTerminals:
         assert by_id["a"]["pid"] == 1111
         assert by_id["a"]["source"] == "config"
         assert by_id["a"]["attached"] is True
-        assert by_id["a"]["execution_allowed"] is False
+        assert by_id["a"]["armable"] is True  # a is running
 
         assert by_id["c"]["running"] is False  # in config, not running
-        assert by_id["c"]["execution_allowed"] is True  # eligible candidate
+        assert by_id["c"]["armable"] is False  # c NOT running → not armable
 
         assert view["selected_id"] is None
         assert view["execution_armed"] is False
         assert view["attached_path"] == r"C:\mt\A"
 
-    def test_auto_detected_terminal_is_data_only(self, monkeypatch, tmp_path):
+    def test_auto_detected_terminal_is_armable(self, monkeypatch, tmp_path):
         _use_config(monkeypatch, tmp_path, CONFIG_TWO)
         monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\Z", 2222))
         monkeypatch.setattr(terminals, "_detect_attached_path", lambda: None)
@@ -154,7 +154,8 @@ class TestListTerminals:
         auto = [t for t in view["terminals"] if t["source"] == "auto"]
         assert len(auto) == 1
         assert auto[0]["id"] == "auto-2222"
-        assert auto[0]["execution_allowed"] is False  # never armable
+        assert auto[0]["armable"] is True  # running by definition
+        assert auto[0]["fanout_target"] is True
 
     def test_scan_without_psutil_returns_empty(self, monkeypatch):
         real_import = __import__
@@ -291,16 +292,19 @@ class TestArmExecution:
         assert result["ok"] is False
         assert terminals.is_execution_armed() is False
 
-    def test_arm_requires_execution_flag(self, monkeypatch, tmp_path):
-        """Terminal A is running+attached but NOT execution-enabled → reject."""
+    def test_arm_execution_flag_ignored(self, monkeypatch, tmp_path):
+        """Terminal A has execution:false but is running → arm SUCCEEDS (B-10)."""
         _use_config(monkeypatch, tmp_path, CONFIG_TWO)
         monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\A"))
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\A"))
         terminals._selected_id = "a"
 
         result = terminals.arm_execution(True)
-        assert result["ok"] is False
-        assert "execution" in result["message"].lower()
+        assert result["ok"] is True
+        assert terminals.is_execution_armed() is True
+
+        # Cleanup: leave nothing armed.
+        assert terminals.arm_execution(False)["ok"] is True
         assert terminals.is_execution_armed() is False
 
     def test_arm_requires_running_terminal(self, monkeypatch, tmp_path):
@@ -348,20 +352,19 @@ class TestArmExecution:
         assert result["armed"] is False
         assert terminals.is_execution_armed() is False
 
-    def test_arm_config_flag_is_reread_without_restart(self, monkeypatch, tmp_path):
-        """Flipping "execution" in the JSON file takes effect immediately."""
+    def test_arm_not_gated_by_execution_flag(self, monkeypatch, tmp_path):
+        """B-10: the "execution" config flag no longer gates arming at all."""
         path = _use_config(monkeypatch, tmp_path, CONFIG_TWO)
         monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\A"))
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\A"))
         terminals._selected_id = "a"
 
-        assert terminals.arm_execution(True)["ok"] is False  # flag still false
-
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        payload["terminals"][0]["execution"] = True
-        path.write_text(json.dumps(payload), encoding="utf-8")
-
+        # Flag is still false in the file — arm succeeds regardless.
         assert terminals.arm_execution(True)["ok"] is True
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert payload["terminals"][0]["execution"] is False
+        assert terminals.is_execution_armed() is True
+        assert terminals.arm_execution(False)["ok"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -473,8 +476,12 @@ class TestArmTerminal:
         assert result["armed"] is False
         assert terminals.get_armed_terminals() == ["demo2"]
 
-    def test_arm_execution_false_terminal_rejected(self, monkeypatch, tmp_path):
-        """vito2 (LIVE) has execution:false → arm must be rejected (SAFETY)."""
+    def test_arm_execution_false_terminal_allowed(self, monkeypatch, tmp_path):
+        """vito2 has execution:false but is running → arm is ALLOWED (B-10).
+
+        The per-terminal arm switch is the only execution control; running is
+        the sole eligibility condition.
+        """
         _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
         monkeypatch.setattr(
             terminals,
@@ -484,9 +491,12 @@ class TestArmTerminal:
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\VITO2"))
 
         result = terminals.arm_terminal("vito2", True)
-        assert result["ok"] is False
-        assert result["armed"] is False
-        assert "execution" in result["message"].lower()
+        assert result["ok"] is True
+        assert result["armed"] is True
+        assert terminals.get_armed_terminals() == ["vito2"]
+
+        # Cleanup: disarm.
+        assert terminals.arm_terminal("vito2", False)["ok"] is True
         assert terminals.get_armed_terminals() == []
 
     def test_arm_unknown_terminal_rejected(self, monkeypatch, tmp_path):
@@ -594,7 +604,7 @@ class TestArmTerminalEndpoint:
         assert result["execution_armed"] is True
         assert result["armed_terminals"] == ["bil2"]
 
-    def test_arm_endpoint_rejects_ineligible(self, monkeypatch, tmp_path):
+    def test_arm_endpoint_allows_execution_false_terminal(self, monkeypatch, tmp_path):
         from mt5.endpoints import arm_terminal_by_id as endpoint
 
         _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
@@ -606,7 +616,13 @@ class TestArmTerminalEndpoint:
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\VITO2"))
 
         result = _run(endpoint("vito2", type("R", (), {"armed": True})()))
-        assert getattr(result, "status_code", None) == 400
+        assert result["ok"] is True
+        assert result["armed"] is True
+        assert result["armed_terminals"] == ["vito2"]
+
+        # Cleanup: disarm via the endpoint.
+        _run(endpoint("vito2", type("R", (), {"armed": False})()))
+        assert terminals.get_armed_terminals() == []
 
 
 # ---------------------------------------------------------------------------

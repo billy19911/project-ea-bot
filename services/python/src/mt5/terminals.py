@@ -9,14 +9,16 @@ tracks the selected/attached terminal, and gates real order execution
 behind an explicit arm switch.
 
 Safety model (accounts may be LIVE):
-1. ``"execution": true`` in the config file marks a terminal as *eligible*
-   to receive real orders. Every terminal defaults to ``false``.
-2. Even when eligible, execution stays OFF until the operator explicitly
-   arms the selected terminal (dashboard -> POST /mt5/terminals/arm).
+1. The ONLY eligibility condition for arming is that the terminal is
+   currently RUNNING (B-10). The legacy ``"execution"`` flag in the config
+   file is deprecated and ignored for every gate.
+2. Execution stays OFF until the operator explicitly arms a terminal
+   (dashboard -> POST /mt5/terminals/arm). The per-terminal arm switch is the
+   only execution control.
 3. Switching the selected terminal only MOVES the data binding; it does not
    change any terminal's arm state (multi-arm, B-9 Lanjutan).
 4. Auto-detected terminals (running but not in the config file) can be
-   selected for data, but can never be armed for execution.
+   selected for data AND armed for execution (they are running by definition).
 """
 
 from __future__ import annotations
@@ -302,7 +304,9 @@ def list_terminals() -> dict[str, Any]:
                 "label": t["label"],
                 "path": t["path"],
                 "folder": folder,
-                "execution_allowed": t["execution"],
+                # B-10: armable == running. The legacy "execution" config flag
+                # is deprecated and ignored for every gate.
+                "armable": bool(proc is not None),
                 "source": "config",
                 "running": proc is not None,
                 "pid": proc["pid"] if proc else None,
@@ -318,7 +322,9 @@ def list_terminals() -> dict[str, Any]:
             }
         )
 
-    # Running terminals that are not in the config file (data-only).
+    # Running terminals that are not in the config file. B-10: they are running
+    # by definition, so they are armable and participate in fan-out once armed
+    # (no per-account sizing → the engine falls back to the signal volume).
     for r in running:
         key = _norm(r["folder"])
         if key in matched_running:
@@ -331,7 +337,7 @@ def list_terminals() -> dict[str, Any]:
                 "label": ntpath.basename(r["folder"]) or r["exe"],
                 "path": r["exe"],
                 "folder": r["folder"],
-                "execution_allowed": False,
+                "armable": True,
                 "source": "auto",
                 "running": True,
                 "pid": r["pid"],
@@ -339,22 +345,16 @@ def list_terminals() -> dict[str, Any]:
                 "selected": bool(st.get("selected")),
                 "armed": bool(st.get("armed")),
                 "account": _account_cache.get(key),
-                # Auto-detected terminals are never fan-out targets (not in the
-                # config → no per-account sizing, not execution-eligible).
                 "risk_per_trade_pct": None,
                 "fixed_lot": None,
                 "max_lot_per_trade": None,
-                "fanout_target": False,
+                "fanout_target": True,
             }
         )
 
     # Armed terminals are derived from the entries we just built (avoids a
     # recursive call back into list_terminals from get_armed_terminals).
-    armed_terminals = [
-        e["id"]
-        for e in entries
-        if e.get("armed") and e.get("execution_allowed") and e.get("running")
-    ]
+    armed_terminals = [e["id"] for e in entries if e.get("armed") and e.get("armable")]
 
     return {
         "terminals": entries,
@@ -739,11 +739,12 @@ def is_execution_armed() -> bool:
 
 
 def get_armed_terminals() -> list[str]:
-    """Return terminal ids armed AND eligible (config ``execution: true`` + running).
+    """Return terminal ids armed AND running.
 
-    Fail-closed: a terminal whose config flag flipped to ``false`` or whose
-    process stopped is dropped from the list (the operator armed it, but it is
-    no longer eligible). The execution engine loops this list.
+    B-10: running is the only eligibility condition; the ``execution`` config
+    flag is ignored. Fail-closed: a terminal whose process stopped is dropped
+    from the list (the operator armed it, but it is no longer running). The
+    execution engine loops this list.
     """
     view = list_terminals()
     by_id = {t["id"]: t for t in view["terminals"]}
@@ -753,8 +754,6 @@ def get_armed_terminals() -> list[str]:
             continue
         entry = by_id.get(tid)
         if entry is None:
-            continue
-        if not entry.get("execution_allowed"):
             continue
         if not entry.get("running"):
             continue
@@ -826,10 +825,10 @@ def get_fanout_targets() -> list[dict[str, Any]]:
     """Return the terminal entries eligible to receive a fan-out order (F1).
 
     A fan-out target must satisfy ALL of:
-    - ``execution: true`` in the config (real-money accounts opt in explicitly),
     - currently running,
     - ARMED by the operator (per-terminal on/off switch),
-    - ``fanout_target`` true (operator has not excluded it).
+    - ``fanout_target`` true (operator has not excluded it)
+      (B-10: no execution flag gate).
 
     Fail-closed: any doubt drops the terminal. Returns full entries (with
     ``path`` + per-account sizing fields) so the fan-out engine can re-attach
@@ -838,8 +837,6 @@ def get_fanout_targets() -> list[dict[str, Any]]:
     view = list_terminals()
     targets: list[dict[str, Any]] = []
     for entry in view["terminals"]:
-        if not entry.get("execution_allowed"):
-            continue
         if not entry.get("running"):
             continue
         if not entry.get("armed"):
@@ -853,17 +850,16 @@ def get_fanout_targets() -> list[dict[str, Any]]:
 def arm_terminal(terminal_id: str, armed: bool) -> dict[str, Any]:
     """Arm or disarm a SPECIFIC terminal (multi-terminal B-9).
 
-    Arming requires ALL of:
-    - the terminal exists in the registry,
-    - it is currently running,
-    - it is marked ``"execution": true`` in the config file (LIVE accounts
-      must opt in explicitly; ``vito2`` ships with ``execution: false``).
+    Arming requires the terminal to exist in the registry and be currently
+    running. Any running terminal (demo or live) can be armed — the
+    per-terminal arm switch is the ONLY execution control (B-10). An attached
+    binding is NOT required.
 
-    An attached binding is NOT required (B-9 Lanjutan): the process-wide
-    MetaTrader5 binding is a DATA pointer only; the execution engine re-attaches
-    to each armed account right before sending that account's order (canonical
-    fan-out), and the single-terminal path validates "binding attached to an
-    armed terminal" separately in the pipeline/engine.
+    The process-wide MetaTrader5 binding is a DATA pointer only; the execution
+    engine re-attaches to each armed account right before sending that
+    account's order (canonical fan-out), and the single-terminal path
+    validates "binding attached to an armed terminal" separately in the
+    pipeline/engine.
 
     Disarming is always allowed (fail-safe).
     """
@@ -898,17 +894,6 @@ def arm_terminal(terminal_id: str, armed: bool) -> dict[str, Any]:
             "terminal_id": terminal_id,
             "armed": False,
             "message": f"Terminal '{terminal_id}' is not running.",
-        }
-    if not entry["execution_allowed"]:
-        return {
-            "ok": False,
-            "terminal_id": terminal_id,
-            "armed": False,
-            "message": (
-                f"Terminal '{terminal_id}' is not execution-enabled. Set "
-                '"execution": true for it in mt5_terminals.json, then arm again '
-                "(the config is re-read on every request — no restart needed)."
-            ),
         }
 
     _state_for(terminal_id)["armed"] = True

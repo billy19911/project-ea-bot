@@ -4,7 +4,7 @@
 Runs without a real MT5 terminal: MetaTrader5, the connector and the symbol
 resolver are stubbed. Covers:
 
-- ``get_fanout_targets`` selection (running + execution:true + armed + fanout_target),
+- ``get_fanout_targets`` selection (running + armed + fanout_target; B-10: execution flag ignored),
 - ``update_terminal_config`` writing per-account sizing to mt5_terminals.json,
 - ``ExecutionEngine.execute_order_fanout``: re-attach per terminal, distance →
   absolute SL/TP, per-account lot, partial failure, binding restore,
@@ -60,7 +60,7 @@ def _running(folder: str, pid: int = 1):
 # ---------------------------------------------------------------------------
 # get_fanout_targets
 # ---------------------------------------------------------------------------
-def test_fanout_targets_require_running_armed_eligible(monkeypatch, tmp_path):
+def test_fanout_targets_require_running_armed(monkeypatch, tmp_path):
     _use_config(
         monkeypatch,
         tmp_path,
@@ -72,12 +72,21 @@ def test_fanout_targets_require_running_armed_eligible(monkeypatch, tmp_path):
             ]
         },
     )
-    # Only terminal A is running; B (armed) is NOT running → excluded.
-    monkeypatch.setattr(terminals, "scan_running_terminals", _running(r"C:\mt\A"))
+    # A and C are running (C is execution:false → B-10: no flag gate); B (armed)
+    # is NOT running → excluded.
+    monkeypatch.setattr(
+        terminals,
+        "scan_running_terminals",
+        lambda: [
+            {"pid": 1, "exe": r"C:\mt\A\terminal64.exe", "folder": r"C:\mt\A"},
+            {"pid": 3, "exe": r"C:\mt\C\terminal64.exe", "folder": r"C:\mt\C"},
+        ],
+    )
     terminals._state_for("a")["armed"] = True
     terminals._state_for("b")["armed"] = True  # armed but not running
+    terminals._state_for("c")["armed"] = True  # execution:false but running → included
     targets = terminals.get_fanout_targets()
-    assert [t["id"] for t in targets] == ["a"]
+    assert [t["id"] for t in targets] == ["a", "c"]
 
 
 def test_fanout_targets_excluded_by_flag(monkeypatch, tmp_path):
@@ -238,6 +247,57 @@ def test_fanout_dispatches_to_all_targets(monkeypatch):
     for p in mt5.sent:
         assert p["sl"] == pytest.approx(99.0)
         assert p["tp"] == pytest.approx(103.0)
+
+
+def test_fanout_sizing_falls_back_to_signal_volume(monkeypatch):
+    """B-10: terminals WITHOUT sizing config trade the signal volume (not 0)."""
+    mt5 = _FakeMT5()
+    _install_fakes(monkeypatch, mt5)
+    engine = engine_mod.ExecutionEngine(simulation_mode=False)
+
+    # 2 targets with NO fixed_lot / risk_per_trade_pct (id/label/path only).
+    targets = [
+        {"id": "a", "label": "A", "path": r"C:\mt\A\terminal64.exe"},
+        {"id": "b", "label": "B", "path": r"C:\mt\B\terminal64.exe"},
+    ]
+    out = engine.execute_order_fanout(_request(), targets=targets, risk_price=1.0, tp_price=3.0)
+    assert out.target_count == 2
+    assert out.succeeded == 2 and out.failed == 0
+    # Signal volume of _request() is 0.10 → both terminals use it.
+    vols = sorted(p["volume"] for p in mt5.sent)
+    assert vols == [0.10, 0.10]
+
+    # Priority still holds: fixed_lot wins, unsized target falls back.
+    mt5.sent.clear()
+    targets = [
+        {"id": "a", "label": "A", "path": r"C:\mt\A\terminal64.exe", "fixed_lot": 0.05},
+        {"id": "b", "label": "B", "path": r"C:\mt\B\terminal64.exe"},
+    ]
+    out = engine.execute_order_fanout(_request(), targets=targets, risk_price=1.0, tp_price=3.0)
+    assert out.succeeded == 2 and out.failed == 0
+    vols = sorted(p["volume"] for p in mt5.sent)
+    assert vols == [0.05, 0.10]
+
+
+def test_size_for_terminal_fallback_and_clamp(monkeypatch):
+    """B-10 unit: fallback volume, clamp to max_lot_per_trade, fail-closed at 0."""
+    mt5 = _FakeMT5()
+    _install_fakes(monkeypatch, mt5)
+    engine = engine_mod.ExecutionEngine(simulation_mode=False)
+
+    # No sizing configured → fallback volume (rounded to volume_step 0.01).
+    assert engine._size_for_terminal({}, 100.0, 1.0, "XAUUSD", fallback_volume=0.10) == 0.10
+
+    # Fallback above max_lot_per_trade → clamped down.
+    assert (
+        engine._size_for_terminal(
+            {"max_lot_per_trade": 0.05}, 100.0, 1.0, "XAUUSD", fallback_volume=0.50
+        )
+        == 0.05
+    )
+
+    # No fallback → fail-closed (0.0).
+    assert engine._size_for_terminal({}, 100.0, 1.0, "XAUUSD", fallback_volume=0.0) == 0.0
 
 
 def test_fanout_partial_failure_continues(monkeypatch):

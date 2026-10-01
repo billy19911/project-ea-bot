@@ -13,7 +13,8 @@
       "path": "E:\\MT5 XYNN EA\\MetaTrader 5 VITO 2\\terminal64.exe",
       "execution": false,
       "fixed_lot": 0.01,
-      "risk_per_trade_pct": 1.0
+      "risk_per_trade_pct": 1.0,
+      "fanout_target": true
     },
     {
       "id": "bil1",

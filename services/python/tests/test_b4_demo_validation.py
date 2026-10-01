@@ -56,9 +56,7 @@ class FakeSymbolInfo:
 
 
 class FakeAccount:
-    def __init__(
-        self, login=49662626, server="Demo-Server", trade_mode=0, balance=10000.0
-    ):
+    def __init__(self, login=49662626, server="Demo-Server", trade_mode=0, balance=10000.0):
         self.login = login
         self.server = server
         self.trade_mode = trade_mode
@@ -126,9 +124,7 @@ class FakeMT5:
         for i in range(15)
     ]
 
-    def __init__(
-        self, *, account=None, tick=None, symbol_info=None, init_ok=True, rates=None
-    ):
+    def __init__(self, *, account=None, tick=None, symbol_info=None, init_ok=True, rates=None):
         self._account = account if account is not None else FakeAccount()
         self._tick = tick if tick is not None else FakeTick()
         self._symbol_info = symbol_info if symbol_info is not None else FakeSymbolInfo()
@@ -198,7 +194,8 @@ class FakeTerminals:
                     "running": self.running,
                     "selected": True,
                     "attached": True,
-                    "execution_allowed": True,
+                    # B-10: armable mirrors running; execution_allowed is gone.
+                    "armable": True,
                 }
             ]
         }
@@ -346,9 +343,7 @@ def test_dry_run_performs_order_check_only(evidence_paths):
 
 def test_dry_run_order_check_failure_aborts(evidence_paths):
     mt5 = FakeMT5()
-    mt5.order_check = lambda payload: FakeOrderCheck(
-        retcode=10030, comment="IOC rejected"
-    )
+    mt5.order_check = lambda payload: FakeOrderCheck(retcode=10030, comment="IOC rejected")
     h = _make_harness(mt5, dry_run=True)
     code = h.run()
     assert code == 2
@@ -390,10 +385,7 @@ def test_open_position_guard_records_ledger_entry(evidence_paths):
     assert h.evidence["ledger_intent_id"] == "b4-t1-555777"
     ledger = Path(h.evidence["ledger_path"])
     assert ledger.exists()
-    states = [
-        json.loads(line)["state"]
-        for line in ledger.read_text(encoding="utf-8").splitlines()
-    ]
+    states = [json.loads(line)["state"] for line in ledger.read_text(encoding="utf-8").splitlines()]
     assert "position_confirmed" in states
 
 
@@ -638,9 +630,7 @@ def test_parse_send_result_retcode_zero_is_success():
     from src.execution.engine import ExecutionEngine
 
     engine = ExecutionEngine()
-    res = engine._parse_send_result(
-        SimpleNamespace(retcode=0, order=42, deal=42, comment="ok")
-    )
+    res = engine._parse_send_result(SimpleNamespace(retcode=0, order=42, deal=42, comment="ok"))
     assert res["success"] is True
     assert res["ticket"] == 42
 
@@ -670,9 +660,7 @@ class FakeConnector:
 class FakeProviders:
     """Provider object exposing the four reconciliation hooks."""
 
-    def __init__(
-        self, *, internal_positions=None, broker_positions=None, broker_orders=None
-    ):
+    def __init__(self, *, internal_positions=None, broker_positions=None, broker_orders=None):
         self._ip = list(internal_positions or [])
         self._bp = list(broker_positions or [])
         self._bo = list(broker_orders or [])
@@ -780,9 +768,7 @@ def test_reconcile_symbol_and_magic_gaps_classified_expected(evidence_paths):
     _seed_t1_evidence(json_path, 555001)
     providers = FakeProviders(
         internal_positions=[{"ticket": 555001, "symbol": "", "volume": 0.01}],
-        broker_positions=[
-            {"ticket": 555001, "symbol": "#BTCUSD", "volume": 0.01, "magic": 84004}
-        ],
+        broker_positions=[{"ticket": 555001, "symbol": "#BTCUSD", "volume": 0.01, "magic": 84004}],
     )
     h = _make_reconcile_harness(providers)
     assert h.run_reconcile() == 0
@@ -838,9 +824,7 @@ def test_reconcile_uses_durable_ledger(evidence_paths):
 
     providers = MT5ReconciliationProviders(
         connector=SimpleNamespace(
-            get_positions=lambda: [
-                {"ticket": 555001, "symbol": "#BTCUSD", "volume": 0.01}
-            ],
+            get_positions=lambda: [{"ticket": 555001, "symbol": "#BTCUSD", "volume": 0.01}],
             get_orders=lambda: [],
         )
     )
@@ -900,7 +884,8 @@ class FakeArmStateTerminals:
                     "selected": True,
                     "attached": True,
                     "armed": self.armed,
-                    "execution_allowed": True,
+                    # B-10: armable mirrors running; execution_allowed is gone.
+                    "armable": True,
                 }
             ],
             "selected_id": "bil2" if self.selected else None,
@@ -1122,15 +1107,15 @@ def test_recovery_pre_and_post_merge_into_both_stages(evidence_paths):
     )
     # Pre process (armed), then a FRESH terminals instance for post (cleared).
     assert (
-        _make_recovery_harness(
-            providers, FakeArmStateTerminals(armed=True)
-        ).run_recovery_check("pre")
+        _make_recovery_harness(providers, FakeArmStateTerminals(armed=True)).run_recovery_check(
+            "pre"
+        )
         == 0
     )
     assert (
-        _make_recovery_harness(
-            providers, FakeArmStateTerminals(armed=False)
-        ).run_recovery_check("post")
+        _make_recovery_harness(providers, FakeArmStateTerminals(armed=False)).run_recovery_check(
+            "post"
+        )
         == 0
     )
 

@@ -1187,7 +1187,9 @@ class ExecutionEngine:
             tp = entry + sign * tp_price if tp_price and tp_price > 0 else 0.0
             row["price"] = entry
 
-            volume = self._size_for_terminal(target, entry, risk_price, symbol)
+            volume = self._size_for_terminal(
+                target, entry, risk_price, symbol, fallback_volume=request.volume
+            )
             row["volume"] = volume
             if volume <= 0:
                 row["error_message"] = "Volume lot tidak valid (0)."
@@ -1227,12 +1229,17 @@ class ExecutionEngine:
         entry: float,
         risk_price: float,
         symbol: str = "",
+        fallback_volume: float = 0.0,
     ) -> float:
         """Size the lot for ONE terminal from its account equity (F1/F3).
 
         Priority: ``fixed_lot`` (explicit) → ``risk_per_trade_pct`` of the
-        terminal's equity given the SL distance → fall back to the base request
-        volume. Always clamped to ``[min_volume, max_lot_per_trade or max_volume]``.
+        terminal's equity given the SL distance → signal volume
+        (``fallback_volume``) when the terminal has no sizing configured
+        (B-10: auto-detected/running terminals without config must still trade
+        the signal lot). Always clamped to
+        ``[min_volume, max_lot_per_trade or max_volume]`` + normalized to
+        ``volume_step``.
         """
         fixed = target.get("fixed_lot")
         max_lot = target.get("max_lot_per_trade") or self.max_volume
@@ -1264,7 +1271,9 @@ class ExecutionEngine:
                     else:
                         vol = 0.0
                 else:
-                    vol = 0.0
+                    # No sizing configured → fall back to the signal volume
+                    # (B-10: auto-detected/running terminals without config).
+                    vol = float(fallback_volume or 0.0)
             if vol <= 0:
                 return 0.0
             # Clamp to broker volume constraints.

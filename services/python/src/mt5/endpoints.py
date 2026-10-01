@@ -92,9 +92,10 @@ class TerminalConfigRequest(BaseModel):
 async def list_terminals() -> dict:
     """List configured + auto-detected terminals with live status.
 
-    Read-only. ``execution_allowed`` reflects the per-terminal config flag;
-    ``execution_armed`` reflects the operator's explicit arm switch (off by
-    default, always off after switching terminals).
+    Read-only. ``armable`` reflects whether the terminal is currently running;
+    any running terminal can be armed. ``execution_armed`` reflects the
+    operator's explicit arm switch (off by default, always off after switching
+    terminals).
     """
     return terminal_manager.list_terminals()
 
@@ -118,9 +119,9 @@ async def select_terminal(request: SelectTerminalRequest):
 async def arm_terminal(request: ArmRequest):
     """Arm or disarm real order execution for the selected terminal (legacy).
 
-    Arming requires: a running selected terminal and ``"execution": true`` in
-    mt5_terminals.json. An attached binding is NOT required (B-9 Lanjutan).
-    Returns 400 otherwise.
+    Arming requires: a running selected terminal (B-10: the ``"execution"``
+    config flag is ignored). An attached binding is NOT required (B-9
+    Lanjutan). Returns 400 otherwise.
     Kept for backward compat — the per-terminal endpoint below is preferred.
     """
     result = terminal_manager.arm_execution(request.armed)
@@ -134,10 +135,10 @@ async def arm_terminal(request: ArmRequest):
 async def arm_terminal_by_id(terminal_id: str, request: ArmTerminalRequest):
     """Arm or disarm ONE specific terminal (multi-terminal B-9).
 
-    Arming requires: the terminal is in the registry, currently running, and
-    marked ``"execution": true`` in mt5_terminals.json (LIVE accounts such as
-    ``vito2`` ship with ``execution: false`` and can never be armed). Returns
-    400 otherwise. Disarm is always allowed (fail-safe).
+    Arming requires: the terminal is in the registry and currently running
+    (B-10: the ``"execution"`` config flag is ignored — any running terminal,
+    demo or live, can be armed). Returns 400 otherwise. Disarm is always
+    allowed (fail-safe).
 
     Multiple terminals can be armed simultaneously; the execution engine loops
     ``get_armed_terminals()``. The process-wide MT5 binding still only

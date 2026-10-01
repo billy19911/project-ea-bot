@@ -416,8 +416,8 @@ def test_live_terminal_configurable_but_starts_disarmed(tmp_path, monkeypatch):
 
     view = terminals.list_terminals()
     entry = next(e for e in view["terminals"] if e["id"] == "vito2")
-    # Configured as eligible, but DISARMED by default.
-    assert entry["execution_allowed"] is True
+    # Configured and RUNNING, but DISARMED by default.
+    assert entry["armable"] is True
     assert entry["armed"] is False
     # No armed terminals → nothing is a fan-out target.
     assert terminals.get_fanout_targets() == []
