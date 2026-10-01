@@ -43,6 +43,7 @@ export const KNOB_LABELS: Record<string, string> = {
   sltp_progressive_enabled: 'Kunci profit saat TP2',
   sltp_trailing_enabled: 'Trailing stop setelah TP2',
   fanout_enabled: 'Fan-out ke banyak terminal MT5',
+  canonical_fanout_enabled: 'Fan-out kanonik multi-akun (1 sinyal → semua akun)',
   zone_entry_enabled: 'Entry tunggu zona OB/FVG',
 };
 
@@ -71,6 +72,10 @@ export const KNOB_HELP: Record<string, string> = {
     'Trailing stop berbasis ATR — hanya aktif setelah harga melewati TP2.',
   fanout_enabled:
     'Satu analisa dikirim ke SEMUA terminal MT5 yang running + execution:true + di-arm. ' +
+    'Default NONAKTIF. Uji di DEMO dulu sebelum dipakai di akun LIVE.',
+  canonical_fanout_enabled:
+    'Satu SINYAL kanonik dikirim ke SEMUA akun yang di-arm — binding di-attach ulang ' +
+    'per akun sebelum order dikirim (ukuran lot dihitung dari equity akun masing-masing). ' +
     'Default NONAKTIF. Uji di DEMO dulu sebelum dipakai di akun LIVE.',
   zone_entry_enabled:
     'Entry menunggu harga masuk zona Order Block / Fair Value Gap searah bias ' +
