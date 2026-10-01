@@ -151,6 +151,8 @@ class EventQueue:
         self._queue: list[PrioritizedEvent] = []
         self._lock = threading.Lock()
         self._sequence = 0
+        self._high_water = 0
+        self._rejected = 0
 
     @property
     def max_size(self) -> int:
@@ -172,13 +174,25 @@ class EventQueue:
         """
         with self._lock:
             if len(self._queue) >= self._max_size:
+                self._rejected += 1
                 return False
             priority = _event_priority(event)
             self._queue.append(
                 PrioritizedEvent(event=event, priority=priority, sequence=self._sequence)
             )
             self._sequence += 1
+            self._high_water = max(self._high_water, len(self._queue))
             return True
+
+    def stats(self) -> dict[str, int]:
+        """Return current depth and lifetime queue pressure counters."""
+        with self._lock:
+            return {
+                "queue_size": len(self._queue),
+                "queue_capacity": self._max_size,
+                "queue_high_water": self._high_water,
+                "queue_rejected": self._rejected,
+            }
 
     def dequeue(self) -> Optional[DetectedEvent]:
         """Remove and return highest-priority event, else None."""

@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from src.live_readiness.certification_evidence import _collect_gate_d
 
 # The 7 Gate D drills the collector must know about.
@@ -272,6 +273,13 @@ def test_runner_exposes_seven_drills(runner_module) -> None:
     assert set(DRILLS) == names
 
 
+def _mock_healthy_stack(runner_module, monkeypatch) -> None:
+    monkeypatch.setattr(runner_module.OpsDrillRunner, "_preflight", lambda self: (True, "healthy"))
+    monkeypatch.setattr(
+        runner_module.OpsDrillRunner, "_verify_after", lambda self: (True, "healthy")
+    )
+
+
 def test_runner_timeout_wraps_slow_drill(runner_module, monkeypatch, tmp_path) -> None:
     """A hanging drill must be cut off by the per-drill timeout, and the
     rollback must still run in ``finally`` — nothing is left un-rolled-back."""
@@ -288,6 +296,7 @@ def test_runner_timeout_wraps_slow_drill(runner_module, monkeypatch, tmp_path) -
         events.append("rollback")
 
     monkeypatch.setattr(runner_module, "run_mt5_restart", _hang)
+    _mock_healthy_stack(runner_module, monkeypatch)
     store = tmp_path / "ops_drills.jsonl"
     runner = runner_module.OpsDrillRunner(drills_path=store, drill_timeout_s=1)
 
@@ -299,9 +308,7 @@ def test_runner_timeout_wraps_slow_drill(runner_module, monkeypatch, tmp_path) -
     assert "drill-end" not in events
 
 
-def test_runner_rollback_runs_on_exception(
-    runner_module, monkeypatch, tmp_path
-) -> None:
+def test_runner_rollback_runs_on_exception(runner_module, monkeypatch, tmp_path) -> None:
     events: list[str] = []
 
     def _boom(*_args, **_kwargs) -> None:
@@ -312,6 +319,7 @@ def test_runner_rollback_runs_on_exception(
         events.append("rollback")
 
     monkeypatch.setattr(runner_module, "run_llm_failure", _boom)
+    _mock_healthy_stack(runner_module, monkeypatch)
     store = tmp_path / "ops_drills.jsonl"
     runner = runner_module.OpsDrillRunner(drills_path=store, drill_timeout_s=5)
 
@@ -322,13 +330,12 @@ def test_runner_rollback_runs_on_exception(
     assert "drill exploded" in record["detail"]
 
 
-def test_runner_persists_record_with_honest_fields(
-    runner_module, monkeypatch, tmp_path
-) -> None:
+def test_runner_persists_record_with_honest_fields(runner_module, monkeypatch, tmp_path) -> None:
     def _ok(*_args, **_kwargs) -> dict:
         return {"ok": True}
 
     monkeypatch.setattr(runner_module, "run_pc_restart", _ok)
+    _mock_healthy_stack(runner_module, monkeypatch)
     store = tmp_path / "ops_drills.jsonl"
     runner = runner_module.OpsDrillRunner(drills_path=store, drill_timeout_s=5)
 
@@ -352,6 +359,7 @@ def test_runner_records_failure_when_verification_fails(
         return {"ok": False, "detail": "service tidak sehat sesudah drill"}
 
     monkeypatch.setattr(runner_module, "run_telegram_failure", _not_ok)
+    _mock_healthy_stack(runner_module, monkeypatch)
     store = tmp_path / "ops_drills.jsonl"
     runner = runner_module.OpsDrillRunner(drills_path=store, drill_timeout_s=5)
 

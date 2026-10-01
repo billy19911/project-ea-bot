@@ -73,12 +73,24 @@ def test_queue_max_size_eviction():
     assert q.enqueue(e2)
     # Queue full, third enqueue returns False
     assert not q.enqueue(e3)
+    assert q.stats() == {
+        "queue_size": 2,
+        "queue_capacity": 2,
+        "queue_high_water": 2,
+        "queue_rejected": 1,
+    }
     # Dequeue two events, ensure they are the first two
     d1 = q.dequeue()
     d2 = q.dequeue()
     assert d1.event_type in (EventTypes.BREAKOUT, EventTypes.DOJI)
     assert d2.event_type in (EventTypes.DOJI, EventTypes.BREAKOUT)
     assert q.dequeue() is None
+    assert q.stats() == {
+        "queue_size": 0,
+        "queue_capacity": 2,
+        "queue_high_water": 2,
+        "queue_rejected": 1,
+    }
 
 
 # ---------------------------------------------------------------------------

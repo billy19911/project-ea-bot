@@ -184,6 +184,9 @@ class TestStats:
             "running": False,
             "backpressure": False,
             "queue_size": 0,
+            "queue_capacity": 1000,
+            "queue_high_water": 0,
+            "queue_rejected": 0,
             "event_gate_enabled": False,
             "event_trace_size": 0,
         }

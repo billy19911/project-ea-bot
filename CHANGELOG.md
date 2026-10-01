@@ -3,6 +3,11 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Queue pressure stats (EventQueue) + isolasi test ops-drill
+- `services/python/src/trading/event_engine.py`: `EventQueue.stats()` — `queue_size` / `queue_capacity` / `queue_high_water` / `queue_rejected` (thread-safe; enqueue saat penuh menambah `queue_rejected`).
+- `services/python/src/trading/scheduler.py`: `stats()` menyertakan blok queue dari `queue.stats()`.
+- Test: kontrak stats di `test_event_engine.py`/`test_scheduler.py`; `test_ops_drills.py` preflight/verify di-mock agar runner test tidak bergantung stack live. Full suite **3149 passed**. Semua terminal tetap DISARMED.
+
 ### Fixed — Timezone MT5: epoch broker → UTC sejati (hapus anomaly +10 jam / "Ruang Komite kosong")
 - Akar bug: `connector`/`retrieval` memakai `datetime.fromtimestamp()` (naive local UTC+7) sementara gate freshness (`feed_loop`/`market_freshness`) menganggap naive = UTC; offset server broker **+3h** → bar tampak +~10 jam "di masa depan" → gate `clock_anomaly_received_before_bar` menolak semua snapshot → Ruang Komite kosong.
 - `services/python/src/mt5/broker_time.py` (baru): `from_broker_epoch()` / `to_broker_epoch()`, `BROKER_UTC_OFFSET = +3h` (diukur dari server broker). Keluar = `ts − 3h` (aware UTC); masuk = `dt + 3h` (int broker epoch).

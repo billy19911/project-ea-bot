@@ -535,6 +535,7 @@ class AutonomousScheduler:
     # ------------------------------------------------------------------
     def stats(self) -> dict[str, Any]:
         """Return a snapshot of scheduler statistics."""
+        queue_stats = self.queue.stats()
         stats: dict[str, Any] = {
             "events_processed": self._stats["events_processed"],
             "events_skipped": self._stats["events_skipped"],
@@ -545,7 +546,7 @@ class AutonomousScheduler:
             "errors": self._stats["errors"],
             "running": self._running,
             "backpressure": self.backpressure,
-            "queue_size": len(self.queue),
+            **queue_stats,
             "event_gate_enabled": self.event_gate is not None,
             "event_trace_size": len(self._event_trace),
         }
