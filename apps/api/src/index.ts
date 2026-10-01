@@ -1077,6 +1077,19 @@ app.get('/market/health', async (req, res) => {
   await sendProxy(res, `/market/health?symbol=${encodeURIComponent(symbol)}`, undefined, req);
 });
 
+// TASK 09: cached market-snapshot freshness / staleness (proxied from Python).
+app.get('/market/snapshot-status', async (req, res) => {
+  const log = (req as any).log;
+  const symbol = String(req.query.symbol || 'XAUUSD');
+  log.info({ symbol }, 'market.snapshot_status');
+  await sendProxy(
+    res,
+    `/market/snapshot-status?symbol=${encodeURIComponent(symbol)}`,
+    undefined,
+    req,
+  );
+});
+
 // Phase 33: full broker symbol specification (proxied from Python).
 app.get('/market/symbol-spec', async (req, res) => {
   const log = (req as any).log;

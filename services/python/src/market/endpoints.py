@@ -93,10 +93,58 @@ async def get_economic_calendar(
 async def market_data_health(
     symbol: str = Query(default="XAUUSD", description="Symbol to check health")
 ) -> dict:
-    """Return market data health for *symbol* (Phase 32)."""
+    """Return market data health for *symbol* (Phase 32).
+
+    TASK 09 adds a ``snapshot_freshness`` block describing the cached market
+    snapshot the committee would run on (age, timeframe, stale/fresh verdict),
+    so staleness is visible in the UI/status surface.
+    """
     from .health import compute_market_data_health
 
-    return compute_market_data_health(symbol)
+    health = compute_market_data_health(symbol)
+    health["snapshot_freshness"] = _snapshot_freshness_status(symbol)
+    return health
+
+
+def _snapshot_freshness_status(symbol: str) -> dict:
+    """Freshness verdict for the cached market snapshot (fail-safe).
+
+    A missing snapshot is reported as ``NO_DATA`` (never a fake "fresh").
+    """
+    from trading.market_snapshot import get_latest_snapshot
+
+    snap = get_latest_snapshot(symbol)
+    if not isinstance(snap, dict) or not snap:
+        return {
+            "status": "NO_DATA",
+            "fresh": None,
+            "symbol": symbol,
+            "age_seconds": None,
+            "bar_timestamp": None,
+            "received_at": None,
+            "timeframe": None,
+            "max_allowed_age": None,
+        }
+    from trading.market_freshness import evaluate_freshness
+
+    verdict = evaluate_freshness(snap, timeframe=snap.get("timeframe"), symbol=symbol)
+    out = verdict.to_dict()
+    out["status"] = "FRESH" if verdict.accepted else "STALE"
+    out["symbol"] = symbol
+    return out
+
+
+@router.get("/snapshot-status")
+async def market_snapshot_status(
+    symbol: str = Query(default="XAUUSD", description="Symbol to check"),
+) -> dict:
+    """Return the freshness/staleness of the cached market snapshot (TASK 09).
+
+    This is the ``/market/status``-style surface the UI uses to show whether
+    the engine is analysing fresh data or has gone stale (a stalled feed must
+    be visible, not silently traded on).
+    """
+    return {"status": "ok", "snapshot": _snapshot_freshness_status(symbol)}
 
 
 @router.get("/symbol-spec")

@@ -197,10 +197,51 @@ def market_snapshot(symbol: str = "XAUUSD") -> dict[str, Any]:
         snap = get_latest_snapshot(symbol) or {}
         for k in ("regime", "volatility", "news_state", "session", "timeframe"):
             out[k] = snap.get(k, UNKNOWN)
+        # TASK 09: surface staleness of the cached market snapshot so the UI
+        # shows whether the committee would run on fresh data. Absent snapshot →
+        # UNKNOWN (never a fake "fresh").
+        out["snapshot"] = _snapshot_freshness(symbol, snap)
     except Exception:
         for k in ("regime", "volatility", "news_state", "session", "timeframe"):
             out[k] = UNKNOWN
+        out["snapshot"] = {"fresh": UNKNOWN, "age_seconds": None}
     return mask_secrets(out)
+
+
+def _snapshot_freshness(symbol: str, snap: Any) -> dict[str, Any]:
+    """Return the freshness verdict for the cached snapshot (TASK 09).
+
+    Fail-safe: a missing snapshot or an import error yields ``UNKNOWN`` —
+    the UI must never be told "fresh" on unverifiable data.
+    """
+    if not isinstance(snap, dict) or not snap:
+        return {
+            "fresh": UNKNOWN,
+            "status": "NO_DATA",
+            "age_seconds": None,
+            "bar_timestamp": None,
+            "received_at": None,
+            "timeframe": UNKNOWN,
+            "max_allowed_age": None,
+            "reason": "",
+        }
+    try:
+        from trading.market_freshness import evaluate_freshness
+
+        v = evaluate_freshness(snap, timeframe=snap.get("timeframe"), symbol=symbol)
+        return {
+            "fresh": v.accepted,
+            "status": "FRESH" if v.accepted else "STALE",
+            "age_seconds": (round(v.age_seconds, 2) if v.age_seconds is not None else None),
+            "bar_timestamp": v.bar_timestamp,
+            "received_at": v.received_at,
+            "timeframe": v.timeframe or UNKNOWN,
+            "max_allowed_age": v.max_allowed_age,
+            "reason": v.reason,
+            "clock_anomaly": v.clock_anomaly,
+        }
+    except Exception:  # noqa: BLE001 - read model must never raise
+        return {"fresh": UNKNOWN, "status": UNKNOWN, "age_seconds": None}
 
 
 # ── Risk (§10) ─────────────────────────────────────────────────────────

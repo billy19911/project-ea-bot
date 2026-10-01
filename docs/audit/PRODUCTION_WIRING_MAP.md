@@ -250,6 +250,7 @@ first hop from a production root (`main.app` → router → module, or
 | `trading/entry_zones.py` | LIVE_RUNTIME | `trading/entry_adapter.py` | relative import |
 | `trading/level_plan.py` | LIVE_RUNTIME | `pipeline.py` | `rg "level_plan"` |
 | `trading/market_snapshot.py` | LIVE_RUNTIME | `feed_loop.py`, `pipeline.py`, `runtime.py`, `ops/readmodels.py` | `rg "market_snapshot"` |
+| `trading/market_freshness.py` | LIVE_RUNTIME | `pipeline.py` (Step 0.5 gate), `ops/readmodels.py`, `market/endpoints.py` | `rg "market_freshness"` |
 | `trading/trigger_engine.py` | LIVE_RUNTIME | `agents/orchestrator.py`, `pipeline.py`, `entry_adapter.py` | `rg "trigger_engine"` |
 | `trading/engine.py` | TEST_ONLY | only tests | `rg` → tests only |
 | `trading/entry_detectors.py` | ORPHANED | no src/test consumers found | `rg` → none |

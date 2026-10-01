@@ -98,6 +98,19 @@ function mergeRefreshWithHistory(prev: ChartData | null, incoming: ChartData): C
   };
 }
 
+// TASK 09: cached market-snapshot freshness (staleness must be visible in UI).
+type SnapshotFreshness = {
+  status?: string; // FRESH | STALE | NO_DATA | UNKNOWN
+  fresh?: boolean | null;
+  age_seconds?: number | null;
+  timeframe?: string | null;
+  max_allowed_age?: number | null;
+  bar_timestamp?: string | null;
+  received_at?: string | null;
+  reason?: string;
+  clock_anomaly?: boolean;
+};
+
 // Analysis response shape (additional to candles)
 type AnalysisData = {
   ok: boolean;
@@ -172,6 +185,7 @@ export default function MarketPage() {
 
   const [data, setData] = useState<ChartData | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
+  const [freshness, setFreshness] = useState<SnapshotFreshness | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -218,9 +232,11 @@ export default function MarketPage() {
     try {
       const qs = new URLSearchParams({ symbol, timeframe, bars: String(bars) });
       // Parallel fetch candlestick & analysis
-      const [candlesRes, analysisRes] = await Promise.all([
+      const [candlesRes, analysisRes, freshnessRes] = await Promise.all([
         apiFetch(`/chart/candles?${qs}`),
         apiFetch(`/chart/analysis?${qs}`),
+        // TASK 09: snapshot staleness (best-effort — never blocks the chart).
+        apiFetch(`/market/snapshot-status?symbol=${encodeURIComponent(symbol)}`).catch(() => null),
       ]);
       // Handle candlestick response
       if (!candlesRes.ok) {
@@ -260,6 +276,15 @@ export default function MarketPage() {
         if (analysisSigRef.current !== '') {
           analysisSigRef.current = '';
           setAnalysis(null);
+        }
+      }
+      // TASK 09: snapshot freshness (staleness visible, never fabricated).
+      if (freshnessRes && freshnessRes.ok && seq === reqSeq.current) {
+        try {
+          const fBody = await freshnessRes.json();
+          setFreshness((fBody?.snapshot ?? null) as SnapshotFreshness | null);
+        } catch {
+          /* best-effort */
         }
       }
     } catch {
@@ -495,6 +520,19 @@ export default function MarketPage() {
           </span>
         ) : null}
         {prov ? (<span className={styles.metaItem}>{barCount} bar · sumber {prov.source} · mode {prov.mode}</span>) : null}
+        {/* TASK 09: market-snapshot freshness — stale data must be visible. */}
+        {freshness ? (() => {
+          const st = (freshness.status ?? 'UNKNOWN').toUpperCase();
+          const cls = st === 'FRESH' ? styles.freshFresh : st === 'STALE' ? styles.freshStale : styles.freshUnknown;
+          const age = typeof freshness.age_seconds === 'number' ? `${freshness.age_seconds.toFixed(0)}s` : '—';
+          const cap = typeof freshness.max_allowed_age === 'number' ? `${freshness.max_allowed_age.toFixed(0)}s` : '—';
+          return (
+            <span className={`${styles.freshChip} ${cls}`} title={freshness.reason || ''}>
+              {st === 'FRESH' ? 'Data segar' : st === 'STALE' ? 'Data basi' : st === 'NO_DATA' ? 'Data basi: belum ada snapshot' : 'Data: tidak diketahui'}
+              {st !== 'NO_DATA' ? ` · ${age} / maks ${cap}${freshness.timeframe ? ` · ${freshness.timeframe}` : ''}` : ''}
+            </span>
+          );
+        })() : null}
         {liveUpdate ? (<span className={styles.metaItem}>live {liveUpdate.toLocaleTimeString('id-ID')}</span>) : null}
         {updatedAt ? (<span className={styles.metaItem}>chart {updatedAt.toLocaleTimeString('id-ID')}</span>) : null}
       </div>

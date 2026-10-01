@@ -250,6 +250,10 @@ class MarketFeedLoop:
         if not bars:
             return 0
 
+        # TASK 09: stamp the receive time ONCE per poll so every snapshot's
+        # ``age_seconds`` is measured against the same instant the bars landed.
+        received_at = datetime.now(timezone.utc)
+
         try:
             ohlcv = [self._bar_to_dict(bar) for bar in bars]
         except Exception as exc:  # noqa: BLE001 - malformed bars are skipped
@@ -268,7 +272,7 @@ class MarketFeedLoop:
             return 0
 
         self._fingerprints[symbol] = fingerprint
-        snapshot = self._build_snapshot(symbol, ohlcv, events)
+        snapshot = self._build_snapshot(symbol, ohlcv, events, received_at=received_at)
         if session is not None:
             try:
                 snapshot["session"] = session
@@ -355,6 +359,7 @@ class MarketFeedLoop:
         symbol: str,
         ohlcv: list[dict[str, Any]],
         events: list[Any],
+        received_at: Optional[datetime] = None,
     ) -> dict[str, Any]:
         """Build the market-evidence snapshot attached to every emitted event.
 
@@ -362,6 +367,13 @@ class MarketFeedLoop:
         close/high/low series, the computed market state (ADX/trend/ATR/BB
         width), the detected events themselves, and the volatility inputs —
         so specialists run on real evidence instead of an empty context.
+
+        TASK 09 also stamps the freshness triple every snapshot must carry:
+        ``bar_timestamp`` (close time of the newest bar), ``received_at`` (when
+        this loop received the bars) and ``age_seconds`` (= received_at −
+        bar_timestamp), plus ``timeframe`` and ``symbol``. The pipeline's
+        freshness gate rejects any snapshot whose age exceeds its
+        timeframe-aware limit, so a stalled feed cannot feed the committee.
         """
         closes = [float(bar.get("close", 0.0) or 0.0) for bar in ohlcv]
         highs = [float(bar.get("high", 0.0) or 0.0) for bar in ohlcv]
@@ -372,8 +384,20 @@ class MarketFeedLoop:
             if closes[i - 1]
         ]
         state = self._states.get(symbol)
+        received_at = received_at or datetime.now(timezone.utc)
+        bar_timestamp = self._bar_timestamp(ohlcv[-1]) if ohlcv else None
+        age_seconds: Optional[float] = None
+        if bar_timestamp is not None:
+            try:
+                age_seconds = (received_at - bar_timestamp).total_seconds()
+            except Exception:  # noqa: BLE001 - age is best-effort evidence
+                age_seconds = None
         snapshot: dict[str, Any] = {
             "symbol": symbol,
+            "timeframe": self.timeframe,
+            "bar_timestamp": bar_timestamp.isoformat() if bar_timestamp is not None else None,
+            "received_at": received_at.isoformat(),
+            "age_seconds": age_seconds,
             "prices": closes,
             "highs": highs,
             "lows": lows,
@@ -431,6 +455,39 @@ class MarketFeedLoop:
         """Return a cheap identity of the series (length, last time, last close)."""
         last = ohlcv[-1]
         return (len(ohlcv), str(last.get("time", "")), last.get("close"))
+
+    @staticmethod
+    def _bar_timestamp(bar: Any) -> Optional[datetime]:
+        """Return the newest bar's timestamp as an aware UTC datetime.
+
+        Bars come from MT5 as an object or dict; ``time`` is normally a
+        ``datetime`` (naive local from the connector) or an ISO string. We
+        normalise to UTC so the freshness gate compares like-for-like. Returns
+        ``None`` when the time is missing/unparseable (the snapshot then carries
+        a null ``bar_timestamp`` and the gate rejects it as UNKNOWN — fail
+        closed, never a silent "fresh").
+        """
+        raw = getattr(bar, "time", None) if not isinstance(bar, dict) else bar.get("time")
+        if raw is None or raw == "":
+            return None
+        try:
+            if isinstance(raw, datetime):
+                dt = raw
+            elif isinstance(raw, (int, float)):
+                dt = datetime.fromtimestamp(float(raw), tz=timezone.utc)
+            else:
+                text = str(raw).strip()
+                if not text:
+                    return None
+                if text.endswith("Z"):
+                    text = text[:-1] + "+00:00"
+                dt = datetime.fromisoformat(text)
+            # Naive → assume UTC (the connector stamps naive local; the gate
+            # only needs a consistent, monotone relationship, and UTC is the
+            # documented convention for received_at).
+            return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError, OverflowError, OSError):
+            return None
 
     # ------------------------------------------------------------------
     # Async lifecycle

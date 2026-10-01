@@ -13,11 +13,24 @@ Follow-up to the release-candidate audit:
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 
 import pytest
 
 from execution.engine import ExecutionEngine, OrderRequest
 from orchestration.pipeline import TradingPipeline
+
+
+def _fresh_meta(timeframe: str = "M5", symbol: str = "XAUUSD") -> dict:
+    """Freshness metadata (TASK 09) so a snapshot clears the freshness gate."""
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "bar_timestamp": now,
+        "received_at": now,
+        "age_seconds": 0.0,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +245,9 @@ def test_run_validation_uses_merged_snapshot_evidence():
             "symbol": "XAUUSD",
             "market_state": _MarketStateObject(close=4333.37, atr=3.05),
             "volatility": {"atr": 3.05, "price": 4333.37},
+            # TASK 09: a production snapshot always carries freshness metadata;
+            # a timestamp-less snapshot is now (correctly) rejected as UNKNOWN.
+            **_fresh_meta(),
         },
     }
 

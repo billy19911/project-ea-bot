@@ -22,6 +22,7 @@ No network and no real MT5 are used (fake connectors only).
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from orchestration.pipeline import TradingPipeline
@@ -30,16 +31,35 @@ from trading.feed_loop import MarketFeedLoop
 from trading.market_snapshot import clear_latest_snapshots, get_latest_snapshot, set_latest_snapshot
 
 
+def _fresh_meta(timeframe: str = "M5", symbol: str = "XAUUSD") -> dict:
+    """Freshness metadata (TASK 09) so snapshots clear the freshness gate."""
+    now = datetime.now(timezone.utc)
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "bar_timestamp": now.isoformat(),
+        "received_at": now.isoformat(),
+        "age_seconds": 0.0,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Helpers / fakes
 # ---------------------------------------------------------------------------
 def _bars(symbol: str = "XAUUSD", n: int = 60, start: float = 2000.0, step: float = 1.5):
-    """Build a strongly trending bar series (oldest → newest)."""
+    """Build a strongly trending bar series (oldest → newest).
+
+    The newest bar's timestamp is ~now so the snapshot clears the TASK 09
+    freshness gate (an old/future bar would be correctly rejected).
+    """
+    base = datetime.now(timezone.utc)
     bars = []
     price = start
     for i in range(n):
         open_ = price
         close = price + step
+        # Space bars one minute apart, ending at "now" for the newest bar.
+        bar_time = base.timestamp() - (n - 1 - i) * 60
         bars.append(
             SimpleNamespace(
                 symbol=symbol,
@@ -48,7 +68,7 @@ def _bars(symbol: str = "XAUUSD", n: int = 60, start: float = 2000.0, step: floa
                 low=open_ - 0.3,
                 close=close,
                 volume=1000.0,
-                time=f"2026-09-19T01:{i:02d}:00",
+                time=datetime.fromtimestamp(bar_time, tz=timezone.utc),
             )
         )
         price = close
@@ -171,6 +191,7 @@ def test_pipeline_merges_event_snapshot_into_analysis_context() -> None:
             "highs": [1.2, 1.3, 1.4],
             "lows": [0.9, 1.0, 1.1],
             "volatility": {"atr": 0.2},
+            **_fresh_meta(),
         },
     }
 
@@ -188,7 +209,7 @@ def test_pipeline_falls_back_to_cached_snapshot_for_manual_cycles() -> None:
     clear_latest_snapshots()
     set_latest_snapshot(
         "XAUUSD",
-        {"prices": [9.0, 9.5], "symbol": "XAUUSD"},
+        {"prices": [9.0, 9.5], "symbol": "XAUUSD", **_fresh_meta()},
     )
     supervisor = _CapturingSupervisor()
     pipeline = _pipeline(supervisor)
@@ -214,7 +235,7 @@ def test_pipeline_without_snapshot_is_unchanged() -> None:
 def test_explicit_context_wins_over_snapshot() -> None:
     """Caller-provided context must never be overwritten by cached evidence."""
     clear_latest_snapshots()
-    set_latest_snapshot("XAUUSD", {"prices": [1.0, 2.0]})
+    set_latest_snapshot("XAUUSD", {"prices": [1.0, 2.0], **_fresh_meta()})
     supervisor = _CapturingSupervisor()
     pipeline = _pipeline(supervisor)
 

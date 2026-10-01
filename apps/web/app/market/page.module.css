@@ -138,6 +138,22 @@
 }
 .liveSub { color: var(--text-muted); font-weight: 500; }
 
+/* TASK 09: market-snapshot freshness chip (age/staleness visible in the UI). */
+.freshChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border);
+}
+.freshFresh { color: var(--ok, #16a34a); border-color: color-mix(in srgb, var(--ok, #16a34a) 40%, var(--border)); }
+.freshStale { color: var(--danger, #dc2626); border-color: color-mix(in srgb, var(--danger, #dc2626) 45%, var(--border)); }
+.freshUnknown { color: var(--text-muted); }
+
 .liveToggle {
   display: inline-flex;
   align-items: center;

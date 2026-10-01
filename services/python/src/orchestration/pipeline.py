@@ -37,6 +37,7 @@ from trading.level_plan import (
     extract_price_atr,
     indicative_levels,
 )
+from trading.market_freshness import evaluate_freshness
 from trading.market_snapshot import get_latest_snapshot
 
 from .signal_registry import get_signal_registry, is_pending_guard_enabled
@@ -64,6 +65,9 @@ STATUS_ERROR = "ERROR"
 # A signal for this symbol is already live (PENDING/EXECUTING/OPEN) or in a
 # post-failure cooldown → the committee was intentionally NOT re-convened.
 STATUS_SIGNAL_PENDING = "SIGNAL_PENDING"
+# TASK 09: the market snapshot behind this event was stale or showed a clock
+# anomaly → the cycle is rejected fail-closed BEFORE the committee ever sees it.
+STATUS_STALE_MARKET_DATA = "STALE_MARKET_DATA"
 
 # Status values for an individual pipeline stage trace entry.
 STAGE_OK = "OK"
@@ -324,6 +328,12 @@ class TradingPipeline:
             exposing ``check_can_execute() -> (bool, reason)``. When supplied and
             it reports a critical internal↔MT5 mismatch, new orders are BLOCKED
             (fail-closed). Optional so existing callers are unaffected.
+        freshness_gate_enabled: TASK 09 — when True (default) a market snapshot
+            whose ``age_seconds`` exceeds its timeframe-aware limit, or that
+            shows a clock anomaly (received_at < bar_timestamp, future
+            timestamps, negative age) is rejected BEFORE the committee is
+            convened. Fail-closed for verified-bad data; a snapshot-less cycle
+            is unaffected.
     """
 
     def __init__(
@@ -353,6 +363,7 @@ class TradingPipeline:
         htf_min_strength: float = 0.0,
         signal_registry: Optional[Any] = None,
         pending_signal_guard: bool = True,
+        freshness_gate_enabled: bool = True,
         strategy_config_provider: Optional[Callable[[], Optional[dict[str, Any]]]] = None,
         fanout_enabled: Any = False,
         zone_entry_enabled: Any = False,
@@ -421,6 +432,11 @@ class TradingPipeline:
         self._signal_registry = signal_registry
         # Master switch for the pending-signal gate (env override honoured).
         self.pending_signal_guard = bool(pending_signal_guard) and is_pending_guard_enabled()
+        # TASK 09: market-freshness gate. When ON (default), a snapshot whose
+        # age exceeds its timeframe-aware limit, or that shows a clock anomaly,
+        # is rejected BEFORE the committee sees it. The gate is fail-CLOSED for
+        # verified-bad data and only skips when there is no snapshot to judge.
+        self.freshness_gate_enabled = bool(freshness_gate_enabled)
         # FOKUS #4: strategy config provider. When supplied it returns the ACTIVE
         # strategy's parameters (from StrategyRegistry); the pipeline applies the
         # risk/confidence knobs so activating a strategy really changes what the
@@ -543,6 +559,34 @@ class TradingPipeline:
                 result.add_stage("supervisor", STAGE_SKIPPED, gate_reason)
                 result.add_stage("risk", STAGE_SKIPPED, "signal sudah aktif")
                 result.add_stage("execution", STAGE_SKIPPED, "signal sudah aktif")
+                self._finalise(result, emit=False)
+                return result
+
+        # ── Step 0.5: Market-freshness gate (TASK 09) ───────────────────
+        # A market snapshot must be provably FRESH (age_seconds <= the
+        # timeframe-aware max, no clock anomaly) BEFORE it can become
+        # trade-ready context. This runs here — before ``_build_analysis_context``
+        # merges the snapshot and before the Supervisor/committee is convened —
+        # so stale data can never reach the committee as real evidence. The gate
+        # is fail-CLOSED for verified-bad data and fail-OPEN only when there is
+        # genuinely no snapshot to judge (a snapshot-less manual cycle keeps
+        # today's behaviour — there is no stale evidence to leak).
+        if self.freshness_gate_enabled:
+            try:
+                stale_reason = self._stale_snapshot_reason(event, result.symbol, context)
+            except Exception as exc:  # noqa: BLE001 - a broken gate must not fake "fresh"
+                stale_reason = f"freshness_gate_error:{type(exc).__name__}"
+                logger.warning("Freshness gate error for %s: %s", result.symbol, exc)
+            if stale_reason:
+                result.decision = "WAIT"
+                result.status = STATUS_STALE_MARKET_DATA
+                result.risk_reason = stale_reason
+                result.summary = stale_reason
+                result.add_stage("freshness", STAGE_BLOCKED, stale_reason)
+                result.add_stage("supervisor", STAGE_SKIPPED, "data pasar basi")
+                result.add_stage("risk", STAGE_SKIPPED, "data pasar basi")
+                result.add_stage("execution", STAGE_SKIPPED, "data pasar basi")
+                # Do NOT emit a trade report — a stale cycle is not a signal.
                 self._finalise(result, emit=False)
                 return result
 
@@ -940,6 +984,55 @@ class TradingPipeline:
         if not symbol:
             symbol = context.get("symbol")
         return str(symbol) if symbol else ""
+
+    @staticmethod
+    def _resolve_market_snapshot(
+        event: Any,
+        symbol: str,
+    ) -> Optional[dict[str, Any]]:
+        """Return the snapshot that would be merged into the analysis context.
+
+        Mirrors :meth:`_merge_market_snapshot`: an event-carried snapshot wins,
+        else the cached latest snapshot for the symbol. Returns ``None`` when
+        there is no snapshot to judge (a genuine snapshot-less manual cycle).
+        """
+        snapshot: Any = None
+        if isinstance(event, dict):
+            snapshot = event.get("market_snapshot")
+        else:
+            snapshot = getattr(event, "market_snapshot", None)
+        if not isinstance(snapshot, dict) or not snapshot:
+            try:
+                snapshot = get_latest_snapshot(str(symbol or ""))
+            except Exception:  # noqa: BLE001 - absence is not an error here
+                return None
+        return snapshot if isinstance(snapshot, dict) and snapshot else None
+
+    def _stale_snapshot_reason(
+        self,
+        event: Any,
+        symbol: str,
+        context: dict[str, Any],
+    ) -> str:
+        """Return a rejection reason when the market snapshot is stale/anomalous.
+
+        Returns an empty string when the snapshot is fresh OR when there is no
+        snapshot to judge (a snapshot-less cycle keeps historic behaviour — no
+        stale evidence exists to leak). Fail-closed for verified-bad data.
+        """
+        # An explicit caller-provided snapshot in ``context`` also counts as
+        # evidence that must be fresh (e.g. a manual run passing raw bars).
+        snapshot = self._resolve_market_snapshot(event, symbol)
+        explicit = context.get("market_snapshot")
+        if snapshot is None and isinstance(explicit, dict) and explicit:
+            snapshot = explicit
+        if snapshot is None:
+            return ""
+        timeframe = snapshot.get("timeframe") or context.get("timeframe")
+        verdict = evaluate_freshness(snapshot, timeframe=timeframe, symbol=symbol or None)
+        if verdict.accepted:
+            return ""
+        return verdict.reason or "stale_market_data"
 
     @staticmethod
     def _merge_market_snapshot(event: Any, analysis_context: dict[str, Any]) -> None:
