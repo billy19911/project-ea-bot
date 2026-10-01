@@ -105,6 +105,7 @@ class MarketFeedLoop:
         multi_timeframe_list: str = "M15,H1,H4",
         multi_timeframe_min_strength: float = 0.0,
         fallback_symbols: Optional[list[str]] = None,
+        identity: Optional[Any] = None,
     ) -> None:
         self.queue = queue
         self.symbols = [str(s).strip() for s in (symbols or []) if str(s).strip()]
@@ -138,6 +139,15 @@ class MarketFeedLoop:
         self._states: dict[str, Any] = {}
         self._last_emitted: dict[tuple[str, str], float] = {}
         self._running = False
+        # TASK 05: runtime identity for duplicate-feed detection. A second
+        # MarketFeedLoop in the same process would have a different
+        # feed_instance_id; two processes differ by process_id.
+        self.identity = identity
+        if self.identity is not None:
+            try:
+                self.identity.register_feed(self)
+            except Exception:  # noqa: BLE001 - identity must never break the feed
+                pass
 
     @staticmethod
     def _default_connector() -> Any:
@@ -438,6 +448,11 @@ class MarketFeedLoop:
         """
         self._running = True
         try:
+            logger.info(
+                "MarketFeedLoop started (process_id=%s feed_instance_id=%s)",
+                getattr(self.identity, "process_id", None),
+                getattr(self.identity, "feed_instance_id", None),
+            )
             while self._running:
                 try:
                     await asyncio.to_thread(self.poll_once)

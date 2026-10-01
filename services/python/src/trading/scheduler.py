@@ -24,7 +24,6 @@ from trading.event_classes import EventGate
 from trading.event_engine import EventPriority, EventQueue, get_priority
 
 logger = logging.getLogger(__name__)
-
 __all__ = ["AutonomousScheduler"]
 
 # Bound on the in-memory event trace retained for diagnostics (TASK 02).
@@ -75,6 +74,7 @@ class AutonomousScheduler:
         backpressure: bool = False,
         reconciliation_runner: Optional[ReconciliationRunner] = None,
         event_gate: Optional[EventGate] = None,
+        identity: Optional[Any] = None,
     ) -> None:
         self.queue = queue
         self.pipeline = pipeline
@@ -85,6 +85,10 @@ class AutonomousScheduler:
         self.reconciliation_runner = reconciliation_runner
         # TASK 02: qualifying-event gate (None → legacy behaviour).
         self.event_gate = event_gate
+        # TASK 05: runtime identity (process_id / runtime_instance_id /
+        # scheduler_instance_id / feed_instance_id). Diagnostic only — every
+        # analysis log line carries it so a duplicate scheduler/feed is visible.
+        self.identity = identity
 
         self._task: Optional[asyncio.Task] = None
         self._stop_event: Optional[asyncio.Event] = None
@@ -264,6 +268,37 @@ class AutonomousScheduler:
     # ------------------------------------------------------------------
     # Event trace (TASK 02: exact wake cause per analysis)
     # ------------------------------------------------------------------
+    def _identity_fields(self) -> dict[str, Any]:
+        """Return the runtime identity stamp for analysis logs (TASK 05).
+
+        Contains ``process_id``, ``runtime_instance_id``,
+        ``scheduler_instance_id`` and ``feed_instance_id``. Fail-safe: any
+        missing/unavailable identity yields empty strings so logging never
+        breaks a cycle.
+        """
+        try:
+            if self.identity is not None:
+                return dict(self.identity.log_fields())
+        except Exception:  # noqa: BLE001 - identity must never break analysis
+            pass
+        try:
+            from orchestration.runtime_identity import process_identity
+
+            proc = process_identity()
+            return {
+                "process_id": proc.get("process_id"),
+                "runtime_instance_id": "",
+                "scheduler_instance_id": "",
+                "feed_instance_id": "",
+            }
+        except Exception:  # noqa: BLE001 - identity must never break analysis
+            return {
+                "process_id": None,
+                "runtime_instance_id": "",
+                "scheduler_instance_id": "",
+                "feed_instance_id": "",
+            }
+
     @staticmethod
     def _gate_kind(event_type: str) -> str:
         """Return the event class name for tracing (never raises)."""
@@ -300,6 +335,7 @@ class AutonomousScheduler:
                 bar_time = str(getattr(event, "bar_time", "") or "")
                 event_id = str(getattr(event, "event_id", "") or "")
             now = time.monotonic()
+            identity = self._identity_fields()
             entry = {
                 "event_id": event_id,
                 "event_type": event_type,
@@ -313,17 +349,24 @@ class AutonomousScheduler:
                 "decision": decision,
                 "status": status,
                 "duration_ms": round((now - wake_started) * 1000.0, 3),
+                # TASK 05: runtime identity — one scheduler, one feed, provable.
+                **identity,
             }
             self._event_trace.append(entry)
             if gate_allowed:
                 logger.info(
-                    "Event analysis: %s %s cause=%s decision=%s status=%s dur=%.1fms",
+                    "Event analysis: %s %s cause=%s decision=%s status=%s dur=%.1fms "
+                    "process_id=%s runtime=%s scheduler=%s feed=%s",
                     symbol,
                     event_type,
                     wake_cause,
                     decision or "-",
                     status or "-",
                     entry["duration_ms"],
+                    identity.get("process_id"),
+                    identity.get("runtime_instance_id") or "-",
+                    identity.get("scheduler_instance_id") or "-",
+                    identity.get("feed_instance_id") or "-",
                 )
         except Exception:  # noqa: BLE001 - tracing must never break the loop
             logger.debug("Event trace record failed", exc_info=True)

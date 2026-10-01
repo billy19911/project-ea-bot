@@ -71,10 +71,19 @@ async def scheduler_status() -> dict[str, Any]:
     """Return scheduler statistics plus its running state."""
     runtime = get_runtime()
     stats = runtime.scheduler.stats()
+    # TASK 05: expose the runtime identity so an operator (or the duplicate
+    # worker audit) can see the process_id + instance ids of the single
+    # scheduler/feed without reading logs.
+    identity: dict[str, Any] = {}
+    try:
+        identity = runtime.identity.to_dict()
+    except Exception:  # noqa: BLE001 - identity is diagnostic only
+        identity = {}
     return {
         "running": stats.get("running", False),
         "stats": stats,
         "queue_size": stats.get("queue_size", 0),
+        "identity": identity,
     }
 
 

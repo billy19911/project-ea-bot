@@ -537,6 +537,9 @@ async def lifespan(app: FastAPI):
             # signal → decision → execution path is not delayed by the idle
             # poll (latency-sensitive entries).
             on_emit=runtime.scheduler.wake,
+            # TASK 05: register the feed instance id on the runtime identity so
+            # every analysis log proves there is exactly ONE feed loop.
+            identity=runtime.identity,
         )
         feed_task = asyncio.create_task(feed.run())
         logger.info(

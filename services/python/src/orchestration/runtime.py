@@ -39,6 +39,7 @@ from trading.scheduler import AutonomousScheduler
 
 from .account_context import AccountContextProvider
 from .pipeline import TradingPipeline
+from .runtime_identity import RuntimeIdentity
 from .signal_registry import get_signal_registry
 
 logger = logging.getLogger(__name__)
@@ -469,6 +470,12 @@ class OrchestrationRuntime:
         execution_guard: Optional[ExecutionGuard] = None,
         event_gate: Optional[EventGate] = None,
     ) -> None:
+        # TASK 05: runtime identity — process id + a unique instance id for this
+        # runtime and every component it owns, so every analysis log can prove
+        # there is exactly ONE scheduler/queue/supervisor/pipeline/feed. Purely
+        # diagnostic; never read by the decision path.
+        self.identity = RuntimeIdentity("runtime")
+        self.identity.register_queue()
         self.queue = queue if queue is not None else EventQueue()
         # Periodic reconciliation (PRD_V2 §14). Providers default to the
         # MT5-backed providers (audit P0-3 follow-up) so the reconciliation gate
@@ -503,6 +510,11 @@ class OrchestrationRuntime:
                 execution_guard=self.execution_guard,
             )
         )
+        # TASK 05: register the singleton component identities (first writer
+        # wins; idempotent so a re-constructed runtime never double-registers).
+        self.identity.register_reconciliation()
+        self.identity.register_pipeline()
+        self.identity.register_supervisor()
         self.scheduler = (
             scheduler
             if scheduler is not None
@@ -523,8 +535,13 @@ class OrchestrationRuntime:
                         symbol=sym or "XAUUSD"
                     ),
                 ),
+                # TASK 05: thread the runtime identity into the scheduler so
+                # every analysis log carries process/runtime/scheduler/feed ids.
+                identity=self.identity,
             )
         )
+        # TASK 05: the scheduler is the single owner of the analysis loop.
+        self.identity.register_scheduler()
         # Bounded in-memory history of PipelineResult dicts (oldest first).
         self._decisions: deque[dict[str, Any]] = deque(maxlen=decision_limit)
         # Real trace store for pipeline cycles (PRD §26/§27, bounded).
@@ -547,6 +564,7 @@ class OrchestrationRuntime:
             event_queue=self.queue,
             scheduler=self.scheduler,
         )
+        self.identity.register_position_monitor()
         # Dynamic stop-loss management (BEP / progressive / trailing) applied to
         # open positions once per cycle. Always wired; the master switch is read
         # LIVE from the runtime settings store each cycle (Settings →
