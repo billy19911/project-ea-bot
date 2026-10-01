@@ -460,9 +460,10 @@ class MarketFeedLoop:
     def _bar_timestamp(bar: Any) -> Optional[datetime]:
         """Return the newest bar's timestamp as an aware UTC datetime.
 
-        Bars come from MT5 as an object or dict; ``time`` is normally a
-        ``datetime`` (naive local from the connector) or an ISO string. We
-        normalise to UTC so the freshness gate compares like-for-like. Returns
+        Bars come from MT5 as an object or dict; ``time`` is normally an
+        aware-UTC ``datetime`` from the connector (legacy naive values are
+        assumed UTC) or an ISO string. We normalise to UTC so the freshness
+        gate compares like-for-like. Returns
         ``None`` when the time is missing/unparseable (the snapshot then carries
         a null ``bar_timestamp`` and the gate rejects it as UNKNOWN — fail
         closed, never a silent "fresh").
@@ -482,9 +483,8 @@ class MarketFeedLoop:
                 if text.endswith("Z"):
                     text = text[:-1] + "+00:00"
                 dt = datetime.fromisoformat(text)
-            # Naive → assume UTC (the connector stamps naive local; the gate
-            # only needs a consistent, monotone relationship, and UTC is the
-            # documented convention for received_at).
+            # Naive → assume UTC (documented convention for internal
+            # timestamps; the connector now stamps aware UTC).
             return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
         except (ValueError, TypeError, OverflowError, OSError):
             return None

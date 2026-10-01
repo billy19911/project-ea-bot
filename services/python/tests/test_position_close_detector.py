@@ -148,6 +148,32 @@ def test_close_record_carries_original_stop_loss() -> None:
         clear_entry_contexts()
 
 
+def test_closed_at_is_true_utc_not_broker_wall() -> None:
+    """`closed_at` must carry the TRUE UTC close instant (raw epoch − 3 h).
+
+    The closing deal's ``time`` is a raw MT5 epoch — broker server wall clock
+    rendered as UTC (measured +3 h vs true UTC). Rendering it with
+    ``datetime.fromtimestamp(..., tz=utc)`` stamped the close 3 h in the
+    future; the fix routes it through ``mt5.broker_time.from_broker_epoch``.
+    """
+    import importlib
+    from datetime import datetime, timezone
+
+    broker_time = importlib.import_module("mt5.broker_time")
+    true_close = datetime(2026, 10, 1, 14, 30, 0, tzinfo=timezone.utc)
+    raw = broker_time.to_broker_epoch(true_close)  # 17:30 broker wall
+
+    def resolver(ticket):
+        return {"price": 2001.5, "time": raw, "profit": 5.0, "ticket": 9001}
+
+    detector = PositionCloseDetector(close_deal_resolver=resolver)
+    detector.observe([{"ticket": 9001, "symbol": "XAUUSD", "side": "BUY", "price_open": 2000.0}])
+    closed = detector.observe([])
+
+    assert len(closed) == 1
+    assert closed[0]["closed_at"] == true_close.isoformat()
+
+
 if __name__ == "__main__":  # pragma: no cover
     import pytest
 

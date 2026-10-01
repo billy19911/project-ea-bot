@@ -15,7 +15,7 @@ trade is a deal with ``entry`` in (1, 3) — those carry the realized profit.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 MAX_DAYS = 90
@@ -61,7 +61,12 @@ def aggregate_deals(deals: list[dict], days: int) -> dict:
     commission and swap of every deal in the period are still summed into
     the day they belong to, so the net is complete.
     """
-    cutoff = datetime.now() - timedelta(days=days)
+    # Raw MT5 epochs live in broker server wall-clock space (+3 h vs true
+    # UTC); convert to the true UTC instant before windowing/bucketing so a
+    # deal lands on the calendar day it truly happened (see mt5.broker_time).
+    from ..mt5.broker_time import from_broker_epoch
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     by_day: dict[str, dict] = {}
     by_symbol: dict[str, dict] = {}
 
@@ -69,7 +74,7 @@ def aggregate_deals(deals: list[dict], days: int) -> dict:
         ts = d.get("ts") or 0
         if ts <= 0:
             continue
-        moment = datetime.fromtimestamp(ts)
+        moment = from_broker_epoch(ts)
         if moment < cutoff:
             continue
         day = moment.strftime("%Y-%m-%d")
@@ -176,8 +181,14 @@ def build_daily_report(days: int = DEFAULT_DAYS) -> dict:
             "days": days,
         }
 
-    date_to = datetime.now()
-    date_from = date_to - timedelta(days=days)
+    # history_deals_get treats naive datetimes as machine-LOCAL (the original
+    # bug: the window drifted by the host offset) and ints as raw broker
+    # epochs; pass explicit broker epochs so the window is exact on any host.
+    from ..mt5.broker_time import to_broker_epoch
+
+    now_utc = datetime.now(timezone.utc)
+    date_to = to_broker_epoch(now_utc)
+    date_from = to_broker_epoch(now_utc - timedelta(days=days))
     try:
         deals = mt5.history_deals_get(date_from, date_to)
     except Exception as exc:  # never let a terminal hiccup crash the endpoint
@@ -197,7 +208,7 @@ def build_daily_report(days: int = DEFAULT_DAYS) -> dict:
     return {
         "ok": True,
         "days": days,
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "account": {
             "login": getattr(info, "login", None),
             "server": getattr(info, "server", None),
@@ -205,8 +216,8 @@ def build_daily_report(days: int = DEFAULT_DAYS) -> dict:
             "balance": _to_float(getattr(info, "balance", 0)),
             "equity": _to_float(getattr(info, "equity", 0)),
         },
-        # Label waktu: MT5 mengembalikan waktu server broker; tanggal di sini
-        # memakai zona waktu mesin ini — UI menyebutkannya supaya jujur.
-        "note": "Tanggal mengikuti zona waktu mesin ini.",
+        # Label waktu: waktu server broker (epoch mentah) dikonversi ke UTC
+        # sebenarnya lewat mt5.broker_time — tanggal di sini adalah tanggal UTC.
+        "note": "Tanggal mengikuti UTC (waktu server broker dikonversi ke UTC).",
         **report,
     }

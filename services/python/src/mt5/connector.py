@@ -11,6 +11,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+from .broker_time import from_broker_epoch, to_broker_epoch
 from .schemas import OHLC, AccountInfo, Order, Position, SymbolInfo, Tick
 from .write_guard import MT5WriteGuard
 
@@ -371,7 +372,7 @@ def get_tick(symbol: str) -> Optional[Tick]:
                 ask=t.ask,
                 last=t.last,
                 volume=float(t.volume),
-                time=datetime.fromtimestamp(t.time),
+                time=from_broker_epoch(t.time),
             )
         except Exception:
             return None
@@ -430,8 +431,10 @@ def get_ohlc(
             # `count` strictly older than `before`.
             if before is not None:
                 tf_seconds = _TIMEFRAME_SECONDS.get(str(timeframe).upper(), 3600)
-                start_ts = int(before.timestamp()) - (count + 8) * tf_seconds
-                before_ts = int(before.timestamp())
+                # `before` is true UTC; MT5 copy_rates_from expects the broker
+                # wall-clock epoch space (see mt5.broker_time).
+                before_ts = to_broker_epoch(before)
+                start_ts = before_ts - (count + 8) * tf_seconds
                 for cand in candidates:
                     rates = mt5.copy_rates_from(cand, tf, start_ts, (count + 8) * 2)
                     if rates is None or len(rates) == 0:
@@ -449,7 +452,7 @@ def get_ohlc(
                             low=r["low"],
                             close=r["close"],
                             volume=float(r["tick_volume"]),
-                            time=datetime.fromtimestamp(int(r["time"])),
+                            time=from_broker_epoch(int(r["time"])),
                         )
                         for r in older
                     ]
@@ -467,7 +470,7 @@ def get_ohlc(
                             low=r["low"],
                             close=r["close"],
                             volume=float(r["tick_volume"]),
-                            time=datetime.fromtimestamp(r["time"]),
+                            time=from_broker_epoch(r["time"]),
                         )
                         for r in rates
                     ]
@@ -541,8 +544,10 @@ def get_ohlc_range(
             except Exception:  # noqa: BLE001
                 pass
 
-            start_ts = int(start_date.timestamp())
-            end_ts = int(end_date.timestamp())
+            # Callers pass true-UTC datetimes; MT5 range endpoints live in the
+            # broker wall-clock epoch space (see mt5.broker_time).
+            start_ts = to_broker_epoch(start_date)
+            end_ts = to_broker_epoch(end_date)
 
             for cand in candidates:
                 rates = mt5.copy_rates_range(cand, tf, start_ts, end_ts)
@@ -556,7 +561,7 @@ def get_ohlc_range(
                             low=r["low"],
                             close=r["close"],
                             volume=float(r["tick_volume"]),
-                            time=datetime.fromtimestamp(r["time"]),
+                            time=from_broker_epoch(r["time"]),
                         )
                         for r in rates
                     ]
@@ -619,18 +624,18 @@ def get_data_info(symbol: str, timeframe: str = "H1") -> dict[str, Any]:
             resolved = resolve_symbol(symbol)
             # Probe: fetch 1 bar from 5 years ago to check depth
             probe_start = datetime.now(timezone.utc) - timedelta(days=5 * 365)
-            probe_ts = int(probe_start.timestamp())
+            probe_ts = to_broker_epoch(probe_start)
             rates_old = mt5.copy_rates_from(resolved, tf, probe_ts, 1)
             # Fetch latest bar
             rates_new = mt5.copy_rates_from_pos(resolved, tf, 0, 1)
 
             if rates_new is not None and len(rates_new) > 0:
-                newest = datetime.fromtimestamp(rates_new[0]["time"])
+                newest = from_broker_epoch(rates_new[0]["time"])
             else:
                 newest = None
 
             if rates_old is not None and len(rates_old) > 0:
-                oldest = datetime.fromtimestamp(rates_old[0]["time"])
+                oldest = from_broker_epoch(rates_old[0]["time"])
             else:
                 oldest = None
 
@@ -704,8 +709,8 @@ def get_positions() -> list[Position]:
                         else "POSITION_ENTRY_OUT"
                     ),
                     status="OPEN",
-                    time=datetime.fromtimestamp(p.time),
-                    time_update=datetime.fromtimestamp(p.time_update),
+                    time=from_broker_epoch(p.time),
+                    time_update=from_broker_epoch(p.time_update),
                 )
                 for p in raw
             ]
@@ -824,12 +829,13 @@ def get_position_close_deal(ticket: Any, lookback_days: int = 30) -> Optional[di
         return None
 
     try:
-        from datetime import timedelta
-
-        now = datetime.now()
+        # The MT5 history window lives in the broker wall-clock epoch
+        # space; pass explicit epochs so the wrapper's datetime handling
+        # cannot skew the window (see mt5.broker_time).
+        now_broker = to_broker_epoch(datetime.now(timezone.utc))
         deals = mt5.history_deals_get(
-            now - timedelta(days=max(1, int(lookback_days))),
-            now + timedelta(days=1),
+            now_broker - max(1, int(lookback_days)) * 86400,
+            now_broker + 86400,
             position=int(ticket),
         )
     except Exception:
@@ -898,9 +904,9 @@ def get_orders() -> list[Order]:
                     quantity=o.volume_initial,
                     filled_qty=o.volume_current,
                     status=str(o.state),
-                    time_setup=datetime.fromtimestamp(o.time_setup),
+                    time_setup=from_broker_epoch(o.time_setup),
                     time_expiration=(
-                        datetime.fromtimestamp(o.time_expiration) if o.time_expiration > 0 else None
+                        from_broker_epoch(o.time_expiration) if o.time_expiration > 0 else None
                     ),
                 )
                 for o in raw

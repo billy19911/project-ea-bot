@@ -119,16 +119,18 @@ def test_deals_older_than_window_are_excluded():
 
 
 def test_best_and_worst_day_tracked():
-    from datetime import datetime
+    from datetime import datetime, timedelta, timezone
 
-    # Anchor to local midnight so the two deals are guaranteed to land in
-    # different calendar days. Using "now - 60s" would flip days when the
-    # suite runs just after midnight and merge both deals into one bucket
-    # (30 - 10 = 20) → false failure.
-    midnight = int(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+    from src.mt5.broker_time import to_broker_epoch
+
+    # Anchor to true-UTC midnight so the two deals are guaranteed to land in
+    # different UTC calendar days (the report buckets by true UTC). Using
+    # "now - 60s" would flip days when the suite runs just after midnight and
+    # merge both deals into one bucket (30 - 10 = 20) → false failure.
+    midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     deals = [
-        _deal(midnight + 60, 1, 30.0),  # hari ini, 00:01
-        _deal(midnight - 60, 1, -10.0),  # kemarin, 23:59
+        _deal(to_broker_epoch(midnight + timedelta(minutes=1)), 1, 30.0),  # hari ini, 00:01 UTC
+        _deal(to_broker_epoch(midnight - timedelta(minutes=1)), 1, -10.0),  # kemarin, 23:59 UTC
     ]
     r = aggregate_deals(deals, days=7)
     assert r["totals"]["best_day"]["net"] == 30.0

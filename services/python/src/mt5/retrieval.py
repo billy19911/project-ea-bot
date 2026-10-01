@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
+from .broker_time import from_broker_epoch, to_broker_epoch
 from .models import OHLC, SymbolInfo, Tick, Timeframe
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ def get_tick(symbol: str) -> Optional[Tick]:
         ask=raw.ask,
         last=raw.last,
         volume=raw.volume,
-        time=datetime.fromtimestamp(raw.time),
+        time=from_broker_epoch(raw.time),
         flags=raw.flags,
     )
 
@@ -109,7 +110,7 @@ def get_ohlc(
     _require_mt5()
     tf = _TIMEFRAME_MAP[timeframe.value]
     if since is not None:
-        timestamp = int(since.timestamp())
+        timestamp = to_broker_epoch(since)
         rates = mt5.copy_rates_from(symbol, tf, timestamp, count)
     else:
         rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
@@ -129,7 +130,7 @@ def get_ohlc(
             tick_volume=float(r["tick_volume"]),
             spread=int(r["spread"]),
             real_volume=float(r["real_volume"]),
-            time=datetime.fromtimestamp(int(r["time"])),
+            time=from_broker_epoch(int(r["time"])),
         )
         for r in rates
     ]

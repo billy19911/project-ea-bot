@@ -147,14 +147,15 @@ class PositionCloseDetector:
                         record["pnl"] = float(deal["profit"])
                     if deal.get("ticket") is not None:
                         record["broker_deal_ticket"] = deal["ticket"]
-                    # Real close time (MT5 epoch seconds) → ISO string for bucketing.
+                    # Real close time: raw MT5 epoch = broker server wall clock
+                    # (+3 h vs true UTC) → convert to the true UTC instant so
+                    # ``closed_at`` is not stamped hours in the future
+                    # (see mt5.broker_time).
                     raw_time = deal.get("time")
                     if raw_time:
-                        from datetime import datetime, timezone
+                        from mt5.broker_time import from_broker_epoch
 
-                        record["closed_at"] = datetime.fromtimestamp(
-                            int(raw_time), tz=timezone.utc
-                        ).isoformat()
+                        record["closed_at"] = from_broker_epoch(raw_time).isoformat()
             except (TypeError, ValueError):
                 pass
         # T3b: attach the entry-time decision context (agent outputs / news

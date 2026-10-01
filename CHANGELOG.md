@@ -3,6 +3,14 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Fixed — Timezone MT5: epoch broker → UTC sejati (hapus anomaly +10 jam / "Ruang Komite kosong")
+- Akar bug: `connector`/`retrieval` memakai `datetime.fromtimestamp()` (naive local UTC+7) sementara gate freshness (`feed_loop`/`market_freshness`) menganggap naive = UTC; offset server broker **+3h** → bar tampak +~10 jam "di masa depan" → gate `clock_anomaly_received_before_bar` menolak semua snapshot → Ruang Komite kosong.
+- `services/python/src/mt5/broker_time.py` (baru): `from_broker_epoch()` / `to_broker_epoch()`, `BROKER_UTC_OFFSET = +3h` (diukur dari server broker). Keluar = `ts − 3h` (aware UTC); masuk = `dt + 3h` (int broker epoch).
+- `services/python/src/mt5/connector.py` + `services/python/src/mt5/retrieval.py`: semua output/input dikonversi; **0 `fromtimestamp` tersisa**. `services/python/src/market/health.py`: `_now_naive_local` → `_as_aware_utc`; `services/python/src/trading/feed_loop.py`: komentar diselaraskan (aware-UTC).
+- Konsumen aktif ikut dipatch: `review/close_detector.py` (`closed_at` true-UTC) + `reports/daily.py` (window pakai int broker epoch, bucketing/`generated_at`/`cutoff` aware-UTC, note UTC). `review_store`/`trade_ledger` (tanpa caller produksi) tidak diubah.
+- Semantik `history_deals_get` diprobes live: INT = raw broker epoch (dipakai langsung), naive-datetime = machine-local (bug), aware OK.
+- Verifikasi: `tests/test_mt5_broker_time.py` (22 test) + 2 test konsumen (RED→GREEN); full suite **3149 passed**; E2E live: `/market/health` `bar_timestamp` true-UTC + `clock_anomaly:false`, `/reports/daily` bucket UTC (154 deals, 77 closed, net +19.2M IDR). Semua terminal tetap DISARMED.
+
 ### Added — B-10: Auto-Detect Terminal Aktif (Tanpa Gate Live/Demo, Arm Manual per Akun)
 - `services/python/src/mt5/terminals.py`: **arm eligibility = terminal running saja**. Field `"execution"` di `mt5_terminals.json` **tidak lagi dibaca** untuk gate apa pun (file milik user tetap tidak disentuh); `list_terminals` mengemit `armable` (= proses running) sebagai ganti `execution_allowed`. Terminal **auto-detect** (running, tidak ada di config) kini armable (`armable: true`) dan ikut fan-out (`fanout_target: true`) — sebelumnya hardcoded "never armable". `arm_terminal` hanya butuh exists + running; `get_armed_terminals` = armed + running; `get_fanout_targets` = running + armed + fanout_target. `execution_permitted()` **tidak diubah** (tetap fail-closed: butuh ≥1 armed + binding attached).
 - `services/python/src/mt5/endpoints.py`: docstring `execution_allowed` → `armable`.

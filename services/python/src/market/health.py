@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """Market data health utilities – compute freshness and status for a symbol.
 
-Provides a simple health object matching PRD V2 §32:
+Provides a simple health object matching PRD V2 §32:
 {
     "symbol": str,
     "tick_age_ms": int,
     "bar_age_ms": int,
     "spread_age_ms": int,
     "feed_connected": bool,
-    "last_successful_update": str,  # ISO8601
+    "last_successful_update": str,  # ISO8601, aware UTC
     "status": "HEALTHY" | "STALE" | "DISCONNECTED" | "INVALID",
 }
 
@@ -29,17 +29,17 @@ _BAR_STALE_MS = 3000
 _SPREAD_STALE_MS = 2000
 
 
-def _now_naive_local() -> datetime.datetime:
-    """Return current time as a *naive local* datetime.
+def _as_aware_utc(value: datetime.datetime) -> datetime.datetime:
+    """Normalise a timestamp to aware UTC for like-for-like age maths.
 
-    The MT5 connector builds tick/bar timestamps with
-    ``datetime.fromtimestamp(...)`` (see ``mt5/connector.py``), i.e. **naive
-    local** datetimes — not UTC. Comparing them against a UTC "now" produced a
-    constant negative age (the WIB-vs-UTC bug that forced every symbol to
-    DISCONNECTED). We therefore compare like-for-like: naive local vs naive
-    local.
+    Connector timestamps are aware-UTC since the broker-time fix
+    (``mt5.broker_time``). Legacy callers/tests still build *naive local*
+    datetimes (the pre-fix convention); those get the host-local zone
+    attached so the comparison stays meaningful.
     """
-    return datetime.datetime.now()
+    if value.tzinfo is None:
+        value = value.astimezone()  # attach the host-local timezone
+    return value.astimezone(datetime.timezone.utc)
 
 
 def compute_market_data_health(symbol: str) -> Dict[str, Any]:
@@ -49,14 +49,14 @@ def compute_market_data_health(symbol: str) -> Dict[str, Any]:
     - ``bar_age_ms``: age of latest OHLC bar.
     - ``spread_age_ms``: age of latest spread (here we reuse tick age).
     - ``feed_connected``: True only if both tick and bar fetched.
-    - ``last_successful_update``: ISO‑8601 of newest timestamp.
+    - ``last_successful_update``: ISO‑8601 (aware UTC) of newest timestamp.
     - ``status``: ``HEALTHY`` if all ages < thresholds, ``STALE`` if any exceed,
       ``DISCONNECTED`` if data missing, ``INVALID`` on unexpected errors.
     """
     try:
         tick = get_tick(symbol)
         ohlc = get_ohlc(symbol)
-        now = _now_naive_local()
+        now = datetime.datetime.now(datetime.timezone.utc)
         if not tick or not ohlc:
             return {
                 "symbol": symbol,
@@ -79,11 +79,10 @@ def compute_market_data_health(symbol: str) -> Dict[str, Any]:
             bar_time, datetime.datetime
         ):
             raise ValueError("Invalid time fields")
-        # Connector times are naive LOCAL datetimes → compare like-for-like.
-        if tick_time.tzinfo is not None:
-            tick_time = tick_time.astimezone().replace(tzinfo=None)
-        if bar_time.tzinfo is not None:
-            bar_time = bar_time.astimezone().replace(tzinfo=None)
+        # Normalise both sides to aware UTC before subtracting, so ages are
+        # true wall-clock ages regardless of the host timezone.
+        tick_time = _as_aware_utc(tick_time)
+        bar_time = _as_aware_utc(bar_time)
         tick_age = int((now - tick_time).total_seconds() * 1000)
         bar_age = int((now - bar_time).total_seconds() * 1000)
         spread_age = tick_age  # spread derived from tick spread; reuse tick age
