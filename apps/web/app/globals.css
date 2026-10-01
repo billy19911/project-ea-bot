@@ -678,6 +678,16 @@ td {
 .pcLevelEntry .pcLevelLine { stroke: var(--text-secondary); }
 .pcLevelEntry .pcLevelLabel { fill: var(--text-secondary); }
 .pcLevelStop .pcLevelLine { stroke: var(--danger); }
+.pcZoneBand { stroke-width: 0; opacity: 0.10; }
+.pcZoneEdge { stroke-width: 1.2; }
+.pcZoneLabel { font-size: 9px; font-weight: 700; font-family: var(--font-mono); }
+.pcZonelong .pcZoneBand { fill: var(--success); }
+.pcZonelong .pcZoneEdge, .pcZonelong .pcZoneLabel { stroke: var(--success); fill: var(--success); }
+.pcZoneshort .pcZoneBand { fill: var(--danger); }
+.pcZoneshort .pcZoneEdge, .pcZoneshort .pcZoneLabel { stroke: var(--danger); fill: var(--danger); }
+.pcZonefvg .pcZoneEdge { stroke-dasharray: 4 3; }
+.pcZonechart .pcZoneBand { opacity: 0.055; }
+.pcZonechart .pcZoneEdge { stroke-dasharray: 2 3; opacity: 0.8; }
 .pcLevelStop .pcLevelLabel { fill: var(--danger); }
 .pcLevelTarget .pcLevelLine { stroke: var(--success); }
 .pcLevelTarget .pcLevelLabel { fill: var(--success); }

@@ -73,9 +73,23 @@ export type ChartLevel = {
   kind: 'entry' | 'stop' | 'target';
 };
 
+export type ChartZone = {
+  zone_id: string;
+  zone_type: 'ORDER_BLOCK' | 'FVG';
+  direction: 'LONG' | 'SHORT';
+  timeframe: string;
+  top: number;
+  bottom: number;
+  mitigation: string;
+  gap_atr?: number;
+  displacement_atr?: number;
+  source?: 'scan' | 'chart';
+};
+
 type Props = {
   data: ChartData;
   levels?: ChartLevel[];
+  zones?: ChartZone[];
   showEma?: boolean;
   showBollinger?: boolean;
   showRsi?: boolean;
@@ -145,6 +159,7 @@ function fmtTime(iso: string, timeframe?: string): string {
 function PriceChart({
   data,
   levels = [],
+  zones = [],
   showEma = true,
   showBollinger = true,
   showRsi = true,
@@ -516,6 +531,41 @@ function PriceChart({
           </g>
         ))}
 
+        {/* OB/FVG price bands from the scanner and the displayed chart TF. */}
+        {zones.map((zone) => {
+          if (
+            !Number.isFinite(zone.top) ||
+            !Number.isFinite(zone.bottom) ||
+            zone.top <= zone.bottom ||
+            zone.bottom > geom.hi ||
+            zone.top < geom.lo
+          ) return null;
+          const rawTop = geom.yMain(zone.top);
+          const rawBottom = geom.yMain(zone.bottom);
+          const y = Math.max(MAIN_TOP, Math.min(MAIN_BOTTOM, rawTop));
+          const bottom = Math.max(MAIN_TOP, Math.min(MAIN_BOTTOM, rawBottom));
+          const direction = zone.direction === 'LONG' ? 'long' : 'short';
+          const kind = zone.zone_type === 'ORDER_BLOCK' ? 'ob' : 'fvg';
+          const source = zone.source === 'chart' ? 'chart' : 'scan';
+          const label = `${source.toUpperCase()} ${zone.timeframe} · ${kind.toUpperCase()} ${direction.toUpperCase()}`;
+          return (
+            <g key={`${source}-${zone.zone_id}`} className={`pcZone pcZone${direction} pcZone${kind} pcZone${source}`}>
+              <rect
+                x={PAD_L}
+                y={y}
+                width={INNER_W}
+                height={Math.max(1, bottom - y)}
+                className="pcZoneBand"
+              />
+              <line x1={PAD_L} y1={y} x2={PAD_L + INNER_W} y2={y} className="pcZoneEdge" />
+              <line x1={PAD_L} y1={bottom} x2={PAD_L + INNER_W} y2={bottom} className="pcZoneEdge" />
+              <text x={PAD_L + 4} y={Math.min(MAIN_BOTTOM - 3, y + 11)} className="pcZoneLabel">
+                {label}
+              </text>
+            </g>
+          );
+        })}
+
         {/* ── Bollinger Bands (isi tipis + tepi) ── */}
         {showBollinger && bb
           ? (() => {
@@ -843,9 +893,18 @@ function levelsSignature(levels: ChartLevel[]): string {
   return out;
 }
 
+function zonesSignature(zones: ChartZone[]): string {
+  let out = '';
+  for (const zone of zones) {
+    out += `${zone.source}:${zone.zone_id}:${zone.top}:${zone.bottom}:${zone.mitigation};`;
+  }
+  return out;
+}
+
 export default memo(PriceChart, (prev, next) => {
   if (chartSignature(prev.data) !== chartSignature(next.data)) return false;
   if (levelsSignature(prev.levels ?? []) !== levelsSignature(next.levels ?? [])) return false;
+  if (zonesSignature(prev.zones ?? []) !== zonesSignature(next.zones ?? [])) return false;
   // Live price/open are compared so the "Price Now" line moves on a tick, but
   // they do NOT reset the viewport or rebuild geometry (both key on the data
   // signature), so this re-render is a cheap diff, not a flicker.

@@ -13,10 +13,11 @@ import { useLiveQuotes, type LivePosition } from '../../lib/useLiveQuotes';
 import { shouldFlash } from '../../lib/liveFlash';
 import AppShell from '../../components/AppShell';
 import Pagination from '../../components/ui/pagination';
-import PriceChart, { ChartData, ChartLevel } from '../../components/PriceChart';
+import PriceChart, { ChartData, ChartLevel, ChartZone } from '../../components/PriceChart';
 
 const TIMEFRAMES = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1', 'MN1'] as const;
 type Timeframe = (typeof TIMEFRAMES)[number];
+const TIMEFRAME_STORAGE_KEY = 'xynnbot.market.timeframe';
 
 const DEFAULT_SYMBOLS = ['XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'BTCUSD'];
 
@@ -141,6 +142,12 @@ type AnalysisData = {
     tp: number | null;
     profit: number;
   }[];
+  zones?: {
+    scan_timeframe: string;
+    scan: ChartZone[];
+    chart_timeframe: string;
+    chart: ChartZone[];
+  };
   provenance?: {
     source: string;
     mode: string;
@@ -178,6 +185,7 @@ export default function MarketPage() {
   const [symbolInput, setSymbolInput] = useState('XAUUSD');
   const [symbols, setSymbols] = useState<string[]>(DEFAULT_SYMBOLS);
   const [timeframe, setTimeframe] = useState<Timeframe>('H1');
+  const [timeframeReady, setTimeframeReady] = useState(false);
   const [bars, setBars] = useState(300);
   const [showEma, setShowEma] = useState(true);
   const [showBollinger, setShowBollinger] = useState(true);
@@ -219,6 +227,27 @@ export default function MarketPage() {
     if (data) chartSigRef.current = chartSignature(data);
   }, [data]);
 
+  useEffect(() => {
+    let restored: Timeframe = 'H1';
+    try {
+      const saved = window.localStorage.getItem(TIMEFRAME_STORAGE_KEY);
+      if (TIMEFRAMES.some((tf) => tf === saved)) restored = saved as Timeframe;
+    } catch {
+      // Storage can be unavailable in restricted browser contexts.
+    }
+    setTimeframe(restored);
+    setTimeframeReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!timeframeReady) return;
+    try {
+      window.localStorage.setItem(TIMEFRAME_STORAGE_KEY, timeframe);
+    } catch {
+      // The selected timeframe still works for this visit.
+    }
+  }, [timeframe, timeframeReady]);
+
   // Realtime stream (WS): price quotes + open-position P&L, read-only.
   const {
     quotes: liveQuotes,
@@ -228,6 +257,7 @@ export default function MarketPage() {
   } = useLiveQuotes({ symbols, positions: true, enabled: live });
 
   const load = useCallback(async () => {
+    if (!timeframeReady) return;
     const seq = ++reqSeq.current;
     setError(null);
     try {
@@ -293,7 +323,7 @@ export default function MarketPage() {
     } finally {
       if (seq === reqSeq.current) setLoading(false);
     }
-  }, [symbol, timeframe, bars]);
+  }, [symbol, timeframe, bars, timeframeReady]);
 
   useAutoRefresh(load);
 
@@ -404,6 +434,16 @@ export default function MarketPage() {
     // `livePrice` deliberately excluded from deps: it ticks every 2.5s and the
     // chart's axes already rescale to live bars. Including it would make the
     // memo (and React.memo on PriceChart) ineffective.
+  }, [analysis]);
+
+  const chartZones: ChartZone[] = useMemo(() => {
+    const zones = analysis?.zones;
+    if (!zones) return [];
+    const out: ChartZone[] = zones.scan.map((zone) => ({ ...zone, source: 'scan' }));
+    if (zones.chart_timeframe !== zones.scan_timeframe) {
+      out.push(...zones.chart.map((zone): ChartZone => ({ ...zone, source: 'chart' })));
+    }
+    return out;
   }, [analysis]);
 
   const barCount = data?.bars?.length ?? 0;
@@ -521,6 +561,9 @@ export default function MarketPage() {
           </span>
         ) : null}
         {prov ? (<span className={styles.metaItem}>{barCount} bar · sumber {prov.source} · mode {prov.mode}</span>) : null}
+        {analysis?.zones ? (
+          <span className={styles.metaItem}>Zona scan {analysis.zones.scan_timeframe} + chart {analysis.zones.chart_timeframe}</span>
+        ) : null}
         {/* TASK 09: market-snapshot freshness — stale data must be visible. */}
         {freshness ? (() => {
           const st = (freshness.status ?? 'UNKNOWN').toUpperCase();
@@ -549,6 +592,7 @@ export default function MarketPage() {
           showRsi={showRsi}
           showMacd={showMacd}
           levels={chartLevels}
+          zones={chartZones}
           onNeedMoreHistory={loadMoreHistory}
           loadingMore={loadingMore}
           livePrice={typeof livePrice === 'number' ? livePrice : null}

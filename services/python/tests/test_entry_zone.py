@@ -15,6 +15,7 @@ from trading.entry_zone import (
     ZoneEntryGate,
     build_entry_plan,
     compute_bias,
+    detect_entry_zones,
     find_fair_value_gaps,
     find_order_blocks,
 )
@@ -63,6 +64,127 @@ def test_find_order_blocks_returns_bands():
     assert {o["type"] for o in obs} == {"bullish", "bearish"}
     for o in obs:
         assert o["top"] > o["bottom"]
+
+
+def _quality_zone_bars():
+    opens = [10.2, 10.2, 10.5, 10.4, 10.4, 11.0, 11.1]
+    highs = [10.3, 10.3, 10.55, 11.1, 11.0, 11.2, 11.3]
+    lows = [10.1, 10.0, 10.2, 10.3, 10.7, 10.8, 10.9]
+    closes = [10.25, 10.1, 10.3, 11.0, 10.9, 11.1, 11.2]
+    return opens, highs, lows, closes
+
+
+def test_quality_zones_use_closed_ohlc_and_report_type_and_mitigation():
+    opens, highs, lows, closes = _quality_zone_bars()
+    zones = detect_entry_zones(
+        symbol="XAUUSD",
+        timeframe="M5",
+        opens=opens,
+        highs=highs,
+        lows=lows,
+        closes=closes,
+        atr=0.3,
+    )
+
+    assert any(z["zone_type"] == "ORDER_BLOCK" and z["direction"] == "LONG" for z in zones)
+    assert any(z["zone_type"] == "FVG" and z["direction"] == "LONG" for z in zones)
+    assert all(z["timeframe"] == "M5" for z in zones)
+    assert all(z["mitigation"] in {"FRESH", "TOUCHED", "PARTIALLY_MITIGATED"} for z in zones)
+
+
+def test_quality_zones_reject_fully_filled_fvg():
+    opens, highs, lows, closes = _quality_zone_bars()
+    lows[5] = 10.0
+    closes[5] = 10.1
+    zones = detect_entry_zones(
+        symbol="XAUUSD",
+        timeframe="M5",
+        opens=opens,
+        highs=highs,
+        lows=lows,
+        closes=closes,
+        atr=0.3,
+    )
+
+    assert not any(z["zone_type"] == "FVG" and z["origin_index"] == 3 for z in zones)
+
+
+def test_quality_zones_reject_order_block_after_retest_limit():
+    opens, highs, lows, closes = _quality_zone_bars()
+    opens.extend([10.8, 11.1])
+    highs.extend([11.3, 11.4])
+    lows.extend([10.9, 11.0])
+    closes.extend([11.2, 11.3])
+    highs[4], lows[4], closes[4] = 10.5, 10.3, 10.4
+    highs[5], lows[5], closes[5] = 11.2, 10.8, 11.0
+    highs[6], lows[6], closes[6] = 10.5, 10.3, 10.4
+
+    zones = detect_entry_zones(
+        symbol="XAUUSD",
+        timeframe="M5",
+        opens=opens,
+        highs=highs,
+        lows=lows,
+        closes=closes,
+        atr=0.3,
+    )
+
+    assert not any(z["zone_type"] == "ORDER_BLOCK" and z["origin_index"] == 2 for z in zones)
+
+
+def test_quality_zones_ignore_fvg_completed_by_forming_bar():
+    opens = [10.0, 10.2, 10.3, 10.8]
+    highs = [10.4, 10.3, 10.5, 11.0]
+    lows = [9.9, 10.0, 10.2, 10.9]
+    closes = [10.05, 10.2, 10.4, 10.95]
+    zones = detect_entry_zones(
+        symbol="XAUUSD",
+        timeframe="M5",
+        opens=opens,
+        highs=highs,
+        lows=lows,
+        closes=closes,
+        atr=0.2,
+    )
+
+    assert not any(z["zone_type"] == "FVG" for z in zones)
+
+
+def test_plan_uses_quality_zones_when_closed_ohlc_is_supplied():
+    opens, highs, lows, closes = _quality_zone_bars()
+    plan = build_entry_plan(
+        htf_closes=_rising(),
+        zone_highs=highs,
+        zone_lows=lows,
+        zone_opens=opens,
+        zone_closes=closes,
+        trigger_price=10.4,
+        atr=0.3,
+        require_inside_zone=True,
+    )
+
+    assert plan is not None
+    assert plan.direction == "BUY"
+    assert plan.zone_bottom < plan.entry < plan.zone_top
+
+
+def test_plan_does_not_fall_back_to_weak_zones_with_closed_ohlc():
+    opens = [10.0] * 60
+    highs = [10.1] * 60
+    lows = [9.9] * 60
+    closes = [10.0] * 60
+    plan = build_entry_plan(
+        htf_closes=_rising(),
+        zone_highs=highs,
+        zone_lows=lows,
+        zone_opens=opens,
+        zone_closes=closes,
+        trigger_price=10.0,
+        atr=0.1,
+        require_inside_zone=False,
+    )
+
+    assert plan is None
 
 
 # ---------------------------------------------------------------------------

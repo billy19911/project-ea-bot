@@ -30,6 +30,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from trading.entry_config import ZoneConfig
+from trading.entry_detectors import detect_fvgs, detect_order_blocks
 from trading.indicators import ema_series
 
 __all__ = [
@@ -37,6 +39,7 @@ __all__ = [
     "ZoneEntryGate",
     "find_order_blocks",
     "find_fair_value_gaps",
+    "detect_entry_zones",
     "compute_bias",
     "build_entry_plan",
     "pick_zone",
@@ -243,6 +246,104 @@ def find_fair_value_gaps(
     return fvgs[-5:]
 
 
+def detect_entry_zones(
+    *,
+    symbol: str,
+    timeframe: str,
+    opens: list[float],
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    atr: float,
+    config: ZoneConfig | None = None,
+    exclude_forming_bar: bool = True,
+) -> list[dict[str, Any]]:
+    """Return quality-gated, unconsumed zones from closed OHLC bars.
+
+    OB and FVG detection is shared by the live entry gate and chart endpoint.
+    The newest candle is excluded by default because MT5 includes the forming
+    bar in its OHLC response; later closed candles still determine whether a
+    zone has already been invalidated or fully filled.
+    """
+    size = min(len(opens), len(highs), len(lows), len(closes))
+    if exclude_forming_bar:
+        size -= 1
+    if size < 3 or atr <= 0:
+        return []
+
+    o = [float(value) for value in opens[:size]]
+    h = [float(value) for value in highs[:size]]
+    lo = [float(value) for value in lows[:size]]
+    c = [float(value) for value in closes[:size]]
+    cfg = config or ZoneConfig()
+    zones = detect_order_blocks(
+        symbol=symbol,
+        timeframe=timeframe,
+        opens=o,
+        highs=h,
+        lows=lo,
+        closes=c,
+        atr=atr,
+        config=cfg,
+    ) + detect_fvgs(
+        symbol=symbol,
+        timeframe=timeframe,
+        highs=h,
+        lows=lo,
+        atr=atr,
+        config=cfg,
+    )
+
+    result: list[dict[str, Any]] = []
+    for zone in zones:
+        follow_index = int(zone.metadata.get("follow_index", zone.origin_index + 1))
+        later = range(follow_index + 1, size)
+        touch_count = 0
+        was_touched = False
+        if zone.zone_type == "ORDER_BLOCK":
+            for index in later:
+                touched = lo[index] <= zone.top and h[index] >= zone.bottom
+                if touched and not was_touched:
+                    touch_count += 1
+                was_touched = touched
+            if touch_count > cfg.max_retests:
+                continue
+        if zone.zone_type == "FVG":
+            fully_filled = any(
+                lo[index] <= zone.bottom if zone.direction == "LONG" else h[index] >= zone.top
+                for index in later
+            )
+            if fully_filled:
+                continue
+        elif any(
+            (
+                c[index] < zone.invalidation_price
+                if zone.direction == "LONG"
+                else c[index] > zone.invalidation_price
+            )
+            for index in later
+        ):
+            continue
+
+        item = zone.to_dict()
+        item["type"] = "bullish" if zone.direction == "LONG" else "bearish"
+        item["mitigation"] = "FRESH"
+        item["touch_count"] = touch_count
+        if zone.zone_type == "FVG":
+            item["mitigation"] = (
+                "PARTIALLY_MITIGATED"
+                if any(
+                    lo[index] < zone.top if zone.direction == "LONG" else h[index] > zone.bottom
+                    for index in later
+                )
+                else "FRESH"
+            )
+        elif touch_count:
+            item["mitigation"] = "TOUCHED"
+        result.append(item)
+    return result
+
+
 def _zone_distance(zone: dict[str, Any], price: float) -> float:
     """Distance from ``price`` to the zone band (0 when inside the band)."""
     top = _num(zone.get("top"))
@@ -286,6 +387,9 @@ def build_entry_plan(
     min_bias_strength: float = 0.0,
     require_inside_zone: bool = True,
     zone_opens: list[float] | None = None,
+    zone_closes: list[float] | None = None,
+    zone_timeframe: str = "M5",
+    zone_config: ZoneConfig | None = None,
     zone_tolerance_atr: float = DEFAULT_ZONE_TOLERANCE_ATR,
     zone_proximity_atr: float = DEFAULT_ZONE_PROXIMITY_ATR,
     entry_trigger_atr: float = DEFAULT_ENTRY_TRIGGER_ATR,
@@ -324,9 +428,21 @@ def build_entry_plan(
         return None
 
     want = "bullish" if direction == "BULLISH" else "bearish"
-    zones = find_fair_value_gaps(zone_highs, zone_lows) + find_order_blocks(
-        zone_highs, zone_lows, zone_opens
-    )
+    if zone_closes is not None:
+        zones = detect_entry_zones(
+            symbol="",
+            timeframe=zone_timeframe,
+            opens=zone_opens or [],
+            highs=zone_highs,
+            lows=zone_lows,
+            closes=zone_closes,
+            atr=atr,
+            config=zone_config,
+        )
+    else:
+        zones = find_fair_value_gaps(zone_highs, zone_lows) + find_order_blocks(
+            zone_highs, zone_lows, zone_opens
+        )
     zone = _pick_zone(zones, want, price)
     if zone is None:
         return None
@@ -428,6 +544,9 @@ class ZoneEntryGate:
         atr: float = 0.0,
         rr: float = DEFAULT_RR,
         zone_opens: list[float] | None = None,
+        zone_closes: list[float] | None = None,
+        zone_timeframe: str = "M5",
+        zone_config: ZoneConfig | None = None,
         zone_tolerance_atr: float = DEFAULT_ZONE_TOLERANCE_ATR,
         zone_proximity_atr: float = DEFAULT_ZONE_PROXIMITY_ATR,
         entry_trigger_atr: float = DEFAULT_ENTRY_TRIGGER_ATR,
@@ -452,6 +571,9 @@ class ZoneEntryGate:
                 rr=rr,
                 require_inside_zone=True,
                 zone_opens=zone_opens,
+                zone_closes=zone_closes,
+                zone_timeframe=zone_timeframe,
+                zone_config=zone_config,
                 zone_tolerance_atr=zone_tolerance_atr,
                 zone_proximity_atr=zone_proximity_atr,
                 entry_trigger_atr=entry_trigger_atr,
@@ -469,6 +591,9 @@ class ZoneEntryGate:
                 rr=rr,
                 require_inside_zone=False,
                 zone_opens=zone_opens,
+                zone_closes=zone_closes,
+                zone_timeframe=zone_timeframe,
+                zone_config=zone_config,
                 zone_tolerance_atr=zone_tolerance_atr,
                 zone_proximity_atr=zone_proximity_atr,
                 entry_trigger_atr=entry_trigger_atr,

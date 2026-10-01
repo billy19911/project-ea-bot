@@ -64,6 +64,22 @@ type SigAnalysis = {
     sl?: number | null;
     tp?: number | null;
   }[];
+  zones?: {
+    scan_timeframe?: string;
+    scan?: SigZone[];
+    chart_timeframe?: string;
+    chart?: SigZone[];
+  };
+};
+
+type SigZone = {
+  zone_id?: string;
+  zone_type?: string;
+  direction?: string;
+  timeframe?: string;
+  top?: number;
+  bottom?: number;
+  mitigation?: string;
 };
 
 /** Last N values of a series, joined — enough to detect an indicator shift. */
@@ -113,12 +129,17 @@ export function analysisSignature(a: SigAnalysis | null | undefined): string {
   const pos = (a.positions ?? [])
     .map((p) => `${p.ticket ?? ''}:${p.side ?? ''}:${p.volume ?? ''}:${p.sl ?? ''}:${p.tp ?? ''}`)
     .join(',');
+  const zones = [...(a.zones?.scan ?? []), ...(a.zones?.chart ?? [])]
+    .map((z) => `${z.zone_id ?? ''}:${z.zone_type ?? ''}:${z.direction ?? ''}:${z.timeframe ?? ''}:${z.top ?? ''}:${z.bottom ?? ''}:${z.mitigation ?? ''}`)
+    .join(',');
   return [
     a.ok ? '1' : '0',
     a.reason ?? '',
     a.symbol ?? '',
     a.timeframe ?? '',
     a.bar_count ?? '',
+    a.zones?.scan_timeframe ?? '',
+    a.zones?.chart_timeframe ?? '',
     an
       ? [
           an.signal ?? '',
@@ -133,5 +154,6 @@ export function analysisSignature(a: SigAnalysis | null | undefined): string {
         ].join(';')
       : '',
     pos,
+    zones,
   ].join('|');
 }

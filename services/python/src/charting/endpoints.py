@@ -17,6 +17,8 @@ from fastapi import APIRouter, HTTPException, Query
 
 from ..strategy.endpoints import get_active_strategy_config
 from ..trading.engine import TradingEngine
+from ..trading.entry_zone import detect_entry_zones
+from ..trading.indicators import atr_series
 from .series import SUPPORTED_TIMEFRAMES, build_chart_payload
 
 router = APIRouter(prefix="/chart", tags=["chart"])
@@ -141,6 +143,45 @@ def _symbol_matches(chart_symbol: str, position_symbol: str) -> bool:
     return a == b or a.startswith(b) or b.startswith(a)
 
 
+def _zones_for_bars(symbol: str, timeframe: str, bars: list[Any]) -> list[dict[str, Any]]:
+    """Use the live entry detector to build chart zones from real OHLC bars."""
+
+    def values(key: str) -> list[float]:
+        result = []
+        for bar in bars:
+            value = bar.get(key, 0.0) if isinstance(bar, dict) else getattr(bar, key, 0.0)
+            try:
+                result.append(float(value))
+            except (TypeError, ValueError):
+                result.append(0.0)
+        return result
+
+    opens, highs, lows, closes = (values(key) for key in ("open", "high", "low", "close"))
+    if len(closes) < 16:
+        return []
+    atr_values = atr_series(highs[:-1], lows[:-1], closes[:-1], 14)
+    atr = float(atr_values[-1]) if atr_values and atr_values[-1] is not None else 0.0
+    zones = detect_entry_zones(
+        symbol=symbol,
+        timeframe=timeframe,
+        opens=opens,
+        highs=highs,
+        lows=lows,
+        closes=closes,
+        atr=atr,
+    )
+    reference_price = closes[-2]
+    counts: dict[tuple[str, str], int] = {}
+    selected: list[dict[str, Any]] = []
+    for zone in sorted(zones, key=lambda item: abs(float(item["mid"]) - reference_price)):
+        group = (str(zone["zone_type"]), str(zone["direction"]))
+        if counts.get(group, 0) >= 2:
+            continue
+        counts[group] = counts.get(group, 0) + 1
+        selected.append(zone)
+    return selected
+
+
 @router.get("/analysis")
 async def get_chart_analysis(
     symbol: str = Query(..., min_length=1, max_length=32, description="Symbol, e.g. XAUUSD"),
@@ -203,6 +244,18 @@ async def get_chart_analysis(
     )
     signal = result.signal
 
+    import os
+
+    scan_timeframe = (os.getenv("ZONE_TF") or "M5").strip().upper()
+    if scan_timeframe not in SUPPORTED_TIMEFRAMES:
+        scan_timeframe = "M5"
+    chart_zones = _zones_for_bars(symbol, timeframe, bars_data)
+    if scan_timeframe == timeframe:
+        scan_zones = chart_zones
+    else:
+        scan_bars = connector.get_ohlc(symbol, scan_timeframe, 60) or []
+        scan_zones = _zones_for_bars(symbol, scan_timeframe, scan_bars)
+
     open_positions = []
     try:
         for pos in connector.get_positions():
@@ -253,6 +306,12 @@ async def get_chart_analysis(
             "atr": snap.atr,
         },
         "positions": open_positions,
+        "zones": {
+            "scan_timeframe": scan_timeframe,
+            "scan": scan_zones,
+            "chart_timeframe": timeframe,
+            "chart": chart_zones,
+        },
         "provenance": {
             "source": "mt5",
             "mode": "live-read-only",

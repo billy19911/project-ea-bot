@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Phase 4.5 — canonical runtime cutover tests (A–L + adversarial Cases 1–7)."""
+
 from __future__ import annotations
 
 import threading
@@ -118,7 +119,7 @@ def test_zone_touch_without_trigger_waits_in_pipeline():
             "close": 100.0,
             "price": 100.0,
             "zone_bars_provider": lambda s: {
-                "bias_closes": [100.0] * 120,
+                "bias_closes": list(range(1, 121)),
                 "zone_highs": [101.0] * 60,
                 "zone_lows": [99.0] * 60,
                 "zone_opens": [100.0] * 60,
@@ -152,7 +153,7 @@ def test_trigger_confirmed_returns_plan_in_pipeline():
             "close": 100.0,
             "price": 100.0,
             "zone_bars_provider": lambda s: {
-                "bias_closes": [100.0] * 120,
+                "bias_closes": list(range(1, 121)),
                 "zone_highs": [101.0] * 60,
                 "zone_lows": [99.0] * 60,
                 "zone_opens": [100.0] * 60,
@@ -225,7 +226,7 @@ def test_legacy_plan_carries_trigger_assessment():
             "close": 100.0,
             "price": 100.0,
             "zone_bars_provider": lambda s: {
-                "bias_closes": [100.0] * 120,
+                "bias_closes": list(range(1, 121)),
                 "zone_highs": [101.0] * 60,
                 "zone_lows": [99.0] * 60,
                 "zone_opens": [100.0] * 60,
@@ -355,7 +356,7 @@ def test_shadow_verdict_recorded():
             "close": 100.0,
             "price": 100.0,
             "zone_bars_provider": lambda s: {
-                "bias_closes": [100.0] * 120,
+                "bias_closes": list(range(1, 121)),
                 "zone_highs": [101.0] * 60,
                 "zone_lows": [99.0] * 60,
                 "zone_opens": [100.0] * 60,

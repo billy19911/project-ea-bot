@@ -225,6 +225,7 @@ class TestChartAnalysisEndpoint:
         from src.mt5 import connector
 
         bars = _bars(120)
+        monkeypatch.setenv("ZONE_TF", "M5")
         monkeypatch.setattr(connector, "is_live_mode", lambda: True)
         monkeypatch.setattr(
             connector, "get_ohlc", lambda symbol, tf, count, before=None: bars[:count]
@@ -242,6 +243,10 @@ class TestChartAnalysisEndpoint:
         assert body["provenance"]["stop_multiplier"] == 2.0
         assert body["provenance"]["reward_risk_ratio"] == 2.0
         assert body["provenance"]["risk_percent"] == 2.0
+        assert body["zones"]["scan_timeframe"] == "M5"
+        assert body["zones"]["chart_timeframe"] == "H1"
+        assert isinstance(body["zones"]["scan"], list)
+        assert isinstance(body["zones"]["chart"], list)
 
         analysis = body["analysis"]
         assert analysis["signal"] in {"BUY", "SELL", "HOLD"}

@@ -2203,6 +2203,8 @@ class TradingPipeline:
             zone_highs = bars.get("zone_highs") or []
             zone_lows = bars.get("zone_lows") or []
             zone_opens = bars.get("zone_opens") or []
+            zone_closes = bars.get("zone_closes") or []
+            zone_timeframe = str(bars.get("zone_timeframe") or "M5")
             atr = float(bars.get("atr") or 0.0)
 
             rr = 0.0
@@ -2213,19 +2215,53 @@ class TradingPipeline:
 
             import trading.entry_zone as ez
 
+            proposal_direction = str(proposal.get("direction", "")).upper()
+            if proposal_direction not in {"BUY", "SELL"}:
+                return (
+                    None,
+                    f"arah sinyal tidak valid untuk entry zona: {proposal_direction or 'UNKNOWN'}",
+                )
+            bias = ez.compute_bias(bias_closes)
+            expected_bias = "BULLISH" if proposal_direction == "BUY" else "BEARISH"
+            if bias.get("direction") != expected_bias:
+                clear_pending = getattr(gate, "clear", None)
+                if callable(clear_pending):
+                    clear_pending(symbol)
+                actual_bias = str(bias.get("direction") or "NEUTRAL")
+                if actual_bias == "NEUTRAL":
+                    return (
+                        None,
+                        "bias M30/H1 netral; zona OB/FVG diblokir "
+                        f"untuk sinyal {proposal_direction}",
+                    )
+                return (
+                    None,
+                    f"bias M30/H1 {actual_bias} tidak searah " f"sinyal {proposal_direction}",
+                )
+
             plan = gate.evaluate(
                 symbol=symbol,
                 htf_closes=bias_closes,
                 zone_highs=zone_highs,
                 zone_lows=zone_lows,
                 zone_opens=zone_opens,
+                zone_closes=zone_closes,
+                zone_timeframe=zone_timeframe,
+                zone_config=ez.ZoneConfig(),
                 trigger_price=trigger_price,
                 atr=atr,
                 rr=(rr if rr > 0 else ez.DEFAULT_RR),
             )
             if plan is None:
                 return None, self._zone_wait_reason(
-                    bias_closes, zone_highs, zone_lows, trigger_price, atr
+                    bias_closes,
+                    zone_opens,
+                    zone_highs,
+                    zone_lows,
+                    zone_closes,
+                    zone_timeframe,
+                    trigger_price,
+                    atr,
                 )
             plan_dict = plan.to_dict()
             want = str(proposal.get("direction", "")).upper()
@@ -2236,7 +2272,10 @@ class TradingPipeline:
                     plan_dict.get("direction"),
                     want,
                 )
-                return None, f"arah zona {plan_dict.get('direction')} != sinyal {want}"
+                return (
+                    None,
+                    f"arah zona {plan_dict.get('direction')} bertentangan dengan sinyal {want}",
+                )
             # Phase 4.5 §A1: canonical trigger gate. Zone presence alone is NOT
             # entry — the deterministic Trigger Engine must confirm. A zone
             # plan WITHOUT trigger confirmation yields WAIT_TRIGGER (None +
@@ -2285,8 +2324,11 @@ class TradingPipeline:
     def _zone_wait_reason(
         self,
         bias_closes: list[float],
+        zone_opens: list[float],
         zone_highs: list[float],
         zone_lows: list[float],
+        zone_closes: list[float],
+        zone_timeframe: str,
         price: float,
         atr: float,
     ) -> str:
@@ -2300,12 +2342,19 @@ class TradingPipeline:
             if bias.get("direction") == "NEUTRAL":
                 return "bias pasar netral (M30/H1 tak searah)"
             want = "bullish" if bias["direction"] == "BULLISH" else "bearish"
-            zones = ez.find_fair_value_gaps(zone_highs, zone_lows) + ez.find_order_blocks(
-                zone_highs, zone_lows
+            zones = ez.detect_entry_zones(
+                symbol="",
+                timeframe=zone_timeframe,
+                opens=zone_opens,
+                highs=zone_highs,
+                lows=zone_lows,
+                closes=zone_closes,
+                atr=atr,
             )
+            zones = [zone for zone in zones if zone.get("type") == want]
             zone = ez.pick_zone(zones, want, price)
             if zone is None:
-                return "tak ada zona OB/FVG yang cocok"
+                return "tak ada zona OB/FVG berkualitas searah bias yang masih valid"
             dist = ez.zone_distance(zone, price)
             return (
                 f"harga {dist:.4g} dari zona (window {ez.DEFAULT_ENTRY_TRIGGER_ATR}×ATR"
@@ -2448,20 +2497,23 @@ class TradingPipeline:
                 float(b.get("open", 0.0)) if isinstance(b, dict) else float(getattr(b, "open", 0.0))
                 for b in zone_bars
             ]
+            zone_closes = [
+                (
+                    float(b.get("close", 0.0))
+                    if isinstance(b, dict)
+                    else float(getattr(b, "close", 0.0))
+                )
+                for b in zone_bars
+            ]
             atr = 0.0
             try:
                 from trading.indicators import atr_series
 
-                closes = [
-                    (
-                        float(b.get("close", 0.0))
-                        if isinstance(b, dict)
-                        else float(getattr(b, "close", 0.0))
-                    )
-                    for b in zone_bars
-                ]
-                if len(closes) >= 15:
-                    series = atr_series(zone_highs, zone_lows, closes, 14)
+                closed_highs = zone_highs[:-1]
+                closed_lows = zone_lows[:-1]
+                closed_closes = zone_closes[:-1]
+                if len(closed_closes) >= 15:
+                    series = atr_series(closed_highs, closed_lows, closed_closes, 14)
                     atr = float(series[-1]) if series else 0.0
             except Exception:  # noqa: BLE001 - ATR is optional
                 atr = 0.0
@@ -2470,6 +2522,8 @@ class TradingPipeline:
                 "zone_highs": zone_highs,
                 "zone_lows": zone_lows,
                 "zone_opens": zone_opens,
+                "zone_closes": zone_closes,
+                "zone_timeframe": zone_tf,
                 "atr": atr,
             }
         except Exception:  # noqa: BLE001

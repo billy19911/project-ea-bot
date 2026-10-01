@@ -3,6 +3,13 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Zona OB/FVG berkualitas: overlay chart + gate entry closed-bar + bias gate
+- `services/python/src/trading/entry_zone.py`: `detect_entry_zones()` baru — deteksi OB/FVG dari closed OHLC (forming bar dikecualikan), quality gate via `ZoneConfig` (retest limit, FVG fill, invalidasi), metadata `mitigation`/`touch_count`; `build_entry_plan`/`ZoneEntryGate` menerima `zone_closes`/`zone_timeframe`/`zone_config` (fallback deteksi lama bila `zone_closes` tidak diberikan — backward compat).
+- `services/python/src/orchestration/pipeline.py`: gate entry memakai detektor berkualitas + **bias M30/H1 wajib searah sinyal** (netral → blok dengan alasan jelas); `_zone_wait_reason` memakai detektor yang sama.
+- `services/python/src/charting/endpoints.py`: `/chart/analysis` menambah blok `zones` (scan via env `ZONE_TF`, default M5; chart = timeframe chart).
+- Web: `PriceChart.tsx` merender band zona (scan solid, chart dashed) + `zonesSignature` (memo stabil, tanpa flicker) + chip zona di `market/page.tsx` + CSS token `globals.css` + `chartSignature.ts`.
+- Test: `test_entry_zone.py` (+5), `test_charting.py` (assert blok zones), `test_phase4_5_cutover.py`; full suite **3149 passed**; `tsc --noEmit` web clean. Semua terminal tetap DISARMED.
+
 ### Added — Queue pressure stats (EventQueue) + isolasi test ops-drill
 - `services/python/src/trading/event_engine.py`: `EventQueue.stats()` — `queue_size` / `queue_capacity` / `queue_high_water` / `queue_rejected` (thread-safe; enqueue saat penuh menambah `queue_rejected`).
 - `services/python/src/trading/scheduler.py`: `stats()` menyertakan blok queue dari `queue.stats()`.
