@@ -724,7 +724,10 @@ export default function AppShell({
             <h1>{title}</h1>
           </div>
           <div className={styles.actions}>
-            <span className={styles.hideOnMobile}>{actions}</span>
+            {/* Page-supplied controls stay in the row and wrap together with the
+             * global theme toggle + environment badge — never hidden (invariant
+             * 23: critical status must remain visible at every width). */}
+            <span className={styles.pageActions}>{actions}</span>
             <ThemeToggle />
             <EnvironmentBadge environment={toEnvironment(account?.mode)} />
           </div>

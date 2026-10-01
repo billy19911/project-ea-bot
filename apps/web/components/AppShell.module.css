@@ -445,10 +445,14 @@
   position: sticky;
   top: 0;
   z-index: 20;
-  display: flex;
+  /* Robust header layout: the text column may shrink (minmax(0, 1fr)) while the
+   * actions column is sized to its content (min-content floored). This prevents
+   * long titles from being pushed out by fixed-width controls at any width. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-4);
+  column-gap: var(--sp-4);
+  row-gap: var(--sp-2);
   margin-bottom: var(--sp-6);
   padding: var(--sp-2) 0 var(--sp-4);
   border-bottom: 1px solid var(--border);
@@ -459,7 +463,10 @@
 }
 
 .topbarText {
+  /* WAJIB: allows the title/eyebrow to shrink and ellipsis instead of
+   * overflowing the grid track. */
   min-width: 0;
+  grid-column: 1;
 }
 
 .eyebrow {
@@ -469,6 +476,9 @@
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topbar h1 {
@@ -477,13 +487,34 @@
   font-size: var(--fs-2xl);
   font-weight: 700;
   letter-spacing: -0.02em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .actions {
+  grid-column: 2;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--sp-2);
-  flex-shrink: 0;
+  /* Actions may shrink below their content width (down to min-content) and
+   * wrap onto additional rows instead of forcing the grid wider. Individual
+   * controls never shrink below min-content, so buttons/badges never clip. */
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+/* Wrapper for page-supplied action fragments (e.g. a <>…</> pair). It is a
+ * flex container itself so the fragments lay out in one wrapping row alongside
+ * the theme toggle and environment badge, and it may shrink with the header. */
+.pageActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
 }
 
 /* Collapsed rail (desktop) --------------------------------------------------
@@ -694,11 +725,24 @@
   }
 
   .topbar {
-    gap: var(--sp-3);
+    /* Tablet/phone: [menu button] [title] on the first row, controls move to a
+     * dedicated full-width second row (defined wrap breakpoint) so page actions
+     * are never hidden and never push the title out of the viewport. */
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: var(--sp-3);
+    row-gap: var(--sp-2);
+  }
+
+  .menuBtn {
+    grid-column: 1;
+    grid-row: 1;
   }
 
   .topbarText {
-    flex: 1;
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
   }
 
   .topbar h1 {
@@ -709,11 +753,10 @@
   }
 
   .actions {
-    justify-content: flex-end;
-  }
-
-  .hideOnMobile {
-    display: none !important;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .main {
