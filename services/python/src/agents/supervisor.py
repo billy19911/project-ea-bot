@@ -15,6 +15,7 @@ Phase 7 enhancements:
 from __future__ import annotations
 
 import hashlib
+import importlib
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
@@ -148,6 +149,30 @@ def _record_activity(
         pass
 
 
+def _load_llm_errors() -> Any:
+    """Import the LLM error taxonomy under either import identity (TASK 12).
+
+    The supervisor is loaded as ``src.agents.supervisor`` in production but as a
+    top-level ``agents.supervisor`` under the test suite's dual-import scheme.
+    A bare relative import (``..llm.errors``) is invalid for the top-level
+    identity and would silently degrade every provider 503 to a generic
+    ``AGENT_EXCEPTION``. Try the relative spelling first, then both absolute
+    spellings so the real failing layer is always attributed.
+    """
+    last_exc: Optional[Exception] = None
+    for importer in (
+        lambda: importlib.import_module("..llm.errors", __package__),
+        lambda: importlib.import_module("llm.errors"),
+        lambda: importlib.import_module("src.llm.errors"),
+    ):
+        try:
+            return importer()
+        except Exception as exc:  # noqa: BLE001 - try the next identity
+            last_exc = exc
+            continue
+    raise ImportError(f"llm.errors unavailable: {last_exc}")
+
+
 def _classify_agent_exception(
     exc: BaseException, agent_name: str, event_type: str
 ) -> dict[str, Any]:
@@ -165,7 +190,8 @@ def _classify_agent_exception(
         A classified-error dict (never raises).
     """
     try:
-        from ..llm.errors import classify_llm_exception
+        llm_errors = _load_llm_errors()
+        classify_llm_exception = llm_errors.classify_llm_exception
 
         message = str(exc) or exc.__class__.__name__
         # LLM/provider-shaped exceptions carry a status code or a provider
@@ -179,7 +205,7 @@ def _classify_agent_exception(
         )
         if looks_llm:
             return classify_llm_exception(exc, agent=agent_name, event_id=event_type or None)
-        from ..llm.errors import classify  # noqa: PLC0415 - lazy, fail-safe
+        classify = llm_errors.classify
 
         if "timeout" in message.lower():
             return classify(
