@@ -234,6 +234,19 @@ def _coerce_float(value: Any) -> Optional[float]:
     return result
 
 
+def _event_attr(event: Any, name: str, default: Any = None) -> Any:
+    """Read ``name`` from a mapping event or a dataclass/object event.
+
+    The market feed passes :class:`trading.events.DetectedEvent` objects while
+    other callers pass plain dicts; both must work without raising.
+    """
+    if event is None:
+        return default
+    if isinstance(event, dict):
+        return event.get(name, default)
+    return getattr(event, name, default)
+
+
 # ── Default routing table ────────────────────────────────────────────────────
 # Keys are event-type substrings; values are agent names (registered in registry).
 # The supervisor matches an incoming event against this table and dispatches to
@@ -763,9 +776,9 @@ class SupervisorAgent(BaseAgent):
         committee_record = build_committee_record(
             event={
                 "event_id": context.get("event_id")
-                or (context.get("event") or {}).get("event_id", ""),
+                or _event_attr(context.get("event"), "event_id", ""),
                 "event_type": event_type,
-                "symbol": context.get("symbol") or (context.get("event") or {}).get("symbol", ""),
+                "symbol": context.get("symbol") or _event_attr(context.get("event"), "symbol", ""),
             },
             agent_outputs=display_results,
             decision=decision_str,

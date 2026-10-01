@@ -89,3 +89,31 @@ def _isolate_order_state_ledger(tmp_path, monkeypatch):
     yield
     reset_store()
     set_store(None)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_review_and_trade_ledger(tmp_path, monkeypatch):
+    """Isolate the process-wide review store + trade ledger between tests.
+
+    TASK 01 wired both as process-wide singletons at app startup. Tests that
+    boot the real FastAPI app (``TestClient(main.app)``) would otherwise
+    rehydrate ``logs/reviews.jsonl`` (the operator's real file, or another
+    test's leftovers) and ``/v2/r-performance`` would report ``NO_DATA`` for
+    seeded in-process records because the durable branch skips the fallback.
+    Point both paths at throwaway files and detach the singletons before AND
+    after every test.
+    """
+    monkeypatch.setenv("REVIEW_STORE_PATH", str(tmp_path / "reviews.jsonl"))
+    monkeypatch.setenv("TRADE_LEDGER_PATH", str(tmp_path / "trade_ledger.jsonl"))
+    try:
+        from persistence.review_store import set_review_store
+        from persistence.trade_ledger import set_trade_ledger
+    except Exception:  # pragma: no cover - import identity fallback
+        from src.persistence.review_store import set_review_store  # type: ignore
+        from src.persistence.trade_ledger import set_trade_ledger  # type: ignore
+
+    set_review_store(None)
+    set_trade_ledger(None)
+    yield
+    set_review_store(None)
+    set_trade_ledger(None)
