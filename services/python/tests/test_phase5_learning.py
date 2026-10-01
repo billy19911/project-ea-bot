@@ -332,12 +332,17 @@ def test_invalidated_decision_review_no_resurrect():
 
 
 def test_experiment_record_reproducible():
+    # created_at memakai wall-clock mikrodetik: dua konstruksi berurutan
+    # kadang melewati batas 1us sehingga to_dict() berbeda. Kunci eksplisit
+    # agar uji determinisme field input stabil.
+    fixed_ts = "2023-01-01T00:00:00+00:00"
     e1 = ExperimentRecord(
         experiment_id="ex1",
         hypothesis_id="h1",
         random_seed=42,
         data_window="2023-01..2023-12",
         cost_model={"spread": True},
+        created_at=fixed_ts,
     )
     e2 = ExperimentRecord(
         experiment_id="ex1",
@@ -345,6 +350,7 @@ def test_experiment_record_reproducible():
         random_seed=42,
         data_window="2023-01..2023-12",
         cost_model={"spread": True},
+        created_at=fixed_ts,
     )
     assert e1.to_dict() == e2.to_dict()
 
