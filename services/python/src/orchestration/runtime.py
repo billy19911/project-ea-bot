@@ -27,6 +27,7 @@ from execution.reconciliation_runner import (
     ReconciliationGuard,
     ReconciliationRunner,
 )
+from execution.restart_recovery import ReconciliationReadinessGate
 from market.news_feed import get_news_feed_provider
 from observability.traces import TraceCollector
 from risk.dependency_breakers import ExecutionGuard
@@ -544,6 +545,7 @@ class OrchestrationRuntime:
         reconciliation_runner: Optional[ReconciliationRunner] = None,
         execution_guard: Optional[ExecutionGuard] = None,
         event_gate: Optional[EventGate] = None,
+        recovery_coordinator: Optional[Any] = None,
     ) -> None:
         # TASK 05: runtime identity — process id + a unique instance id for this
         # runtime and every component it owns, so every analysis log can prove
@@ -573,6 +575,17 @@ class OrchestrationRuntime:
         # Audit P0-3: a critical reconciliation mismatch BLOCKS new orders. The
         # guard wraps the runner and is injected into the pipeline below.
         self._reconciliation_guard = ReconciliationGuard(self.reconciliation)
+        # TASK 08: restart-recovery readiness. When a coordinator is supplied the
+        # pipeline refuses new orders until recovery has reconciled broker ↔
+        # internal state. Default None keeps the pre-restart behaviour so tests
+        # and single-process runs are unaffected; the FastAPI lifespan wires a
+        # real coordinator (see main.py).
+        self.recovery_coordinator = recovery_coordinator
+        self._readiness_gate = (
+            ReconciliationReadinessGate(recovery_coordinator)
+            if recovery_coordinator is not None
+            else None
+        )
         # Audit P1-2: per-dependency circuit breakers (§24) + kill switch, wired
         # into the pipeline as the execution-critical dependency guard. An open
         # EXECUTION breaker or an engaged kill switch blocks new orders.
@@ -583,6 +596,7 @@ class OrchestrationRuntime:
             else self._build_pipeline(
                 reconciliation_guard=self._reconciliation_guard,
                 execution_guard=self.execution_guard,
+                readiness_guard=self._readiness_gate,
             )
         )
         # TASK 05: register the singleton component identities (first writer
@@ -691,6 +705,7 @@ class OrchestrationRuntime:
     def _build_pipeline(
         reconciliation_guard: Optional[Any] = None,
         execution_guard: Optional[Any] = None,
+        readiness_guard: Optional[Any] = None,
     ) -> TradingPipeline:
         """Build the production pipeline from the registered agents + risk gate."""
         # Audit P2-3: the production supervisor runs the configurable routing
@@ -914,6 +929,7 @@ class OrchestrationRuntime:
             lesson_provider=lesson_provider,
             reconciliation_guard=reconciliation_guard,
             dependency_guard=execution_guard,
+            readiness_guard=readiness_guard,
             single_entry_policy=one_entry_policy,
             entry_magic=entry_magic,
             entry_cooldown_s=entry_cooldown_s,
@@ -1185,6 +1201,30 @@ class OrchestrationRuntime:
     def last_reconciliation_ok(self) -> bool:
         """Whether the most recent reconciliation completed without criticals."""
         return self._reconciliation_runner.last_ok
+
+    # ------------------------------------------------------------------
+    # Restart recovery (TASK 08)
+    # ------------------------------------------------------------------
+    def run_recovery(self) -> Optional[dict[str, Any]]:
+        """Run the wired restart-recovery sequence and return its report.
+
+        Returns ``None`` when no recovery coordinator is wired (nothing to do).
+        The coordinator is fail-closed: it never raises, and until it reports
+        RECONCILED the readiness gate keeps blocking new orders.
+        """
+        if self.recovery_coordinator is None:
+            return None
+        report = self.recovery_coordinator.run()
+        return report.to_dict() if hasattr(report, "to_dict") else dict(report)
+
+    def recovery_state(self) -> Optional[dict[str, Any]]:
+        """Return the current restart-recovery report as a dict (or ``None``)."""
+        if self.recovery_coordinator is None:
+            return None
+        report = getattr(self.recovery_coordinator, "report", None)
+        if report is None:
+            return None
+        return report.to_dict() if hasattr(report, "to_dict") else dict(report)
 
 
 _runtime: Optional[OrchestrationRuntime] = None

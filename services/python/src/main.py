@@ -489,6 +489,19 @@ async def lifespan(app: FastAPI):
     except Exception:  # pragma: no cover - defensive, never block startup
         logger.exception("Execution recovery failed (startup continues)")
 
+    # TASK 08: restart recovery + durable reconciliation. Runs the ORDERED
+    # sequence (load durable intents → connect MT5 → read positions → read
+    # orders/deals → reconcile → rebuild state → permit new execution) and wires
+    # a fail-closed readiness gate into the pipeline. Until it converges the gate
+    # BLOCKS new orders. Fail-safe: a failure leaves the system fail-closed.
+    try:
+        from system.startup_checks import run_restart_recovery
+
+        rr_report = run_restart_recovery()
+        logger.info("Restart recovery at startup: %s", rr_report.get("summary"))
+    except Exception:  # pragma: no cover - defensive, never block startup
+        logger.exception("Restart recovery failed (system stays fail-closed)")
+
     # Autonomous scheduler (PRD_V2 §10.3, §32.17) — optional, non-blocking.
     scheduler_task = None
     if settings.scheduler_enabled:

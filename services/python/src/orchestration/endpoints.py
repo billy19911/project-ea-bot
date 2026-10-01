@@ -139,10 +139,32 @@ async def reconciliation_status() -> dict[str, Any]:
     runtime = get_runtime()
     last = runtime.last_reconciliation()
     history = runtime.reconciliation_history()
+    recovery = runtime.recovery_state()
     return {
         "last_report": last.to_dict() if last is not None else None,
         "history_count": len(history),
+        "recovery": recovery,
         "source": "live",
+    }
+
+
+@router.get(
+    "/reconciliation/recovery",
+    summary="Get restart-recovery state (TASK 08)",
+)
+async def reconciliation_recovery() -> dict[str, Any]:
+    """Return the restart-recovery report (durable reconciliation state).
+
+    Real data only: ``state`` is ``pending`` / ``reconciled`` / ``blocked``.
+    ``permits_execution`` is the fail-closed verdict the readiness gate uses —
+    False until the post-restart sequence has reconciled broker ↔ internal state.
+    """
+    runtime = get_runtime()
+    recovery = runtime.recovery_state()
+    return {
+        "recovery": recovery,
+        "permits_execution": bool(recovery.get("permits_execution")) if recovery else False,
+        "source": "live" if recovery is not None else "unavailable",
     }
 
 

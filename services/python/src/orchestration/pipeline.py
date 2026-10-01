@@ -337,6 +337,7 @@ class TradingPipeline:
         result_hook: Optional[Callable[[PipelineResult], None]] = None,
         lesson_provider: Optional[Any] = None,
         reconciliation_guard: Optional[Any] = None,
+        readiness_guard: Optional[Any] = None,
         money_manager: Optional[Any] = None,
         default_risk_pct: float = DEFAULT_RISK_PCT,
         # Safe default cap: a misconfigured/omitted value must NOT allow 1.0-lot
@@ -442,6 +443,11 @@ class TradingPipeline:
         # Optional reconciliation gate (audit P0-3). Same ``check_can_execute``
         # contract; a critical internal↔MT5 mismatch blocks new orders.
         self.reconciliation_guard = reconciliation_guard
+        # Optional restart-recovery readiness gate (TASK 08). Same
+        # ``check_can_execute`` contract: until the post-restart sequence has
+        # reconciled internal↔broker state it BLOCKS new orders. Optional so
+        # existing callers (which never restart mid-test) are unaffected.
+        self.readiness_guard = readiness_guard
         # Optional per-cycle result hook (Phase 5). Invoked exactly once per
         # cycle with the finished PipelineResult — the reporting seam used to
         # deliver Telegram reports. A broken hook is swallowed: reporting must
@@ -712,6 +718,26 @@ class TradingPipeline:
                 self._finalise(result)
                 return result
             result.add_stage("reconciliation", STAGE_OK, "internal state matches MT5")
+
+        # ── Step B3.5: Restart-recovery readiness gate (TASK 08) ────────
+        # After a restart the durable intents must be re-loaded, MT5 read and
+        # reconciled BEFORE any new order. Until that sequence converges the
+        # readiness gate is fail-closed. Fail-closed: a broken guard blocks.
+        if self.readiness_guard is not None:
+            try:
+                allowed, ready_reason = self.readiness_guard.check_can_execute()
+            except Exception as exc:  # fail-closed: a broken guard blocks
+                allowed, ready_reason = False, f"readiness guard error: {exc}"
+            if not allowed:
+                result.status = STATUS_BLOCKED
+                result.risk_reason = ready_reason or "execution blocked — restart recovery pending"
+                result.error = result.risk_reason
+                result.add_stage("readiness", STAGE_BLOCKED, result.risk_reason)
+                result.add_stage("execution", STAGE_SKIPPED, "restart recovery not ready")
+                self._mark_signal(result, "skipped", f"readiness: {result.risk_reason}")
+                self._finalise(result)
+                return result
+            result.add_stage("readiness", STAGE_OK, "restart recovery reconciled")
 
         # ── Step B4: One-entry policy ───────────────────────────────────
         # While one of OUR positions (matched by magic) is still open, a new
@@ -2601,7 +2627,30 @@ class TradingPipeline:
         result.client_order_id = str(client_order_id)
 
         market_quote = validation["market_info"]
-        return self.order_builder.build_order_request(build_proposal, market_quote)
+        request = self.order_builder.build_order_request(build_proposal, market_quote)
+
+        # TASK 08 — durable order identity on the single-terminal path too, so a
+        # restart can trace the persisted order back to its canonical signal +
+        # account + terminal. Best-effort: a builder double lacking these
+        # attributes is left untouched.
+        signal_id = getattr(result, "signal_id", None)
+        if signal_id and hasattr(request, "signal_id"):
+            try:
+                request.signal_id = str(signal_id)
+            except Exception:  # noqa: BLE001 - immutable/slotted double
+                pass
+        for name, getter in (
+            ("account_id", lambda: str(getattr(self, "_active_account_id", "") or "") or None),
+            ("terminal_id", lambda: str(getattr(self, "_active_terminal_id", "") or "") or None),
+        ):
+            if hasattr(request, name) and getattr(request, name, None) in (None, ""):
+                try:
+                    value = getter()
+                    if value:
+                        setattr(request, name, value)
+                except Exception:  # noqa: BLE001
+                    pass
+        return request
 
     # ------------------------------------------------------------------
     # Helpers — serialisation

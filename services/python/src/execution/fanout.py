@@ -789,10 +789,32 @@ class CanonicalFanout:
             request = self.order_builder.build_order_request(
                 build, proposal.get("market_quote") or {}
             )
+            # TASK 08 — stamp the durable order identity so the persisted ledger
+            # can trace the order back to its canonical signal + account +
+            # terminal across a restart. Only set when the request exposes the
+            # attributes (OrderRequest does; test doubles may not).
+            self._stamp_identity(request, signal, account_id)
             return request
         except Exception as exc:  # noqa: BLE001
             logger.warning("Fan-out request build failed: %s", exc)
             return None
+
+    @staticmethod
+    def _stamp_identity(request: Any, signal: CanonicalSignal, account_id: str) -> None:
+        """Attach durable order identity to the built request (TASK 08).
+
+        Best-effort: a request object lacking these attributes is left untouched
+        (never raises into the execution path).
+        """
+        for name, value in (
+            ("signal_id", signal.signal_id),
+            ("account_id", account_id),
+        ):
+            if hasattr(request, name):
+                try:
+                    setattr(request, name, value)
+                except Exception:  # noqa: BLE001 - immutable/slotted doubles
+                    pass
 
 
 def _proposal_request(proposal: dict[str, Any], signal: CanonicalSignal, account_id: str) -> Any:
@@ -814,6 +836,8 @@ def _proposal_request(proposal: dict[str, Any], signal: CanonicalSignal, account
             magic=int(proposal.get("magic") or 70000),
             comment=f"{proposal.get('comment') or 'EA-Bot'} {signal.signal_id}",
             idempotency_key=f"{signal.signal_id}:{account_id}",
+            signal_id=signal.signal_id,
+            account_id=account_id,
         )
     except Exception:  # noqa: BLE001
         return proposal

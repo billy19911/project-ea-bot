@@ -92,6 +92,17 @@ class OrderRequest:
     so a direct call to the executor (or an un-gated order surface) fails
     closed instead of reaching MT5.
     """
+    # TASK 08 — durable order identity. Optional account/signal metadata stamped
+    # by the caller (fan-out coordinator / pipeline) so the persisted ledger can
+    # always trace an order back to the canonical signal + account + terminal it
+    # belongs to. ``intent_id`` is the ``idempotency_key`` above; the broker
+    # tickets are filled in by the engine once the broker acknowledges them.
+    signal_id: Optional[str] = None
+    account_id: Optional[str] = None
+    terminal_id: Optional[str] = None
+    broker_order_ticket: Optional[int] = None
+    broker_deal_ticket: Optional[int] = None
+    broker_position_ticket: Optional[int] = None
 
 
 @dataclass
@@ -228,6 +239,25 @@ class ExecutionEngine:
         # simulated fills within the same millisecond must not collide on the
         # same ticket number.
         self._sim_ticket_seq = 0
+
+    @staticmethod
+    def _identity_fields(request: OrderRequest) -> dict[str, Any]:
+        """Return the durable order-identity fields for a request (TASK 08).
+
+        Only non-empty values are emitted so a partial identity never overwrites
+        a previously-persisted good value with ``None``. The canonical
+        ``intent_id`` is the request's idempotency key (durable across restarts).
+        """
+        fields: dict[str, Any] = {"intent_id": request.idempotency_key}
+        for name in ("signal_id", "account_id", "terminal_id"):
+            value = getattr(request, name, None)
+            if value not in (None, ""):
+                fields[name] = value
+        for name in ("broker_order_ticket", "broker_deal_ticket", "broker_position_ticket"):
+            value = getattr(request, name, None)
+            if value not in (None, ""):
+                fields[name] = value
+        return fields
 
     def _next_simulated_ticket(self) -> int:
         """Return a unique, monotonically-increasing simulated ticket id.
@@ -566,8 +596,21 @@ class ExecutionEngine:
                     send_latency_ms = (time.monotonic() - send_started) * 1000.0
                     if send_res.get("success"):
                         ticket = send_res.get("ticket")
-                        set_order(request.idempotency_key, OrderState.SUBMITTED, {"ticket": ticket})
-                        set_order(request.idempotency_key, OrderState.ACKNOWLEDGED)
+                        # TASK 08 — persist durable order identity atomically with
+                        # the broker tickets. The broker order ticket == deal
+                        # ticket for a market DEAL on MT5; the position ticket is
+                        # what reconciliation matches against ``positions_get``.
+                        identity = self._identity_fields(request)
+                        set_order(
+                            request.idempotency_key,
+                            OrderState.SUBMITTED,
+                            {"ticket": ticket, **identity, "broker_order_ticket": ticket},
+                        )
+                        set_order(
+                            request.idempotency_key,
+                            OrderState.ACKNOWLEDGED,
+                            {"ticket": ticket, "broker_deal_ticket": ticket},
+                        )
                         confirmed = self.confirm_execution(ticket)
                         if confirmed:
                             set_order(request.idempotency_key, OrderState.FILLED)
@@ -582,6 +625,10 @@ class ExecutionEngine:
                                     "symbol": request.symbol,
                                     "volume": request.volume,
                                     "magic": request.magic,
+                                    **self._identity_fields(request),
+                                    "broker_order_ticket": ticket,
+                                    "broker_deal_ticket": ticket,
+                                    "broker_position_ticket": ticket,
                                 },
                             )
 
@@ -653,6 +700,10 @@ class ExecutionEngine:
                             "symbol": request.symbol,
                             "volume": request.volume,
                             "magic": request.magic,
+                            **self._identity_fields(request),
+                            "broker_order_ticket": adopted.ticket,
+                            "broker_deal_ticket": adopted.ticket,
+                            "broker_position_ticket": adopted.ticket,
                         },
                     )
                     self._completed_orders[request.idempotency_key] = adopted
