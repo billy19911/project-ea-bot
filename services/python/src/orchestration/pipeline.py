@@ -304,6 +304,35 @@ class _FanoutExecutionAdapter:
         return base
 
 
+class _BlockedExecutionAdapter:
+    """Present a fail-closed execution result with the single-order shape.
+
+    Used when the single-terminal path is invoked while MORE THAN ONE terminal
+    is armed (B-9 Lanjutan): sending one order via the process-wide binding
+    would silently reach only one account and leave the others without an
+    order. The pipeline refuses instead and tells the operator to use canonical
+    fan-out (or to disarm all but one terminal).
+    """
+
+    def __init__(self, message: str) -> None:
+        self.success = False
+        self.ticket = None
+        self.error_code = 1
+        self.error_message = message
+        self.retries = 0
+        self.position_opened = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "ticket": self.ticket,
+            "error_code": self.error_code,
+            "error_message": self.error_message,
+            "retries": self.retries,
+            "position_opened": self.position_opened,
+        }
+
+
 class TradingPipeline:
     """Runs one autonomous decision cycle end-to-end.
 
@@ -2592,7 +2621,42 @@ class TradingPipeline:
                 tp_price=tp_distance,
             )
             return _FanoutExecutionAdapter(fanout)
+        # B-9 Lanjutan: single-terminal path + MORE THAN ONE armed terminal is a
+        # mis-expectation — the process-wide binding can only reach one account,
+        # so the other armed accounts would silently receive NO order. Fail
+        # closed with an explicit message instead of sending a partial order.
+        armed_count = self._armed_terminal_count()
+        if armed_count > 1:
+            message = (
+                "MULTIPLE TERMINALS ARMED — single-terminal execution disabled. "
+                "Enable canonical fan-out (canonical_fanout_enabled) or disarm "
+                "all but one."
+            )
+            logger.warning("Execution blocked (single path, %d armed): %s", armed_count, message)
+            return _BlockedExecutionAdapter(message)
         return self.execution_engine.execute_order(request)
+
+    @staticmethod
+    def _armed_terminal_count() -> int:
+        """Count armed+eligible terminals (fail-closed: any doubt → 0).
+
+        Reads ``mt5.terminals.get_armed_terminals`` under both import identities
+        so it works whether the service runs as ``src.*`` or ``*``. Any import
+        or lookup error yields 0 — the single-terminal path then proceeds as
+        before rather than spuriously blocking.
+        """
+        for mod_name in ("mt5.terminals", "src.mt5.terminals"):
+            try:
+                import importlib
+
+                terms = importlib.import_module(mod_name)
+                return len(list(terms.get_armed_terminals()))
+            except ImportError:
+                continue
+            except Exception as exc:  # noqa: BLE001 - any doubt → treat as 0
+                logger.warning("Armed terminal count lookup failed (assuming 0): %s", exc)
+                return 0
+        return 0
 
     def _revalidate_final_order(
         self,

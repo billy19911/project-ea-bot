@@ -216,6 +216,20 @@ KNOBS: tuple[Knob, ...] = (
         ),
         applied_to="TradingPipeline.zone_entry_enabled",
     ),
+    Knob(
+        key="canonical_fanout_enabled",
+        kind="bool",
+        minimum=0,
+        maximum=1,
+        default=0,
+        description=(
+            "Fan-out kanonik multi-akun: SATU sinyal kanonik dikirim ke SEMUA "
+            "terminal yang di-arm (re-attach binding PER AKUN sebelum order akun "
+            "dikirim, lalu binding dipulihkan). Default NONAKTIF. Aktifkan hanya "
+            "setelah terminal di-arm (uji di DEMO dulu)."
+        ),
+        applied_to="TradingPipeline.fanout_coordinator",
+    ),
 )
 
 _BY_KEY = {k.key: k for k in KNOBS}

@@ -108,6 +108,23 @@ def _isolate_fanout_ledger():
     fanout_mod.set_fanout_ledger(fanout_mod.FanoutLedger())
 
 
+@pytest.fixture(autouse=True)
+def _stub_mt5_connector(monkeypatch):
+    """B-9 Lanjutan: fan-out re-attaches the process-wide binding per account.
+
+    These are headless tests (no MetaTrader5), so stub the connector so the
+    synthetic re-attach is a no-op success. The real per-account routing is
+    verified by tests/test_b9_multi_arm_hardening.py with a recording connector.
+    """
+    try:
+        connector = importlib.import_module("mt5.connector")
+        monkeypatch.setattr(connector, "shutdown", lambda: None)
+        monkeypatch.setattr(connector, "use_live_data_mode", lambda path=None: True)
+    except Exception:  # pragma: no cover - connector module always importable
+        pass
+    yield
+
+
 # ===========================================================================
 # Shared fakes / helpers — REAL components + injected MT5 boundary
 # ===========================================================================
@@ -952,7 +969,14 @@ class TestScenarioLLiveDisarmed:
         assert res.success is False
         assert "NOT ARMED" in (res.error_message or "").upper()
 
-    def test_armed_helper_is_fail_closed_for_unattached(self, tmp_path, monkeypatch):
+    def test_arm_is_allowed_without_attachment(self, tmp_path, monkeypatch):
+        """B-9 Lanjutan: arm no longer requires an attached binding.
+
+        The binding is a DATA pointer; per-account re-attach happens at
+        execution, and the engine/pipeline validate "attached to an armed
+        terminal" / ">1 armed fail-closed" separately. Arm succeeds here, then
+        the test disarms (safety).
+        """
         self._write_config(
             tmp_path,
             monkeypatch,
@@ -968,7 +992,10 @@ class TestScenarioLLiveDisarmed:
         )
         monkeypatch.setattr(terminals_mod, "_detect_attached_path", lambda: None)
         res = terminals_mod.arm_terminal("vito2", True)
-        assert res["ok"] is False  # not attached → cannot arm
+        assert res["ok"] is True  # running + execution:true → arm allowed
+        assert terminals_mod.get_armed_terminals() == ["vito2"]
+        # Cleanup (the autouse fixture also disarms).
+        terminals_mod.arm_terminal("vito2", False)
         assert terminals_mod.is_execution_armed() is False
 
 

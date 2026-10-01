@@ -76,3 +76,69 @@ Enable parallel execution across multiple MT5 accounts with individual active/in
 **Assignee:** OpenCode (via `opencode-task-runner`)  
 **Estimated effort:** 3-4 hours  
 **Priority:** P1 (user-requested feature)
+
+---
+
+## B-9 Lanjutan — Multi-Arm Hardening (implemented)
+
+The per-terminal ARM/API/UI already existed, but multi-arm (manual, per-account
+arm) could not run END-TO-END because of four gaps. All four are now closed.
+
+### 1. Select no longer disarms (`mt5.terminals.select_terminal`)
+`select_terminal` used to loop `for st in _terminal_states.values(): st["armed"] = False`
+before re-attaching the binding. That loop is REMOVED. Selecting a terminal now
+only (a) validates the entry (not found / not running → reject), (b) re-attaches
+the process-wide binding (shutdown + `use_live_data_mode(path)`), (c) marks it
+selected and unmarks the rest, (d) saves the selection, (e) clears the symbol
+cache. **Arm state is never touched** — success OR failed re-attach. The success
+message is now `Terminal '<id>' selected. Attached to: <path>. Arm state unchanged.`
+and a failed attach still reports a detached binding without changing any arm
+state.
+
+### 2. Arm no longer requires an attached binding (`mt5.terminals.arm_terminal`)
+The `if not entry["attached"]: reject` guard is REMOVED. Arm now requires only:
+registered + running + `"execution": true`. Rationale: the process-wide MT5
+binding is a DATA pointer only; each account is re-attached right before its
+order (canonical fan-out), and the single-terminal path validates
+"binding attached to an armed terminal" separately (`execution_permitted()` and
+the pipeline guard below). Disarm is still always allowed.
+
+### 3. Canonical fan-out re-attaches PER ACCOUNT (`execution.fanout.CanonicalFanout`)
+`fan_out` remembers the originally attached path, and for EVERY target with a
+truthy `path` it now does `connector.shutdown()` + `connector.use_live_data_mode(path=...)`
++ `clear_symbol_cache()` BEFORE dispatching that account's order. A failed
+re-attach fails ONLY that account (`FAILED`, "gagal attach ke terminal '<id>'");
+the others still proceed. A `finally` block restores the original binding
+(best-effort, never raises). A path-less target (test double) skips re-attach
+for backward compat.
+
+### 4. Single-terminal path fails closed when >1 terminal is armed (`orchestration.pipeline`)
+`_dispatch_execution` counts armed+eligible terminals (dual-import helper,
+fail-closed to 0). When fan-out is OFF and the count is > 1 it does NOT send an
+order; it returns a failure adapter with:
+`MULTIPLE TERMINALS ARMED — single-terminal execution disabled. Enable canonical fan-out (canonical_fanout_enabled) or disarm all but one.`
+Count ≤ 1 keeps the historic behaviour. The fan-out branch is unaffected.
+
+### Gate verification (already enforced, now covered by tests)
+`mt5.terminals.execution_permitted()` already required "≥1 armed & eligible
+terminal AND the binding currently attached to one of them" (fail-closed). The
+engine's `_native_execution_armed()` consults it. New tests confirm: 2 armed +
+binding attached to one of them → `True`; binding attached to a NON-armed
+terminal → `False`; an armed terminal that stops running → `False`.
+
+### How to use
+- **Single account (e.g. `bil2` DEMO)**: arm `bil2` → the fan-out target set is
+  the single `bil2`, so a canonical fan-out sends exactly one order.
+- **Three accounts**: arm all three (select no longer disarms the others), then
+  enable `canonical_fanout_enabled` (Settings knob, default NONAKTIF) so ONE
+  canonical signal fans out to every armed terminal with per-account re-attach.
+
+### LIMITATIONS (next phase)
+- `modify_position_sltp` changes SL/TP through the CURRENTLY attached binding; if
+  a ticket belongs to a different terminal the broker rejects it (order_send to
+  the wrong terminal). Per-terminal SL/TP routing is a future phase.
+- Per-account monitoring / reconciliation that is terminal-aware (loop every
+  armed terminal) is a future phase.
+- `canonical_fanout_enabled` is wired when the pipeline is constructed; a change
+  takes effect on the next process start (the coordinator is built once).
+- Fan-out remains OFF by default; execution stays DISARMED by default.

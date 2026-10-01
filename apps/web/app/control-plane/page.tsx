@@ -1504,7 +1504,7 @@ function TerminalPanel({
                     <button
                       className={s.tab}
                       disabled={busy || !hasToken || !t.running || t.selected}
-                      title={!hasToken ? 'Membutuhkan token di localStorage (ea-bot-token)' : t.selected ? 'Terminal sudah terpilih' : t.running ? 'Pilih terminal ini (binding di-attach ulang, arm di-reset)' : 'Terminal tidak berjalan'}
+                      title={!hasToken ? 'Membutuhkan token di localStorage (ea-bot-token)' : t.selected ? 'Terminal sudah terpilih' : t.running ? 'Pilih terminal ini (binding di-attach ulang; status arm tidak berubah)' : 'Terminal tidak berjalan'}
                       onClick={() => post('/mt5/terminals/select', { terminal_id: t.id }, `Terminal ${t.id} dipilih.`)}
                     >
                       Pilih
@@ -1583,8 +1583,9 @@ function TerminalPanel({
           </button>
           <span className={s.mono}>
             Arm mengizinkan eksekusi lewat jalur yang sudah di-guard; order nyata tetap butuh aksi
-            manual. Tombol Arm/Disarm per baris di tabel mengontrol arm per terminal (B-9); ganti
-            terminal selalu me-reset semua arm ke OFF.
+            manual. Tombol Arm/Disarm per baris di tabel mengontrol arm per terminal (B-9); memilih
+            (select) terminal lain hanya memindah fokus/binding dan TIDAK mengubah status arm — arm
+            diatur manual per terminal (beberapa terminal bisa armed sekaligus).
           </span>
         </div>
       )}

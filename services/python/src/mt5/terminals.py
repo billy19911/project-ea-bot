@@ -13,7 +13,8 @@ Safety model (accounts may be LIVE):
    to receive real orders. Every terminal defaults to ``false``.
 2. Even when eligible, execution stays OFF until the operator explicitly
    arms the selected terminal (dashboard -> POST /mt5/terminals/arm).
-3. Switching the selected terminal always disarms execution.
+3. Switching the selected terminal only MOVES the data binding; it does not
+   change any terminal's arm state (multi-arm, B-9 Lanjutan).
 4. Auto-detected terminals (running but not in the config file) can be
    selected for data, but can never be armed for execution.
 """
@@ -633,8 +634,11 @@ def probe_accounts() -> dict[str, Any]:
 def select_terminal(terminal_id: str) -> dict[str, Any]:
     """Select a terminal as the active data target and re-attach the binding.
 
-    Switching terminals ALWAYS disarms execution (safety: an arm state must
-    never silently carry over to a different terminal).
+    Selection only MOVES the process-wide binding (used for DATA); it never
+    touches the per-terminal arm state. In the multi-terminal model several
+    terminals may stay armed at once and each account is re-attached
+    individually at execution time (canonical fan-out), so a select must NOT
+    silently disarm other armed terminals.
     """
     with _binding_lock:
         return _select_terminal_locked(terminal_id)
@@ -674,11 +678,8 @@ def _select_terminal_locked(terminal_id: str) -> dict[str, Any]:
     # Re-attach: shutdown + initialize(path=exe). Verified working at runtime.
     from . import connector
 
-    # Safety: disarm ALL terminals BEFORE touching the binding — a switch (even
-    # a failed one) must never leave execution armed while the binding is ambiguous.
-    for st in _terminal_states.values():
-        st["armed"] = False
-
+    # B-9 Lanjutan: selection NEVER touches arm state — the binding is a DATA
+    # pointer only, so switching focus must not disarm other armed terminals.
     connector.shutdown()
     ok = connector.use_live_data_mode(path=entry["path"])
     if not ok:
@@ -690,7 +691,7 @@ def _select_terminal_locked(terminal_id: str) -> dict[str, Any]:
                 "The binding is now detached — re-select a running terminal."
             ),
             "selected_id": _selected_id,
-            "execution_armed": False,
+            "execution_armed": _execution_armed,
             "attached_path": _detect_attached_path(),
         }
 
@@ -713,10 +714,10 @@ def _select_terminal_locked(terminal_id: str) -> dict[str, Any]:
         "ok": True,
         "message": (
             f"Terminal '{terminal_id}' selected. "
-            f"Attached to: {attached or 'unknown'}. Execution disarmed."
+            f"Attached to: {attached or 'unknown'}. Arm state unchanged."
         ),
         "selected_id": _selected_id,
-        "execution_armed": False,
+        "execution_armed": _execution_armed,
         "attached_path": attached,
     }
 
@@ -857,10 +858,12 @@ def arm_terminal(terminal_id: str, armed: bool) -> dict[str, Any]:
     - it is currently running,
     - it is marked ``"execution": true`` in the config file (LIVE accounts
       must opt in explicitly; ``vito2`` ships with ``execution: false``).
-    - the binding is attached to it (live mode). The MetaTrader5 binding is
-      process-wide (one terminal per process), so an order can only land on
-      the attached terminal; arming a terminal that is not attached would
-      silently route orders elsewhere.
+
+    An attached binding is NOT required (B-9 Lanjutan): the process-wide
+    MetaTrader5 binding is a DATA pointer only; the execution engine re-attaches
+    to each armed account right before sending that account's order (canonical
+    fan-out), and the single-terminal path validates "binding attached to an
+    armed terminal" separately in the pipeline/engine.
 
     Disarming is always allowed (fail-safe).
     """
@@ -905,16 +908,6 @@ def arm_terminal(terminal_id: str, armed: bool) -> dict[str, Any]:
                 f"Terminal '{terminal_id}' is not execution-enabled. Set "
                 '"execution": true for it in mt5_terminals.json, then arm again '
                 "(the config is re-read on every request — no restart needed)."
-            ),
-        }
-    if not entry["attached"]:
-        return {
-            "ok": False,
-            "terminal_id": terminal_id,
-            "armed": False,
-            "message": (
-                f"The binding is not attached to terminal '{terminal_id}'. "
-                "Select it first (POST /mt5/terminals/select)."
             ),
         }
 

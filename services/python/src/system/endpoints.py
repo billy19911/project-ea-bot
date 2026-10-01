@@ -476,6 +476,11 @@ def _apply_to_runtime(values: dict[str, float]) -> dict[str, Any]:
     for toggle_key in ("fanout_enabled", "zone_entry_enabled"):
         if toggle_key in values:
             applied[toggle_key] = bool(values[toggle_key])
+    # B-9 Lanjutan: canonical fan-out toggle. Wired at pipeline construction
+    # (the coordinator is built once), so the value is reported for the UI to
+    # persist; a change takes effect on the next process start.
+    if "canonical_fanout_enabled" in values:
+        applied["canonical_fanout_enabled"] = bool(values["canonical_fanout_enabled"])
     if errors:
         applied["_errors"] = errors
     return applied

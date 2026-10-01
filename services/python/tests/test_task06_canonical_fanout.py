@@ -27,8 +27,18 @@ pipeline_mod = importlib.import_module("orchestration.pipeline")
 # Fixtures / fakes
 # ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
-def _isolate_ledger():
+def _isolate_ledger(monkeypatch):
     fanout_mod.set_fanout_ledger(fanout_mod.FanoutLedger())
+    # B-9 Lanjutan: fan-out now re-attaches the process-wide binding per account.
+    # These are headless tests (no MetaTrader5), so stub the connector so the
+    # synthetic re-attach is a no-op success — the per-account routing itself is
+    # verified by tests/test_b9_multi_arm_hardening.py with a recording connector.
+    try:
+        connector = importlib.import_module("mt5.connector")
+        monkeypatch.setattr(connector, "shutdown", lambda: None)
+        monkeypatch.setattr(connector, "use_live_data_mode", lambda path=None: True)
+    except Exception:  # pragma: no cover - connector module always importable
+        pass
     yield
     fanout_mod.set_fanout_ledger(fanout_mod.FanoutLedger())
 

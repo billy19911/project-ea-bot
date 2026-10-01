@@ -103,8 +103,9 @@ async def list_terminals() -> dict:
 async def select_terminal(request: SelectTerminalRequest):
     """Select the active terminal and re-attach the binding to it.
 
-    Switching always disarms execution. Returns 400 when the terminal is
-    unknown or not running.
+    Selection only moves the DATA binding — the per-terminal arm state is NOT
+    changed (B-9 Lanjutan). Returns 400 when the terminal is unknown or not
+    running.
     """
     result = terminal_manager.select_terminal(request.terminal_id)
     if not result.get("ok"):
@@ -117,8 +118,9 @@ async def select_terminal(request: SelectTerminalRequest):
 async def arm_terminal(request: ArmRequest):
     """Arm or disarm real order execution for the selected terminal (legacy).
 
-    Arming requires: a running selected terminal, ``"execution": true`` in
-    mt5_terminals.json, and an active attachment. Returns 400 otherwise.
+    Arming requires: a running selected terminal and ``"execution": true`` in
+    mt5_terminals.json. An attached binding is NOT required (B-9 Lanjutan).
+    Returns 400 otherwise.
     Kept for backward compat — the per-terminal endpoint below is preferred.
     """
     result = terminal_manager.arm_execution(request.armed)

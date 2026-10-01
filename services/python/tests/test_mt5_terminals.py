@@ -5,8 +5,8 @@ Covers the safety model end to end, without a real MT5 terminal:
 
 - config parsing (missing/malformed files degrade safely),
 - terminal listing merged with auto-detected running processes,
-- selection re-attaches the binding and ALWAYS disarms execution,
-- arming requires: running + execution-enabled + attached (fail-closed),
+- selection re-attaches the binding but does NOT change any arm state (B-9),
+- arming requires: running + execution-enabled (attach NOT required, B-9),
 - ``execution_permitted()`` is the final gate consulted by the engine,
 - ``/mt5/terminals`` endpoints report the registry honestly.
 
@@ -227,8 +227,8 @@ class TestSelectTerminal:
         assert result["ok"] is False
         assert "not running" in result["message"].lower()
 
-    def test_switch_reattaches_and_disarms(self, monkeypatch, tmp_path):
-        """Selecting C must re-attach and reset the arm switch to OFF."""
+    def test_switch_reattaches_and_keeps_arm_state(self, monkeypatch, tmp_path):
+        """Selecting C must re-attach but NOT change any terminal's arm state."""
         _use_config(monkeypatch, tmp_path, CONFIG_TWO)
         monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\C", 3333))
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\C"))
@@ -245,18 +245,20 @@ class TestSelectTerminal:
             lambda path=None: (calls.append(path), True)[1],
         )
 
-        # Pretend execution was armed before the switch.
-        terminals._execution_armed = True
+        # Arm terminal "c" (execution-enabled) before the switch.
+        terminals._state_for("c")["armed"] = True
+        terminals._sync_backcompat_globals()
 
         result = terminals.select_terminal("c")
         assert result["ok"] is True
         assert calls[0] == "shutdown"
         assert calls[1] == r"C:\mt\C\terminal64.exe"
-        assert result["execution_armed"] is False
-        assert terminals.is_execution_armed() is False
+        # B-9 Lanjutan: arm state is UNCHANGED by a select.
+        assert result["execution_armed"] is True
+        assert terminals.is_execution_armed() is True
         assert terminals._selected_id == "c"
 
-    def test_failed_reattach_disarms_and_reports(self, monkeypatch, tmp_path):
+    def test_failed_reattach_keeps_arm_state_and_reports(self, monkeypatch, tmp_path):
         _use_config(monkeypatch, tmp_path, CONFIG_TWO)
         monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\C", 3333))
         monkeypatch.setattr(terminals, "_detect_attached_path", lambda: None)
@@ -265,11 +267,13 @@ class TestSelectTerminal:
         monkeypatch.setattr(real_connector, "shutdown", lambda: None)
         monkeypatch.setattr(real_connector, "use_live_data_mode", lambda path=None: False)
 
-        terminals._execution_armed = True
+        terminals._state_for("c")["armed"] = True
+        terminals._sync_backcompat_globals()
         result = terminals.select_terminal("c")
         assert result["ok"] is False
-        assert result["execution_armed"] is False
-        assert terminals.is_execution_armed() is False
+        # B-9 Lanjutan: a failed re-attach does NOT touch arm state either.
+        assert terminals.is_execution_armed() is True
+        assert result["execution_armed"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -309,17 +313,20 @@ class TestArmExecution:
         assert result["ok"] is False
         assert terminals.is_execution_armed() is False
 
-    def test_arm_requires_attached_binding(self, monkeypatch, tmp_path):
-        """Running + execution-enabled but the binding is elsewhere → reject."""
+    def test_arm_ignores_binding_attachment(self, monkeypatch, tmp_path):
+        """Running + execution-enabled, binding elsewhere → arm SUCCEEDS (B-9).
+
+        The binding is a DATA pointer only; re-attach happens per account at
+        execution time, so an attached binding is no longer an arm requirement.
+        """
         _use_config(monkeypatch, tmp_path, CONFIG_TWO)
         monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\C", 3333))
         monkeypatch.setattr(terminals, "_detect_attached_path", lambda: r"C:\mt\OTHER")
         terminals._selected_id = "c"
 
         result = terminals.arm_execution(True)
-        assert result["ok"] is False
-        assert "attached" in result["message"].lower()
-        assert terminals.is_execution_armed() is False
+        assert result["ok"] is True
+        assert terminals.is_execution_armed() is True
 
     def test_arm_succeeds_when_all_conditions_met(self, monkeypatch, tmp_path):
         _use_config(monkeypatch, tmp_path, CONFIG_TWO)
@@ -500,16 +507,21 @@ class TestArmTerminal:
         assert result["ok"] is False
         assert "not running" in result["message"].lower()
 
-    def test_arm_not_attached_rejected(self, monkeypatch, tmp_path):
-        """Running + eligible but the binding is elsewhere → reject."""
+    def test_arm_without_attachment_succeeds(self, monkeypatch, tmp_path):
+        """Running + eligible but the binding is elsewhere → arm SUCCEEDS (B-9).
+
+        Attach is no longer required: the binding is re-pointed per account at
+        execution time (fan-out) and the single path validates "attached to an
+        armed terminal" in the engine/pipeline.
+        """
         _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
         monkeypatch.setattr(terminals, "scan_running_terminals", _two_running())
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
 
         result = terminals.arm_terminal("demo2", True)
-        assert result["ok"] is False
-        assert "attached" in result["message"].lower()
-        assert terminals.get_armed_terminals() == []
+        assert result["ok"] is True
+        assert result["armed"] is True
+        assert set(terminals.get_armed_terminals()) == {"demo2"}
 
     def test_get_armed_terminals_filters_ineligible(self, monkeypatch, tmp_path):
         """An armed terminal that stops running is dropped from the list."""
@@ -542,22 +554,26 @@ class TestArmTerminal:
         assert by_id["demo2"]["armed"] is False
         assert view["armed_terminals"] == ["bil2"]
 
-    def test_select_disarms_all_terminals(self, monkeypatch, tmp_path):
-        """Switching the selected terminal disarms EVERY armed terminal."""
+    def test_select_keeps_other_armed_terminals(self, monkeypatch, tmp_path):
+        """B-9 core: selecting C does NOT disarm previously armed A/B."""
         _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
         monkeypatch.setattr(terminals, "scan_running_terminals", _two_running())
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
-        terminals.arm_terminal("bil2", True)
+        # Arm BOTH bil2 and demo2 — no attach requirement.
+        assert terminals.arm_terminal("bil2", True)["ok"] is True
+        assert terminals.arm_terminal("demo2", True)["ok"] is True
+        assert set(terminals.get_armed_terminals()) == {"bil2", "demo2"}
 
         real_connector = importlib.import_module("mt5.connector")
         monkeypatch.setattr(real_connector, "shutdown", lambda: None)
         monkeypatch.setattr(real_connector, "use_live_data_mode", lambda path=None: True)
-        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\DEMO2"))
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
 
-        result = terminals.select_terminal("demo2")
+        result = terminals.select_terminal("bil2")
         assert result["ok"] is True
-        assert terminals.get_armed_terminals() == []
-        assert terminals.is_execution_armed() is False
+        # Select only moves focus/binding — BOTH terminals stay armed.
+        assert set(terminals.get_armed_terminals()) == {"bil2", "demo2"}
+        assert terminals.is_execution_armed() is True
 
 
 class TestArmTerminalEndpoint:

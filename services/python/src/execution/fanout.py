@@ -361,52 +361,78 @@ class CanonicalFanout:
         if targets is None:
             targets = self._resolve_targets()
 
+        # B-9 Lanjutan: the process-wide MT5 binding must point at the account
+        # whose order is being sent, otherwise the order (and the symbol
+        # resolver) could land on / read the WRONG broker. Remember where the
+        # binding was so it can be restored in the ``finally`` (fail-safe).
+        connector = self._load_connector()
+        original_path = self._current_attached_path() if connector is not None else None
+
         executed = rejected = failed = duplicates = 0
         rows: list[dict[str, Any]] = []
 
-        for target in targets or []:
-            account_id = self._account_id_for(target)
-            if not account_id:
-                # Cannot attribute a per-account decision → skip (fail-closed).
-                continue
+        try:
+            for target in targets or []:
+                account_id = self._account_id_for(target)
+                if not account_id:
+                    # Cannot attribute a per-account decision → skip (fail-closed).
+                    continue
 
-            # Duplicate fan-out guard: a terminal (signal, account) never re-sends.
-            if self.ledger.is_terminal(signal.signal_id, account_id):
-                duplicates += 1
-                existing = self.ledger.get_account_dispatch(signal.signal_id, account_id)
-                rows.append(
-                    existing.to_dict()
-                    if existing
-                    else {"account_id": account_id, "duplicate": True}
+                # Duplicate fan-out guard: a terminal (signal, account) never re-sends.
+                if self.ledger.is_terminal(signal.signal_id, account_id):
+                    duplicates += 1
+                    existing = self.ledger.get_account_dispatch(signal.signal_id, account_id)
+                    rows.append(
+                        existing.to_dict()
+                        if existing
+                        else {"account_id": account_id, "duplicate": True}
+                    )
+                    continue
+
+                dispatch = AccountDispatch(
+                    signal_id=signal.signal_id,
+                    account_id=account_id,
+                    terminal_id=str(target.get("id") or ""),
+                    environment=str(self._account_mode(target)),
                 )
-                continue
+                self.ledger.upsert_account_dispatch(dispatch)
 
-            dispatch = AccountDispatch(
-                signal_id=signal.signal_id,
-                account_id=account_id,
-                terminal_id=str(target.get("id") or ""),
-                environment=str(self._account_mode(target)),
-            )
-            self.ledger.upsert_account_dispatch(dispatch)
+                # B-9 Lanjutan: re-attach the binding to THIS account's terminal
+                # BEFORE the account's order is built/sent. A path-less test
+                # double skips re-attach (backward-compat). A failed re-attach
+                # only fails THIS account; the others still proceed.
+                attach_ok, attach_msg = self._reattach_for_target(target, connector)
+                if not attach_ok:
+                    dispatch.set_status(
+                        AccountExecutionStatus.FAILED,
+                        attach_msg or f"gagal attach ke terminal '{target.get('id')}'",
+                    )
+                    self.ledger.upsert_account_dispatch(dispatch)
+                    failed += 1
+                    rows.append(dispatch.to_dict())
+                    continue
 
-            try:
-                self._process_account(signal, target, dispatch, raw_proposal)
-            except Exception as exc:  # noqa: BLE001 - one account must not abort others
-                logger.warning("Fan-out account %s failed: %s", account_id, exc)
-                dispatch.set_status(AccountExecutionStatus.FAILED, str(exc)[:200])
+                try:
+                    self._process_account(signal, target, dispatch, raw_proposal)
+                except Exception as exc:  # noqa: BLE001 - one account must not abort others
+                    logger.warning("Fan-out account %s failed: %s", account_id, exc)
+                    dispatch.set_status(AccountExecutionStatus.FAILED, str(exc)[:200])
 
-            # Re-upsert so the aggregate signal_status reflects the FINAL
-            # per-account status (REJECTED/FILLED/FAILED), not the PENDING
-            # placeholder registered before processing.
-            self.ledger.upsert_account_dispatch(dispatch)
+                # Re-upsert so the aggregate signal_status reflects the FINAL
+                # per-account status (REJECTED/FILLED/FAILED), not the PENDING
+                # placeholder registered before processing.
+                self.ledger.upsert_account_dispatch(dispatch)
 
-            if dispatch.status in _EXECUTED_STATUSES:
-                executed += 1
-            elif dispatch.status == AccountExecutionStatus.REJECTED:
-                rejected += 1
-            elif dispatch.status == AccountExecutionStatus.FAILED:
-                failed += 1
-            rows.append(dispatch.to_dict())
+                if dispatch.status in _EXECUTED_STATUSES:
+                    executed += 1
+                elif dispatch.status == AccountExecutionStatus.REJECTED:
+                    rejected += 1
+                elif dispatch.status == AccountExecutionStatus.FAILED:
+                    failed += 1
+                rows.append(dispatch.to_dict())
+        finally:
+            # ALWAYS restore the binding to where it was (fail-safe, best-effort).
+            self._restore_binding(connector, original_path)
 
         signal_status = self.ledger.signal_status(signal.signal_id) or SignalStatus.VALIDATED
         return {
@@ -419,6 +445,89 @@ class CanonicalFanout:
             "failed": failed,
             "duplicates": duplicates,
         }
+
+    # ------------------------------------------------------------------
+    # Binding (re-attach / restore) — B-9 Lanjutan
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _load_connector() -> Optional[Any]:
+        """Return the mt5 connector module, or None when unavailable."""
+        for mod_name in ("mt5.connector", "src.mt5.connector"):
+            try:
+                import importlib
+
+                return importlib.import_module(mod_name)
+            except ImportError:
+                continue
+            except Exception as exc:  # noqa: BLE001 - best-effort, never block
+                logger.warning("Fan-out connector load failed: %s", exc)
+                return None
+        return None
+
+    @staticmethod
+    def _current_attached_path() -> Optional[str]:
+        """Return the folder of the currently attached terminal (or None)."""
+        try:
+            import MetaTrader5 as mt5
+
+            info = mt5.terminal_info()
+            path = getattr(info, "path", None) if info else None
+            return str(path) if path else None
+        except Exception:  # noqa: BLE001 - best-effort
+            return None
+
+    @staticmethod
+    def _clear_symbol_cache() -> None:
+        """Drop the symbol-resolution cache (symbols differ per broker)."""
+        for mod_name in ("mt5.symbol_resolver", "src.mt5.symbol_resolver"):
+            try:
+                import importlib
+
+                mod = importlib.import_module(mod_name)
+                clear = getattr(mod, "clear_symbol_cache", None)
+                if clear is not None:
+                    clear()
+                return
+            except ImportError:
+                continue
+            except Exception:  # noqa: BLE001 - best-effort
+                return
+
+    def _reattach_for_target(
+        self, target: dict[str, Any], connector: Optional[Any]
+    ) -> tuple[bool, str]:
+        """Re-attach the process-wide binding to ``target``'s terminal.
+
+        Returns ``(ok, message)``. A ``path``-less target (test double) or an
+        unavailable connector is treated as a no-op success (backward-compat).
+        Never raises.
+        """
+        path = target.get("path")
+        if not path:
+            return True, ""
+        if connector is None:
+            return True, ""
+        tid = target.get("id")
+        try:
+            connector.shutdown()
+            if not connector.use_live_data_mode(path=path):
+                return False, f"gagal attach ke terminal '{tid}'"
+        except Exception as exc:  # noqa: BLE001 - a failed attach only fails this account
+            return False, f"gagal attach ke terminal '{tid}': {exc}"
+        self._clear_symbol_cache()
+        return True, ""
+
+    @staticmethod
+    def _restore_binding(connector: Optional[Any], original_path: Optional[str]) -> None:
+        """Restore the binding to ``original_path`` (best-effort, never raises)."""
+        if connector is None:
+            return
+        try:
+            connector.shutdown()
+            if original_path:
+                connector.use_live_data_mode(path=original_path)
+        except Exception as exc:  # noqa: BLE001 - restore is best-effort
+            logger.warning("Fan-out: could not restore binding: %s", exc)
 
     # ------------------------------------------------------------------
     # Internal
