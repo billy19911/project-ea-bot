@@ -150,4 +150,4 @@ curl -s http://127.0.0.1:8787/mt5/terminals | python -m json.tool
 **Created:** 2026-10-01
 **Assignee:** OpenCode (serial, 1 task per agent, gate-verified) — verifier: assistant + user
 **Priority:** P1 (user-requested)
-**Status:** IMPLEMENTED & VERIFIED — TASK 1–6 selesai & lulus STOP GATE; full suite 3120 passed; E2E smoke LULUS via instance sementara kode-B-10 (:8791, terisolasi): arm `vito2` (tadinya `execution:false`) → `ok:true` → `armed_terminals:["vito2"]` → disarm → bersih; arm terminal stopped (`vito1`) → `ok:false "is not running"` (fail-closed); state akhir semua DISARMED. Catatan: server utama `:8787` (PID 4908) masih memuat kode pra-B-10 sampai di-restart (butuh UAC).
+**Status:** IMPLEMENTED & VERIFIED — TASK 1–6 selesai & lulus STOP GATE; full suite 3120 passed. E2E smoke LULUS di server utama `:8787` (pasca-restart, PID 39696, kode B-10 aktif): arm `vito2` (LIVE, tadinya `execution:false`) → `ok:true` → `armed_terminals:["vito2"]` → disarm → bersih; arm terminal stopped (`vito1`) → `ok:false "is not running"` (fail-closed); Node proxy `:3789` meneruskan `armable` (tanpa `execution_allowed`); state akhir semua DISARMED. Tidak ada order nyata.
