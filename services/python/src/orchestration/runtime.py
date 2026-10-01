@@ -102,6 +102,81 @@ def _fanout_enabled() -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+def _canonical_fanout_enabled() -> bool:
+    """Return whether canonical-signal fan-out is enabled (default OFF).
+
+    Read from ``CANONICAL_FANOUT_ENABLED`` (true/1/yes/on). Default OFF so the
+    historic single-terminal behaviour is preserved unless the operator opts in.
+    """
+    import os as _os
+
+    raw = (_os.getenv("CANONICAL_FANOUT_ENABLED") or "false").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _build_fanout_coordinator(risk_gate: Any, order_builder: Any) -> Optional[Any]:
+    """Build the canonical-signal fan-out coordinator (TASK 06) — fail-safe None.
+
+    Wired with the real terminal targets (``mt5.terminals.get_fanout_targets``)
+    and a per-account Risk Gate that reuses the SAME deterministic
+    :class:`~risk.gate.RiskGate` the single-terminal path uses, but applied to
+    each account's own state. Returns None when the execution layer is not
+    importable so the pipeline falls back to the single-terminal path.
+    """
+    try:
+        from execution.fanout import CanonicalFanout, get_fanout_ledger
+    except Exception as exc:  # noqa: BLE001 - never block startup
+        logger.warning("Canonical fan-out coordinator not wired: %s", exc)
+        return None
+
+    def _targets() -> list[dict[str, Any]]:
+        for mod_name in ("mt5.terminals", "src.mt5.terminals"):
+            try:
+                import importlib
+
+                terms = importlib.import_module(mod_name)
+                return list(terms.get_fanout_targets())
+            except ImportError:
+                continue
+            except Exception as exc:  # noqa: BLE001 - any doubt → no targets
+                logger.warning("Canonical fan-out target lookup failed: %s", exc)
+                return []
+        return []
+
+    def _symbol_resolver(symbol: str, target: dict[str, Any]) -> str:
+        try:
+            from mt5.symbol_resolver import resolve_symbol
+
+            return resolve_symbol(symbol) or symbol
+        except Exception:  # noqa: BLE001 - fall back to the base symbol
+            return symbol
+
+    return CanonicalFanout(
+        # The coordinator places each account's order via the shared execution
+        # engine, so account orders go through the exact same armed-terminal
+        # gate (real dispatch requires an armed + eligible terminal).
+        execution_engine=_default_single_terminal_sender(),
+        risk_gate=risk_gate,
+        targets_provider=_targets,
+        order_builder=order_builder,
+        symbol_resolver=_symbol_resolver,
+        ledger=get_fanout_ledger(),
+    )
+
+
+def _default_single_terminal_sender() -> Optional[Any]:
+    """Return an object exposing ``execute_order`` for one account dispatch.
+
+    Reuses the process-wide :class:`ExecutionEngine` in simulation when MT5 is
+    absent; real dispatch still requires an armed+eligible terminal (enforced by
+    the engine and ``mt5.terminals``).
+    """
+    try:
+        return ExecutionEngine()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _zone_entry_enabled() -> bool:
     """Return whether the OB/FVG watch-and-fire entry gate is enabled (F2).
 
@@ -844,6 +919,14 @@ class OrchestrationRuntime:
             # switched on from the dashboard without a restart.
             zone_entry_enabled=_toggle_provider("zone_entry_enabled", _zone_entry_enabled),
             zone_entry_gate=_build_zone_entry_gate(),
+            # TASK 06: canonical-signal fan-out. When the toggle is ON, ONE
+            # immutable signal is fanned out to N accounts (each broker-
+            # normalized + risk-gated per account). Off → single-terminal path.
+            fanout_coordinator=(
+                _build_fanout_coordinator(risk_gate, order_builder)
+                if _toggle_provider("canonical_fanout_enabled", _canonical_fanout_enabled)()
+                else None
+            ),
         )
 
     def run_cycle(

@@ -162,6 +162,12 @@ class PipelineResult:
     # Persisted with the decision history so every committee cycle is traceable.
     committee_record: dict[str, Any] = field(default_factory=dict)
     committee_narrative: str = ""
+    # TASK 06: the ONE immutable canonical signal (serialised) shared by every
+    # account, its stable ``signal_id``, and the per-account fan-out report
+    # (signal_status + per-account status rows). Empty when fan-out is not wired.
+    canonical_signal: dict[str, Any] = field(default_factory=dict)
+    signal_id: str = ""
+    fanout: Optional[dict[str, Any]] = None
 
     def add_stage(self, stage: str, status: str, detail: str = "") -> None:
         """Append a stage entry (as a plain dict) to the trace."""
@@ -196,6 +202,9 @@ class PipelineResult:
             "data_source": self.data_source,
             "committee_record": self.committee_record,
             "committee_narrative": self.committee_narrative,
+            "canonical_signal": self.canonical_signal,
+            "signal_id": self.signal_id,
+            "fanout": self.fanout,
         }
 
 
@@ -342,6 +351,7 @@ class TradingPipeline:
         fanout_enabled: Any = False,
         zone_entry_enabled: Any = False,
         zone_entry_gate: Optional[Any] = None,
+        fanout_coordinator: Optional[Any] = None,
     ) -> None:
         self.supervisor = supervisor
         self.risk_gate = risk_gate
@@ -357,6 +367,11 @@ class TradingPipeline:
         # zero-arg callable (live dashboard toggle).
         self._zone_entry_enabled_provider = _as_toggle(zone_entry_enabled, default=False)
         self.zone_entry_gate = zone_entry_gate
+        # TASK 06: canonical-signal fan-out coordinator. When supplied, an
+        # approved proposal is turned into ONE immutable CanonicalSignal and
+        # fanned out to N accounts (each broker-normalized + risk-gated
+        # per account). None → the historic single-terminal dispatch path.
+        self.fanout_coordinator = fanout_coordinator
         # Phase 4.5 §18 shadow comparator store (observability only).
         self._last_shadow_verdicts: dict[str, dict[str, Any]] = {}
         self.order_builder = order_builder if order_builder is not None else OrderBuilder()
@@ -758,7 +773,9 @@ class TradingPipeline:
                 logger.debug("Zone entry plan apply skipped: %s", exc)
 
         # ── Step C: Execution (only when explicitly approved) ───────────
-        if self.execution_engine is None:
+        # A canonical fan-out coordinator owns its own per-account execution;
+        # it satisfies the execution dependency without a single-terminal engine.
+        if self.execution_engine is None and self.fanout_coordinator is None:
             result.status = STATUS_ERROR
             result.error = "execution engine not configured"
             result.add_stage("execution", STAGE_ERROR, "execution engine not configured")
@@ -783,6 +800,14 @@ class TradingPipeline:
 
         result.client_order_id = request.idempotency_key
         result.execution_id = _new_id("exec")
+
+        # ── Step C1: Canonical signal fan-out (TASK 06) ─────────────────
+        # When a fan-out coordinator is wired, ONE immutable canonical signal
+        # is created here and dispatched to N accounts (each broker-normalized
+        # and risk-gated per account). The single-terminal path below is
+        # bypassed so an account can never reach execution without the signal.
+        if self.fanout_coordinator is not None:
+            return self._dispatch_canonical_fanout(result, proposal, validation, analysis_context)
 
         try:
             exec_result = self._dispatch_execution(request)
@@ -2281,6 +2306,127 @@ class TradingPipeline:
             }
         except Exception:  # noqa: BLE001
             return {}
+
+    def _build_canonical_signal(
+        self,
+        result: PipelineResult,
+        proposal: dict[str, Any],
+        validation: dict[str, Any],
+    ) -> Any:
+        """Build the ONE immutable canonical signal for this opportunity (TASK 06).
+
+        ``signal_id`` prefers the committee's / supervisor's id (so the signal is
+        traceable back to the analysis) and otherwise derives deterministically
+        from the opportunity identity — the same event can never mint two ids.
+        """
+        from trading.canonical_signal import make_canonical_signal
+
+        norm = validation["proposal"]
+        entry = float(norm.get("entry_price") or 0.0)
+        sl = float(norm.get("stop_loss") or 0.0)
+        tp = float(norm.get("take_profit") or 0.0)
+        risk = abs(entry - sl) if (entry > 0 and sl > 0) else 0.0
+        reward = abs(tp - entry) if (entry > 0 and tp > 0) else 0.0
+        planned_rr = (reward / risk) if risk > 0 else 0.0
+
+        opportunity_id = (
+            result.event_id or str(validation.get("opportunity_id") or "") or result.decision_id
+        )
+        committee_signal_id = ""
+        if isinstance(result.committee_record, dict):
+            committee_signal_id = str(result.committee_record.get("signal_id") or "")
+
+        risk_policy = {
+            "risk_pct": float(norm.get("risk_pct") or 0.0),
+            "max_lot_per_trade": self.max_lot_per_trade,
+            "single_entry_policy": self.single_entry_policy,
+        }
+        return make_canonical_signal(
+            opportunity_id=opportunity_id,
+            symbol=str(norm.get("symbol") or result.symbol or ""),
+            direction=str(result.decision or norm.get("direction") or "").upper(),
+            entry_reference=entry,
+            initial_SL=sl,
+            initial_TP=tp,
+            planned_RR=planned_rr,
+            risk_policy=risk_policy,
+            strategy_version=self.strategy_version,
+            signal_id=(committee_signal_id or None),
+        )
+
+    def _dispatch_canonical_fanout(
+        self,
+        result: PipelineResult,
+        proposal: dict[str, Any],
+        validation: dict[str, Any],
+        analysis_context: dict[str, Any],
+    ) -> PipelineResult:
+        """Fan ONE canonical signal out to N accounts (TASK 06).
+
+        Success (executed on ≥1 account) marks the signal OPEN in the registry;
+        a partial/total rejection does NOT re-open analysis and does NOT create a
+        second signal — it is recorded per account and reported. Fail-safe: a
+        coordinator error is recorded as a failed execution, never raised.
+        """
+        try:
+            signal = self._build_canonical_signal(result, proposal, validation)
+        except Exception as exc:  # noqa: BLE001 - never break the cycle
+            logger.exception("Canonical signal build failed for event %s", result.event_id)
+            result.status = STATUS_ERROR
+            result.error = f"canonical signal error: {exc}"
+            result.add_stage("canonical_signal", STAGE_ERROR, str(exc))
+            self._finalise(result)
+            return result
+
+        result.canonical_signal = signal.to_dict()
+        result.signal_id = signal.signal_id
+        if isinstance(result.committee_record, dict):
+            result.committee_record.setdefault("signal_id", signal.signal_id)
+        result.add_stage("canonical_signal", STAGE_OK, f"signal_id={signal.signal_id}")
+
+        try:
+            fanout = self.fanout_coordinator.fan_out(
+                signal,
+                raw_proposal={
+                    "volume": float(validation["proposal"].get("size") or 0.0),
+                    "magic": self.entry_magic,
+                    "comment": f"EA-Bot-{signal.direction}",
+                    "market_quote": validation.get("market_info") or {},
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - recorded failure, never propagated
+            logger.exception("Canonical fan-out failed for signal %s", signal.signal_id)
+            result.status = STATUS_ERROR
+            result.error = f"fan-out error: {exc}"
+            result.add_stage("execution", STAGE_ERROR, str(exc))
+            self._finalise(result)
+            return result
+
+        result.fanout = fanout
+        result.execution_result = fanout
+        executed = int(fanout.get("executed", 0) or 0)
+        rejected = int(fanout.get("rejected", 0) or 0)
+        failed = int(fanout.get("failed", 0) or 0)
+        result.executed = executed > 0
+        result.status = STATUS_EXECUTED if executed > 0 else STATUS_ERROR
+        result.add_stage(
+            "execution",
+            STAGE_OK if executed > 0 else STAGE_ERROR,
+            (
+                f"fan-out: {executed} executed / {rejected} rejected / "
+                f"{failed} failed (signal_status={fanout.get('signal_status')})"
+            ),
+        )
+
+        if executed > 0:
+            self._record_entry(result.symbol, proposal, validation)
+            self._mark_signal(result, "open", "entry terbuka (fan-out)")
+        else:
+            # No account executed — do NOT request a new signal. Mark FAILED so
+            # the identical signal is not re-emitted every cycle.
+            self._mark_signal(result, "failed", "fan-out: tidak ada akun tereksekusi")
+        self._finalise(result)
+        return result
 
     def _dispatch_execution(self, request: OrderRequest) -> Any:
         """Dispatch one decision — fan-out to many terminals, or single order.
