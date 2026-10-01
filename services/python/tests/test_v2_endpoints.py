@@ -189,10 +189,86 @@ def test_accounts_and_capital() -> None:
     assert client.get("/v2/capital").status_code == 200
 
 
+def test_capital_exposes_ui_facing_keys() -> None:
+    """TASK 11: the Risk Center binds to these derived, real keys."""
+    r = client.get("/v2/capital")
+    assert r.status_code == 200
+    value = r.json()["value"]
+    for key in (
+        "total_equity",
+        "gross_exposure",
+        "total_capital",
+        "allocated",
+        "available",
+        "utilization",
+    ):
+        assert key in value
+    # No fabricated equity: when MT5 is not live, equity_bnd is False and
+    # total_capital falls back to the (real) allocator value of 0.0, not 10000.
+    assert value["equity_bound"] in (True, False)
+    assert value["allocations_configured"] is False
+
+
+def test_circuit_breaker_exposes_real_execution_guard() -> None:
+    """TASK 11: the endpoint surfaces the real, pipeline-fed guard."""
+    r = client.get("/v2/circuit-breaker")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["value_wired"] is False
+    # The runtime execution guard is returned (kill switch + dependency breakers).
+    assert "execution_guard" in body
+
+
 def test_performance_intelligence_endpoint() -> None:
     r = client.get("/v2/performance-intelligence?dimension=hour")
     assert r.status_code == 200
     assert r.json()["dimension"] == "hour"
+
+
+def test_performance_hour_and_session_dimensions_use_real_close_time() -> None:
+    """TASK 11: hour/session buckets come from the real close timestamp."""
+    from datetime import datetime, timezone
+
+    from src.review.advanced_review import RootCauseClassification
+    from src.review.auto_trigger import ReviewRecord, set_auto_trigger
+    from src.review.trade_review import TradeReviewResult
+
+    class _Trigger:
+        def recent(self, limit: int = 50):
+            return [
+                ReviewRecord(
+                    trade_id="T-H",
+                    review=TradeReviewResult(
+                        trade_id="T-H",
+                        outcome="WIN",
+                        pnl=100.0,
+                        mae=0.0,
+                        mfe=1.0,
+                        timing_score=50.0,
+                        decision_quality_score=50.0,
+                        execution_quality_score=100.0,
+                        summary="x",
+                    ),
+                    root_cause=RootCauseClassification(
+                        primary_cause="none", secondary_causes=[], confidence=1.0
+                    ),
+                    trade_result={"symbol": "XAUUSD"},
+                    r_multiple=1.0,
+                    # 09:00 UTC → "london" session, hour bucket "9".
+                    closed_at=datetime(2025, 3, 4, 9, 0, tzinfo=timezone.utc),
+                )
+            ]
+
+    set_auto_trigger(_Trigger())  # type: ignore[arg-type]
+    try:
+        hour = client.get("/v2/performance-intelligence?dimension=hour").json()
+        assert hour["trade_count"] == 1
+        assert [b["key"] for b in hour["value"]] == ["9"]
+
+        session = client.get("/v2/performance-intelligence?dimension=session").json()
+        assert [b["key"] for b in session["value"]] == ["london"]
+    finally:
+        set_auto_trigger(None)
 
 
 def test_r_performance_endpoint_returns_buckets() -> None:

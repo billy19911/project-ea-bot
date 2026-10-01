@@ -302,25 +302,31 @@ async def tasks() -> dict[str, Any]:
     for name, entry in snapshot.items():
         for idx, rec in enumerate(entry.get("recent", [])):
             at = rec.get("at", "")
+            # TASK 11: the per-run outcome is real (recorded by the tracker), so
+            # a failed agent run is reported as "failed" — never a blanket
+            # "success". Entries recorded before TASK 11 default to success
+            # (there is no error evidence for them).
+            errored = bool(rec.get("error", False))
             rows.append(
                 {
                     "id": f"{name}-{idx}-{at}",
                     "timestamp": at,
                     "agent": name,
                     "action": f"analisis {rec.get('signal')} ({rec.get('confidence')})",
-                    "status": "success",
+                    "status": "failed" if errored else "success",
                 }
             )
     # Newest first; cap the payload for the control plane.
     rows.sort(key=lambda r: r["timestamp"], reverse=True)
     rows = rows[:50]
+    failed = sum(1 for r in rows if r["status"] == "failed")
     return {
         "tasks": rows,
         "counts": {
             "running": 0,
             "queued": 0,
-            "completed": len(rows),
-            "failed": 0,
+            "completed": len(rows) - failed,
+            "failed": failed,
         },
         "source": "live",
     }

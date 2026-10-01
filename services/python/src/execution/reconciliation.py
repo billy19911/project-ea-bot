@@ -68,6 +68,9 @@ class ReconciliationReport:
     magic_mismatches: list[FieldMismatch] = field(default_factory=list)
     matched_orders: list[int] = field(default_factory=list)
     orphan_orders: list[int] = field(default_factory=list)
+    # TASK 11: real wall-clock time of the run (ISO-8601 UTC). Stamped by the
+    # runner; empty until a run happens. Never fabricated.
+    checked_at: str = ""
 
     def has_critical(self) -> bool:
         """True when the mismatch requires blocking new orders (§14).
@@ -98,6 +101,43 @@ class ReconciliationReport:
             + len(self.orphan_orders)
         )
 
+    # Mismatch category key -> human detail for the ticket-only categories.
+    _TICKET_KINDS: tuple[tuple[str, str], ...] = (
+        ("missing_in_broker", "position present internally but missing at broker"),
+        ("missing_internal", "position present at broker but missing internally"),
+        ("orphan_orders", "orphan broker order"),
+    )
+    _FIELD_KINDS: tuple[str, ...] = (
+        "volume_mismatches",
+        "sltp_mismatches",
+        "symbol_mismatches",
+        "magic_mismatches",
+    )
+
+    def mismatch_list(self) -> list[dict[str, Any]]:
+        """Flatten every mismatch into a single UI-friendly list (TASK 11).
+
+        Each entry is ``{kind, ticket, symbol, detail}``. ``kind`` matches the
+        frontend ``MISMATCH_KIND_LABELS`` keys. ``symbol`` is only present when
+        the underlying field mismatch knows it — the report never invents a
+        symbol, so ticket-only categories carry ``symbol=None``.
+        """
+        out: list[dict[str, Any]] = []
+        for kind, detail in self._TICKET_KINDS:
+            for ticket in getattr(self, kind):
+                out.append({"kind": kind, "ticket": ticket, "symbol": None, "detail": detail})
+        for kind in self._FIELD_KINDS:
+            for m in getattr(self, kind):
+                out.append(
+                    {
+                        "kind": kind,
+                        "ticket": m.ticket,
+                        "symbol": getattr(m, "symbol", None),
+                        "detail": f"{m.field}: internal={m.internal} broker={m.broker}",
+                    }
+                )
+        return out
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "matched": list(self.matched),
@@ -111,6 +151,14 @@ class ReconciliationReport:
             "orphan_orders": list(self.orphan_orders),
             "total_mismatches": self.total_mismatches(),
             "critical": self.has_critical(),
+            # TASK 11: additional real, UI-facing fields so the Reconciliation
+            # page can bind to the ACTUAL payload instead of silently reading
+            # keys that were never emitted (which always rendered "CLEAN").
+            "has_critical": self.has_critical(),
+            "internal_count": len(self.matched) + len(self.missing_internal),
+            "broker_count": len(self.matched) + len(self.missing_in_broker),
+            "mismatches": self.mismatch_list(),
+            "checked_at": self.checked_at or None,
         }
 
 

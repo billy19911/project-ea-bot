@@ -219,7 +219,26 @@ def test_tasks_reflect_real_activity() -> None:
         rows = [t for t in data["tasks"] if t["agent"] == "technical_analyst"]
         assert rows, "recorded activity must appear as a task row"
         assert any(row["timestamp"] for row in rows)
-        assert data["counts"]["completed"] == len(data["tasks"])
+        # TASK 11: `completed` excludes failed runs, so it is always <= total.
+        assert data["counts"]["completed"] == len(data["tasks"]) - data["counts"]["failed"]
+    finally:
+        tracker.reset()
+
+
+def test_tasks_report_failed_runs_honestly() -> None:
+    """TASK 11: a failed agent run must NOT be shown as a green "success"."""
+    from src.agents.activity import get_activity_tracker
+
+    tracker = get_activity_tracker()
+    try:
+        tracker.record("technical_analyst", "NEUTRAL", 0.0, error=True)
+        resp = client.get("/tasks")
+        assert resp.status_code == 200
+        data = resp.json()
+        rows = [t for t in data["tasks"] if t["agent"] == "technical_analyst"]
+        assert rows, "recorded failed activity must appear as a task row"
+        assert all(row["status"] == "failed" for row in rows)
+        assert data["counts"]["failed"] >= 1
     finally:
         tracker.reset()
 

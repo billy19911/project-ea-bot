@@ -76,7 +76,16 @@ class AgentActivity:
         self._confidence_n += 1
         if event_type:
             self.last_event_type = event_type
-        self.recent.append({"signal": key, "confidence": round(conf, 3), "at": self.last_active})
+        # TASK 11: carry the REAL per-run outcome so the activity log can show
+        # failed runs instead of a hard-coded "success" (no silently-green log).
+        self.recent.append(
+            {
+                "signal": key,
+                "confidence": round(conf, 3),
+                "at": self.last_active,
+                "error": bool(error),
+            }
+        )
 
     @property
     def avg_confidence(self) -> Optional[float]:

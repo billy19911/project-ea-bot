@@ -125,7 +125,7 @@ type AnalysisData = {
     stop_loss: number | null;
     take_profit: number | null;
     atr: number | null;
-    position_size: number;
+    position_size: number | null;
     reason: string;
     close: number;
     timestamp: string | null;
@@ -148,6 +148,7 @@ type AnalysisData = {
     stop_multiplier: number;
     reward_risk_ratio: number;
     risk_percent: number;
+    sizing_equity_bound?: boolean;
   };
 };
 

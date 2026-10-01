@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from .reconciliation import Reconciler, ReconciliationReport
@@ -140,6 +141,9 @@ class ReconciliationRunner:
                 internal_orders,
                 broker_orders,
             )
+            # TASK 11: stamp the REAL run time so the Reconciliation page can
+            # show when the last check actually happened (never a fake value).
+            report.checked_at = datetime.now(timezone.utc).isoformat()
         except Exception as exc:  # fail-safe: never crash the caller's loop
             self._errors += 1
             self._last_ok = False

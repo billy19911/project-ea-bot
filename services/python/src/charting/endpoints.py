@@ -187,14 +187,20 @@ async def get_chart_analysis(
             ),
         }
 
-    equity = 10000.0
+    # TASK 11: resolve the REAL account equity for position sizing. When it is
+    # unavailable we do NOT substitute a fabricated 10000 — we mark the sizing
+    # as unbound so the response never implies a real lot size.
+    equity: Optional[float] = None
     try:
         equity = float(connector.get_account_info().equity)
     except Exception:
-        pass  # equity is only used for position sizing; keep the analysis honest
+        equity = None  # sizing equity unknown — flagged in provenance below
+    sizing_equity = equity if equity is not None else 0.0
 
     engine = TradingEngine(config=get_active_strategy_config())
-    result = engine.analyze(bars_data, symbol=symbol, timeframe=timeframe, account_equity=equity)
+    result = engine.analyze(
+        bars_data, symbol=symbol, timeframe=timeframe, account_equity=sizing_equity
+    )
     signal = result.signal
 
     open_positions = []
@@ -231,7 +237,8 @@ async def get_chart_analysis(
             "stop_loss": signal.stop_loss,
             "take_profit": signal.take_profit,
             "atr": signal.atr_value,
-            "position_size": signal.position_size,
+            # TASK 11: no fabricated sizing — None when equity is unknown.
+            "position_size": signal.position_size if equity is not None else None,
             "reason": signal.reason,
             "close": result.close,
             "timestamp": result.timestamp,
@@ -256,5 +263,7 @@ async def get_chart_analysis(
             # sizing. ``position_size`` mentah TIDAK ditampilkan sebagai lot:
             # satuannya belum dinormalisasi ke lot broker (butuh contract size).
             "risk_percent": engine.config["risk_percent"],
+            # TASK 11: whether position sizing used the real account equity.
+            "sizing_equity_bound": equity is not None,
         },
     }

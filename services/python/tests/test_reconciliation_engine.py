@@ -128,8 +128,40 @@ class TestSerialisation:
             "magic_mismatches",
             "orphan_orders",
             "critical",
+            # TASK 11: the Reconciliation page binds to these real keys.
+            "has_critical",
+            "internal_count",
+            "broker_count",
+            "mismatches",
+            "checked_at",
         ):
             assert key in payload
+
+    def test_ui_facing_counts_and_mismatches(self) -> None:
+        """TASK 11: UI counts + flattened mismatch list reflect real state."""
+        internal = [_pos(1), _pos(2)]  # 2 missing in broker
+        broker = [_pos(1), _pos(3)]  # 3 missing internal
+        report = Reconciler().compare(internal, broker, [], [])
+        payload = report.to_dict()
+        # matched={1}; internal side = matched + missing_internal(2)
+        assert payload["internal_count"] == 2
+        # broker side = matched + missing_in_broker({2}) = 2
+        assert payload["broker_count"] == 2
+        assert payload["has_critical"] is True
+        kinds = {m["kind"] for m in payload["mismatches"]}
+        assert "missing_in_broker" in kinds
+        assert "missing_internal" in kinds
+        assert payload["total_mismatches"] == 2
+
+    def test_mismatch_list_includes_field_detail(self) -> None:
+        """A volume mismatch surfaces its field/side values, not a fake symbol."""
+        internal = [_pos(1, volume=0.1)]
+        broker = [_pos(1, volume=0.2)]
+        report = Reconciler().compare(internal, broker, [], [])
+        payload = report.to_dict()
+        entries = [m for m in payload["mismatches"] if m["kind"] == "volume_mismatches"]
+        assert entries and entries[0]["ticket"] == 1
+        assert "volume" in entries[0]["detail"]
 
 
 class TestAcceptsObjects:

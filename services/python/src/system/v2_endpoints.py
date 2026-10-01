@@ -217,11 +217,39 @@ class BreakerRecoverBody(BaseModel):
     reason: str = "recovery condition satisfied"
 
 
+def _execution_guard_snapshot() -> Optional[dict[str, Any]]:
+    """Return the REAL runtime execution-guard state (TASK 11).
+
+    The ``MultiLevelBreaker`` singleton exposed as ``value`` is a manually
+    controlled breaker that the pipeline never feeds. The authentic
+    enforcement state that actually blocks orders is
+    ``runtime.execution_guard`` (kill switch + per-dependency breakers, fed by
+    ``record_execution_result``). Surfacing it here lets the Risk Center show
+    the *real* safety state instead of a permanently-NORMAL singleton.
+    """
+    try:
+        from ..orchestration.runtime import get_runtime
+
+        guard = getattr(get_runtime(), "execution_guard", None)
+        if guard is None:
+            return None
+        return guard.snapshot()
+    except Exception as exc:  # noqa: BLE001 - read-only probe must never raise
+        logger.debug("execution-guard snapshot unavailable: %s", exc)
+        return None
+
+
 @router.get("/circuit-breaker", summary="Multi-level circuit breaker state (Phase 36)")
 async def circuit_breaker_state() -> dict[str, Any]:
     try:
         return {
             "value": get_circuit_breaker().to_dict(),
+            # TASK 11: the real, pipeline-fed execution guard (kill switch +
+            # per-dependency breakers). ``value`` above is a manual breaker that
+            # is NOT auto-fed, so the UI labels it as manual/standby and relies
+            # on this block for the true enforcement picture.
+            "execution_guard": _execution_guard_snapshot(),
+            "value_wired": False,
             "source": "live",
             "status": "OK",
         }
@@ -516,11 +544,54 @@ def _read_attached_account(connector: Any = None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _capital_snapshot() -> dict[str, Any]:
+    """Real capital-allocation snapshot bound to the live account (TASK 11).
+
+    The allocator's ``total_equity`` defaults to ``0.0`` and is never bound to
+    the account, so the raw ``snapshot()`` is empty. Here we (read-only) bind
+    the real MT5 equity when the terminal is live and add the derived fields
+    the Risk Center binds to (``total_capital`` / ``allocated`` / ``available``
+    / ``utilization``) — all computed from real values, never fabricated. When
+    no per-strategy allocations are configured the exposure is genuinely 0 and
+    ``allocations_configured`` is ``False`` so the UI can say so honestly.
+    """
+    allocator = get_capital_allocator()
+    # Read-only equity bind (never mutate persisted state).
+    equity: Optional[float] = None
+    try:
+        from ..mt5 import connector as mt5_connector
+
+        if mt5_connector.is_live_mode():
+            equity = float(mt5_connector.get_account_info().equity)
+    except Exception:  # noqa: BLE001 - equity is best-effort, never fabricated
+        equity = None
+
+    snap = allocator.snapshot()
+    total_capital = equity if equity is not None else snap.get("total_equity")
+    allocated = float(snap.get("gross_exposure", 0.0) or 0.0)
+    # "Available" is the un-allocated equity; only meaningful with real equity.
+    available = (total_capital - allocated) if isinstance(total_capital, (int, float)) else None
+    utilization = (
+        (allocated / total_capital)
+        if isinstance(total_capital, (int, float)) and total_capital > 0
+        else None
+    )
+    return {
+        **snap,
+        "total_capital": total_capital,
+        "allocated": allocated,
+        "available": available,
+        "utilization": utilization,
+        "allocations_configured": bool(getattr(allocator, "allocations", None)),
+        "equity_bound": equity is not None,
+    }
+
+
 @router.get("/capital", summary="Capital allocation snapshot (Phase 52)")
 async def capital_state() -> dict[str, Any]:
     try:
         return {
-            "value": get_capital_allocator().snapshot(),
+            "value": _capital_snapshot(),
             "source": "live",
             "status": "OK",
         }
@@ -1058,6 +1129,31 @@ def _total_review_count() -> int:
         return 0
 
 
+def _session_for(dt: Any) -> Optional[str]:
+    """Map a close time (UTC) to a trading session label (derived, TASK 11).
+
+    Derived from the REAL close timestamp — never fabricated. Sessions use
+    standard FX hours expressed in UTC: Sydney/Tokyo/London/New York windows.
+    """
+    from datetime import timezone
+
+    if not hasattr(dt, "hour"):
+        return None
+    try:
+        hour = dt.astimezone(timezone.utc).hour if dt.tzinfo else dt.hour
+    except Exception:  # noqa: BLE001
+        return None
+    if 0 <= hour < 7:
+        return "tokyo"
+    if 7 <= hour < 12:
+        return "london"
+    if 12 <= hour < 17:
+        return "overlap"
+    if 17 <= hour < 22:
+        return "new_york"
+    return "sydney"
+
+
 def _closed_trade_rows() -> list[Any]:
     """Build performance rows from the real auto-review history (fail-safe)."""
     from ..review.performance_intelligence import TradeRow
@@ -1076,11 +1172,17 @@ def _closed_trade_rows() -> list[Any]:
             r_multiple = getattr(record, "r_multiple", None)
             if r_multiple is None:
                 r_multiple = _r_from_record(record)
+            # TASK 11: carry the REAL close timestamp (and a session derived
+            # from it) so the hour / weekday / session dimensions bucket real
+            # trades instead of always coming back empty.
+            closed_at = getattr(record, "closed_at", None)
             rows.append(
                 TradeRow(
                     pnl=pnl,
                     r_multiple=float(r_multiple or 0.0),
                     symbol=_record_symbol(record),
+                    timestamp=closed_at,
+                    session=_session_for(closed_at),
                 )
             )
     except Exception:  # noqa: BLE001 - no data is better than fake data
