@@ -56,6 +56,7 @@ class RiskGate:
         max_spread_pips: float = 5.0,
         min_rr: float = 1.5,
         symbol_spread_limits: dict[str, float] | None = None,
+        max_risk_pct: float | None = None,
     ) -> None:
         self._engine = risk_engine
         self._mm = money_manager
@@ -66,6 +67,14 @@ class RiskGate:
         # key uses that limit instead of the global default. Empty/None keeps
         # the global-limit-only behaviour (backward compatible).
         self._symbol_spread_limits = dict(symbol_spread_limits or {})
+        # TASK 07: monetary stop-loss risk budget (fraction of equity, 0.0-1.0).
+        # When configured, the gate enforces
+        #     abs(entry - initial_SL) × contract_size × volume <= equity × max_risk_pct
+        # using the ACTUAL broker symbol specification (never an invented
+        # contract size). When the broker spec is unavailable the check FAILS
+        # CLOSED (reject). ``None``/``<= 0`` leaves the check informational only
+        # (computed + recorded) so existing call sites keep working.
+        self._max_risk_pct = float(max_risk_pct) if max_risk_pct else None
 
     def _max_spread_for_symbol(self, symbol: str) -> float:
         """Return the applicable max spread (pips) for ``symbol`` (Phase 1 #4).
@@ -78,6 +87,47 @@ class RiskGate:
             if key.upper() in sym:
                 return float(limit)
         return float(self._max_spread_pips)
+
+    @staticmethod
+    def _broker_contract_size(symbol: str, market_info: dict[str, Any]) -> tuple[float, str]:
+        """Resolve the ACTUAL broker contract size for ``symbol`` (TASK 07).
+
+        Returns ``(contract_size, source)`` where ``source`` is:
+
+        - ``"market_info"`` — the caller (broker feed) supplied a real value;
+        - ``"broker"``      — resolved from the live MT5 ``symbol_info`` spec;
+        - ``"missing"``     — nothing real available (contract size 0.0).
+
+        An invented/asset-class fallback spec never counts: only a genuine
+        ``source == "broker"`` spec (or an explicit ``market_info`` value) is
+        accepted, so a fabricated contract size can never slip into the risk
+        math.
+        """
+        # 1) Explicit value from the caller's market snapshot.
+        try:
+            mi_contract = float(market_info.get("contract_size") or 0.0)
+        except (TypeError, ValueError):
+            mi_contract = 0.0
+        if mi_contract > 0:
+            return mi_contract, "market_info"
+
+        # 2) Live broker symbol specification (authoritative).
+        sym = str(symbol or market_info.get("symbol") or "")
+        if sym:
+            try:
+                try:
+                    from market.symbol_spec import get_symbol_specification
+                except ImportError:  # pragma: no cover - alternate import identity
+                    from src.market.symbol_spec import get_symbol_specification  # type: ignore
+
+                spec = get_symbol_specification(sym)
+                is_broker = str(getattr(spec, "source", "")) == "broker"
+                contract = float(getattr(spec, "contract_size", 0.0) or 0.0)
+                if is_broker and contract > 0:
+                    return contract, "broker"
+            except Exception:  # noqa: BLE001 - spec lookup is best-effort
+                pass
+        return 0.0, "missing"
 
     def validate_proposal(
         self,
@@ -220,6 +270,36 @@ class RiskGate:
         checks["stop_loss"] = sl_check
         metrics["stop_loss"] = sl
         metrics["entry_price"] = entry
+
+        # ── 8b. Monetary stop-loss risk (TASK 07) ───────────────────────────
+        # risk_money = abs(entry − initial_SL) × contract_size × volume, using
+        # the ACTUAL broker contract size. When a monetary risk budget
+        # (``max_risk_pct`` of equity) is configured, the check FAILS CLOSED if
+        # the broker spec is unavailable (no invented fallback contract size).
+        prop_volume = float(proposal.get("size") or proposal.get("volume") or 0.0)
+        risk_price_distance = abs(entry - sl) if (entry > 0 and sl > 0) else 0.0
+        contract_size, contract_source = self._broker_contract_size(prop_sym, market_info)
+        risk_money = risk_price_distance * contract_size * prop_volume
+        equity_for_risk = float(account_state.get("equity", account_state.get("balance", 0.0)))
+        metrics["risk_price_distance"] = risk_price_distance
+        metrics["risk_contract_size"] = contract_size
+        metrics["risk_contract_source"] = contract_source
+        metrics["risk_money"] = risk_money
+        metrics["max_risk_pct"] = self._max_risk_pct
+        if self._max_risk_pct and self._max_risk_pct > 0:
+            risk_budget = equity_for_risk * self._max_risk_pct
+            metrics["risk_budget"] = risk_budget
+            if contract_size <= 0 or risk_price_distance <= 0 or prop_volume <= 0:
+                # Cannot prove monetary risk is safe → fail closed.
+                monetary_ok = False
+            elif equity_for_risk <= 0:
+                monetary_ok = False
+            else:
+                monetary_ok = risk_money <= risk_budget
+        else:
+            # No budget configured → informational only (never blocks).
+            monetary_ok = True
+        checks["monetary_risk"] = monetary_ok
 
         # ── 9. Max position size (per-trade notional ceiling) ───────────────
         # Phase 1 Item #2: explicitly enforce the hard per-trade max position

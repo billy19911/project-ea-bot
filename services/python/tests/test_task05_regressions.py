@@ -86,3 +86,20 @@ def test_r_performance_falls_back_to_in_process_history() -> None:
         assert body["overall"]["avg_r"] == 2.0
     finally:
         set_auto_trigger(None)
+
+
+def test_entry_context_registry_is_isolated_between_tests() -> None:
+    """The entry-context registry must never read the operator's real JSONL.
+
+    Regression: a leaked ticket->SL record in ``logs/entry_context.jsonl`` made
+    ``TradeManager`` skip a position whose ticket collided with the stale one.
+    With the conftest isolation fixture the registry starts empty in every test.
+    """
+    from review.entry_context import get_entry_context, remember_entry_context
+
+    # Ticket 1 with a stale SL is exactly the collision that broke
+    # test_manage_handles_multiple_positions_independently.
+    assert get_entry_context("1") == {}
+    remember_entry_context("1", {"symbol": "XAUUSD", "stop_loss": 2495.0})
+    assert get_entry_context("1")["stop_loss"] == 2495.0
+    # Next test starts clean because the fixture clears both cache and store.

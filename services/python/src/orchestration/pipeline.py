@@ -168,6 +168,10 @@ class PipelineResult:
     canonical_signal: dict[str, Any] = field(default_factory=dict)
     signal_id: str = ""
     fanout: Optional[dict[str, Any]] = None
+    # TASK 07: the FINAL order actually sent (symbol/direction/volume/price/SL/
+    # TP) plus its risk re-validation verdict. Present only after an order is
+    # built; proves "final order sent == final order approved".
+    final_order: Optional[dict[str, Any]] = None
 
     def add_stage(self, stage: str, status: str, detail: str = "") -> None:
         """Append a stage entry (as a plain dict) to the trace."""
@@ -205,6 +209,7 @@ class PipelineResult:
             "canonical_signal": self.canonical_signal,
             "signal_id": self.signal_id,
             "fanout": self.fanout,
+            "final_order": self.final_order,
         }
 
 
@@ -789,6 +794,21 @@ class TradingPipeline:
             result.status = STATUS_ERROR
             result.error = f"order build error: {exc}"
             result.add_stage("execution", STAGE_ERROR, str(exc))
+            self._finalise(result)
+            return result
+
+        # ── Step C0 (TASK 07): FINAL ORDER re-validation ────────────────
+        # The order builder may normalise the volume/prices to the broker's
+        # lot step + digits AFTER the gate ran. The gate must validate the EXACT
+        # order that is sent, so when the final request differs from the values
+        # the gate approved, re-run the deterministic gate on the FINAL values.
+        # Only an order that passes the gate ON ITS OWN values may be executed.
+        revalidated = self._revalidate_final_order(request, validation, result)
+        if not revalidated:
+            result.status = STATUS_BLOCKED
+            result.add_stage("risk", STAGE_BLOCKED, result.risk_reason)
+            result.add_stage("execution", STAGE_SKIPPED, "final order risk re-validation failed")
+            self._mark_signal(result, "skipped", f"final order ditolak: {result.risk_reason}")
             self._finalise(result)
             return result
 
@@ -2454,6 +2474,99 @@ class TradingPipeline:
             )
             return _FanoutExecutionAdapter(fanout)
         return self.execution_engine.execute_order(request)
+
+    def _revalidate_final_order(
+        self,
+        request: OrderRequest,
+        validation: dict[str, Any],
+        result: PipelineResult,
+    ) -> bool:
+        """Ensure the gate validates the EXACT final order (TASK 07).
+
+        Compares the built :class:`OrderRequest` (the order that WILL be sent)
+        against the proposal the gate already approved. When they match, nothing
+        to do. When they differ (the order builder normalised the volume to the
+        broker lot step / rounded prices), re-run the deterministic Risk Gate on
+        the FINAL request values so "final order sent" is byte-for-byte the
+        "final order approved".
+
+        Returns ``True`` when the final order is approved (or unchanged),
+        ``False`` when the final order fails the gate (caller must NOT execute).
+        """
+        approved = validation.get("proposal") or {}
+        try:
+            final_volume = float(getattr(request, "volume", 0.0) or 0.0)
+            approved_volume = float(approved.get("size") or 0.0)
+            final_price = float(getattr(request, "price", 0.0) or 0.0)
+            approved_price = float(approved.get("entry_price") or 0.0)
+            final_sl = float(getattr(request, "sl", 0.0) or 0.0)
+            approved_sl = float(approved.get("stop_loss") or 0.0)
+            final_tp = float(getattr(request, "tp", 0.0) or 0.0)
+            approved_tp = float(approved.get("take_profit") or 0.0)
+        except (TypeError, ValueError):
+            result.risk_reason = "final order values unreadable (fail-closed)"
+            return False
+
+        unchanged = (
+            str(getattr(request, "symbol", "")) == str(approved.get("symbol", ""))
+            and abs(final_volume - approved_volume) <= 1e-9
+            and abs(final_price - approved_price) <= 1e-9
+            and abs(final_sl - approved_sl) <= 1e-9
+            and abs(final_tp - approved_tp) <= 1e-9
+        )
+
+        # Always record the FINAL sent order alongside the approved values so the
+        # ledger can prove sent == approved.
+        result.final_order = {
+            "symbol": str(getattr(request, "symbol", "")),
+            "direction": str(getattr(request, "order_type", "")),
+            "volume": final_volume,
+            "price": final_price,
+            "stop_loss": final_sl,
+            "take_profit": final_tp,
+            "idempotency_key": str(getattr(request, "idempotency_key", "")),
+        }
+
+        if unchanged:
+            return True
+
+        # The final order differs → the gate must approve THESE values.
+        final_proposal = {
+            "symbol": str(getattr(request, "symbol", "") or approved.get("symbol", "")),
+            "direction": str(
+                getattr(request, "order_type", "") or approved.get("direction", "")
+            ).upper(),
+            "entry_price": final_price,
+            "stop_loss": final_sl,
+            "take_profit": final_tp,
+            "size": final_volume,
+            "risk_pct": float(approved.get("risk_pct") or 0.0),
+        }
+        try:
+            decision = self.risk_gate.validate_proposal(
+                final_proposal,
+                validation["account_state"],
+                validation["current_positions"],
+                validation["market_info"],
+            )
+        except Exception as exc:  # fail-closed → BLOCK
+            result.risk_reason = f"final order risk error: {exc}"
+            return False
+
+        ok = bool(getattr(decision, "approved", False))
+        result.final_order["risk_approved"] = ok
+        result.final_order["risk_reason"] = str(getattr(decision, "reason", "") or "")
+        if ok:
+            # Adopt the final validated values as the approved values.
+            validation["proposal"]["size"] = final_volume
+            validation["proposal"]["entry_price"] = final_price
+            validation["proposal"]["stop_loss"] = final_sl
+            validation["proposal"]["take_profit"] = final_tp
+            return True
+        result.risk_reason = (
+            f"final order ditolak risk gate: {getattr(decision, 'reason', '') or 'rejected'}"
+        )
+        return False
 
     def _build_order_request(
         self,

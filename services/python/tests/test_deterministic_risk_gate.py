@@ -70,6 +70,7 @@ def test_returns_required_decision_shape(gate, proposal, account, market):
         "spread",
         "risk_reward",
         "stop_loss",
+        "monetary_risk",
         "max_position_size",
     }
     assert "drawdown_pct" in decision.metrics_snapshot

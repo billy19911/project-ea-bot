@@ -117,3 +117,31 @@ def _isolate_review_and_trade_ledger(tmp_path, monkeypatch):
     yield
     set_review_store(None)
     set_trade_ledger(None)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_entry_context(tmp_path, monkeypatch):
+    """Isolate the process-wide entry-context registry between tests.
+
+    The registry persists ticket -> entry context (incl. the ORIGINAL stop-loss
+    used for R-multiples) to ``logs/entry_context.jsonl`` and is consulted by
+    :class:`monitoring.trade_manager.TradeManager` when deciding how far a stop
+    may be tightened. Without isolation, a test that registers ticket 1 (e.g.
+    XAUUSD @ 2500, SL 2495) leaks into the operator's real file and into the
+    next test: ``test_manage_handles_multiple_positions_independently`` then
+    reads that stale SL and skips the position, failing order-dependently.
+    """
+    monkeypatch.setenv("ENTRY_CONTEXT_PATH", str(tmp_path / "entry_context.jsonl"))
+    try:
+        from review.entry_context import clear_entry_contexts, set_entry_context_store
+    except Exception:  # pragma: no cover - import identity fallback
+        from src.review.entry_context import (  # type: ignore
+            clear_entry_contexts,
+            set_entry_context_store,
+        )
+
+    set_entry_context_store(None, disabled=True)
+    clear_entry_contexts()
+    yield
+    clear_entry_contexts()
+    set_entry_context_store(None, disabled=True)

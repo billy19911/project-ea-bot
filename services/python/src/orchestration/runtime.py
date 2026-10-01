@@ -753,11 +753,28 @@ class OrchestrationRuntime:
                     _symbol_spread_limits[_key] = _v
             except (TypeError, ValueError):
                 pass
+        # TASK 07: monetary stop-loss risk budget (fraction of equity). When set,
+        # the gate enforces abs(entry − initial_SL) × contract_size × volume
+        # against this budget using the ACTUAL broker symbol specification, and
+        # fails CLOSED when the broker spec is unavailable (no invented contract
+        # size). Safety logic (like the other RiskGate limits) is configured via
+        # env, never a UI-editable knob; a non-positive/absent value leaves the
+        # check informational only.
+        max_risk_pct: Optional[float] = None
+        try:
+            _raw_risk = os.getenv("MAX_RISK_PCT")
+            if _raw_risk:
+                _candidate = float(_raw_risk)
+                if _candidate > 0:
+                    max_risk_pct = _candidate
+        except (TypeError, ValueError):
+            max_risk_pct = None
         risk_gate = RiskGate(
             RiskEngine(max_positions=max_positions),
             MoneyManager(),
             max_spread_pips=max_spread_pips,
             symbol_spread_limits=_symbol_spread_limits,
+            max_risk_pct=max_risk_pct,
         )
 
         # No MT5 connector is wired in the default runtime, so the engine keeps

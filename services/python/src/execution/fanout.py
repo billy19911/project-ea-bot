@@ -542,11 +542,50 @@ class CanonicalFanout:
                 logger.debug("Order normalization skipped: %s", exc)
         return {"proposal": proposal, "normalized": normalized}
 
+    @staticmethod
+    def _augment_market_info(symbol: str, market_info: dict[str, Any]) -> dict[str, Any]:
+        """Backfill missing market metadata from the live broker spec (TASK 07).
+
+        Only fields the caller did NOT provide are filled, and only from a
+        genuine broker spec (``source == "broker"``). Returns the (possibly new)
+        dict; never raises.
+        """
+        out = dict(market_info or {})
+        sym = str(symbol or out.get("symbol") or "")
+        if not sym:
+            return out
+        try:
+            try:
+                from market.symbol_spec import get_symbol_specification
+            except ImportError:  # pragma: no cover - alternate import identity
+                from src.market.symbol_spec import get_symbol_specification  # type: ignore
+
+            spec = get_symbol_specification(sym)
+            if str(getattr(spec, "source", "")) != "broker":
+                return out
+            out.setdefault("symbol", sym)
+            if not out.get("contract_size"):
+                cs = float(getattr(spec, "contract_size", 0.0) or 0.0)
+                if cs > 0:
+                    out["contract_size"] = cs
+            if not out.get("point_value"):
+                pv = float(getattr(spec, "point", 0.0) or 0.0)
+                if pv > 0:
+                    out["point_value"] = pv
+            if not out.get("spread_limit"):
+                sl = float(getattr(spec, "spread_limit", 0.0) or 0.0)
+                if sl > 0:
+                    out["spread_limit"] = sl
+        except Exception:  # noqa: BLE001 - augmentation is best-effort
+            return out
+        return out
+
     def _risk_gate_account(
         self,
         proposal: dict[str, Any],
         ctx: _AccountContext,
         target: dict[str, Any],
+        market_info_override: Optional[dict[str, Any]] = None,
     ) -> tuple[bool, str]:
         """Run the account-specific Risk Gate on the normalized order.
 
@@ -556,14 +595,20 @@ class CanonicalFanout:
         """
         if self.risk_gate is None:
             return True, "no per-account risk gate configured"
-        market_info: dict[str, Any] = {}
-        if self.market_info_provider is not None:
+        market_info: dict[str, Any] = dict(market_info_override or {})
+        if not market_info and self.market_info_provider is not None:
             try:
                 market_info = dict(
                     self.market_info_provider(proposal.get("symbol", ""), target) or {}
                 )
             except Exception:  # noqa: BLE001
                 market_info = {}
+        # TASK 07: ensure the per-account gate always sees the ACTUAL broker
+        # symbol specification (contract_size / point / spread) so monetary SL
+        # risk and exposure are computed from real broker metadata — never an
+        # invented fallback. A caller-supplied market_info wins; the broker spec
+        # only fills what is missing.
+        market_info = self._augment_market_info(proposal.get("symbol", ""), market_info)
         positions: list[dict[str, Any]] = []
         if self.positions_provider is not None:
             try:
@@ -619,6 +664,37 @@ class CanonicalFanout:
             dispatch.set_status(AccountExecutionStatus.FAILED, "urutan tidak dapat dibangun")
             return
 
+        # TASK 07 — FINAL ORDER INVARIANT: the Risk Gate must validate the EXACT
+        # order that is sent. If the built request differs from the proposal the
+        # gate approved (e.g. the order builder re-normalised the volume to the
+        # broker lot step), re-run the gate on the FINAL request values. Only an
+        # order that passes the gate ON ITS OWN VALUES may be dispatched, so
+        # "final order sent" is byte-for-byte the "final order approved".
+        final_proposal = self._proposal_from_request(request, proposal)
+        if self._differs_from_approved(final_proposal, proposal):
+            final_market = self._augment_market_info(final_proposal.get("symbol", ""), {})
+            approved, reason = self._risk_gate_account(final_proposal, ctx, target, final_market)
+            if not approved:
+                dispatch.set_status(
+                    AccountExecutionStatus.REJECTED,
+                    f"final order re-validation rejected: {reason or 'risk ditolak'}",
+                )
+                return
+            # The FINAL (sent) values are now the approved values — record them.
+            proposal = final_proposal
+
+        # Record the exact values being sent so the ledger proves sent==approved.
+        dispatch.symbol = str(getattr(request, "symbol", proposal.get("symbol", "")))
+        dispatch.volume = float(getattr(request, "volume", proposal.get("volume", 0.0)) or 0.0)
+        dispatch.price = float(getattr(request, "price", proposal.get("price", 0.0)) or 0.0)
+        dispatch.sl = float(
+            getattr(request, "sl", proposal.get("stop_loss", 0.0)) or proposal.get("stop_loss", 0.0)
+        )
+        dispatch.tp = float(
+            getattr(request, "tp", proposal.get("take_profit", 0.0))
+            or proposal.get("take_profit", 0.0)
+        )
+
         result = self.execution_engine.execute_order(request)
         success = bool(getattr(result, "success", False))
         dispatch.ticket = getattr(result, "ticket", None)
@@ -629,6 +705,67 @@ class CanonicalFanout:
                 AccountExecutionStatus.FAILED,
                 str(getattr(result, "error_message", "execution failed") or "execution failed"),
             )
+
+    @staticmethod
+    def _proposal_from_request(request: Any, base: dict[str, Any]) -> dict[str, Any]:
+        """Build a proposal dict from the FINAL OrderRequest (TASK 07).
+
+        Carries the exact symbol/volume/price/SL/TP that will be sent, so the
+        gate can be re-run on the true final order.
+        """
+        proposal = dict(base or {})
+        proposal["symbol"] = str(getattr(request, "symbol", proposal.get("symbol", "")))
+        proposal["direction"] = str(
+            getattr(request, "order_type", proposal.get("direction", ""))
+        ).upper()
+        proposal["order_type"] = str(
+            getattr(request, "order_type", proposal.get("order_type", proposal["direction"]))
+        ).upper()
+        try:
+            proposal["volume"] = float(
+                getattr(request, "volume", proposal.get("volume", 0.0)) or 0.0
+            )
+        except (TypeError, ValueError):
+            proposal["volume"] = 0.0
+        proposal["size"] = proposal["volume"]
+        try:
+            proposal["price"] = float(getattr(request, "price", proposal.get("price", 0.0)) or 0.0)
+        except (TypeError, ValueError):
+            proposal["price"] = 0.0
+        proposal["entry_price"] = proposal["price"]
+        try:
+            proposal["stop_loss"] = float(
+                getattr(request, "sl", proposal.get("stop_loss", 0.0)) or 0.0
+            )
+        except (TypeError, ValueError):
+            proposal["stop_loss"] = 0.0
+        try:
+            proposal["take_profit"] = float(
+                getattr(request, "tp", proposal.get("take_profit", 0.0)) or 0.0
+            )
+        except (TypeError, ValueError):
+            proposal["take_profit"] = 0.0
+        return proposal
+
+    @staticmethod
+    def _differs_from_approved(final_proposal: dict[str, Any], approved: dict[str, Any]) -> bool:
+        """True when the final (sent) values differ from the approved values.
+
+        Compares symbol / volume / price / SL / TP with a tiny float tolerance
+        (the order builder rounds to the symbol's digits). Any difference means
+        the gate did not validate the exact order that would be sent.
+        """
+        try:
+            if str(final_proposal.get("symbol", "")) != str(approved.get("symbol", "")):
+                return True
+            for key in ("volume", "price", "stop_loss", "take_profit"):
+                f = float(final_proposal.get(key) or 0.0)
+                a = float(approved.get(key) or 0.0)
+                if abs(f - a) > 1e-9:
+                    return True
+        except (TypeError, ValueError):
+            return True
+        return False
 
     def _build_request(
         self, proposal: dict[str, Any], signal: CanonicalSignal, account_id: str

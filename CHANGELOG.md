@@ -3,6 +3,14 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — TASK 07: Risk / final order invariant
+- `src/risk/gate.py`: new deterministic check `monetary_risk` — `risk_money = abs(entry − initial_SL) × contract_size × volume`, using the **actual broker symbol specification** (`market.symbol_spec`, `source == "broker"`) or an explicit broker-supplied value. A labelled fallback/asset-class spec is never accepted as a contract size. When a monetary budget (`max_risk_pct`) is configured the check **fails closed** (reject) if no real contract size can be resolved; no invented fallback.
+- `src/orchestration/pipeline.py`: **final-order re-validation** — after the order builder normalises the volume/prices to the broker lot step + digits, the deterministic Risk Gate is re-run on the EXACT final order values (symbol/volume/price/SL/TP). Only an order that passes the gate on its own values may execute, so *final order sent == final order approved*. The final order + its risk verdict are recorded on the result (`final_order`).
+- `src/execution/fanout.py`: per-account broker-spec augmentation (`_augment_market_info`) so the account gate always sees real `contract_size`/`point`/`spread`; `_proposal_from_request` + `_differs_from_approved` re-validate the built request when it differs from the approved proposal (byte-parity guard).
+- `src/orchestration/runtime.py`: `MAX_RISK_PCT` env configures the monetary risk budget on the production `RiskGate` (safety logic stays out of UI-editable settings). Default unset → check is informational only.
+- Projected exposure already validates `current + proposed <= limit` via `RiskEngine.check_projected_exposure`, now exercised with the final volume/price.
+- Verifikasi: 16 test TASK 07 baru (`tests/test_task07_final_order_risk.py`) — monetary risk (market_info + broker spec), fail-closed on missing spec, invented-fallback rejection, projected exposure (25%+10%>30% → BLOCK), lot rounding up AND down, final sent == approved (pipeline + fanout), real-gate end-to-end. Full Python 3011 passed. Execution tetap DISARMED.
+
 ### Added — TASK 02: Event-driven supervisor / wake model
 - `src/trading/event_classes.py`: event-class taxonomy (TRADE_TRIGGER / CONTEXT_UPDATE / HOUSEKEEPING / TRADE_CLOSE) + `EventGate` (classification gate + TTL fingerprint dedup) + `EventFingerprintGuillotine`.
 - `src/trading/scheduler.py`: `AutonomousScheduler(event_gate=...)` — only qualifying (TRADE_TRIGGER) events reach the committee; identical events are suppressed deterministically; new `events_gated` stat + bounded event-trace (`recent_event_traces`) recording the exact wake cause per analysis.
