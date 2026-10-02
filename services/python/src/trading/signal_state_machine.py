@@ -63,7 +63,7 @@ VALID_TRANSITIONS: dict[str, tuple[str, ...]] = {
     SignalState.DETECTED: (SignalState.ANALYZING, SignalState.REJECTED),
     SignalState.ANALYZING: (SignalState.CANDIDATE, SignalState.REJECTED),
     SignalState.CANDIDATE: (SignalState.VALIDATED, SignalState.REJECTED),
-    SignalState.VALIDATED: (SignalState.ARMED, SignalState.REJECTED),
+    SignalState.VALIDATED: (SignalState.ARMED, SignalState.WAITING_TRIGGER, SignalState.REJECTED),
     SignalState.ARMED: (SignalState.WAITING_TRIGGER, SignalState.EXPIRED),
     SignalState.WAITING_TRIGGER: (SignalState.EXECUTING, SignalState.EXPIRED),
     SignalState.EXECUTING: (SignalState.OPEN,),

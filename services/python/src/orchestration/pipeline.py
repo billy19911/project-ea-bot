@@ -40,6 +40,7 @@ from trading.level_plan import (
 from trading.market_freshness import evaluate_freshness
 from trading.market_snapshot import get_latest_snapshot
 
+from .decision_chain import build_decision_chain
 from .signal_registry import get_signal_registry, is_pending_guard_enabled
 
 logger = logging.getLogger(__name__)
@@ -176,6 +177,10 @@ class PipelineResult:
     # TP) plus its risk re-validation verdict. Present only after an order is
     # built; proves "final order sent == final order approved".
     final_order: Optional[dict[str, Any]] = None
+    # Phase 2: the canonical decision chain (MarketAssessment -> SetupCandidate
+    # -> DecisionState) built from the supervisor's agent evidence. Empty when
+    # the analysis carries no usable evidence (historic behaviour preserved).
+    canonical_decision: dict[str, Any] = field(default_factory=dict)
 
     def add_stage(self, stage: str, status: str, detail: str = "") -> None:
         """Append a stage entry (as a plain dict) to the trace."""
@@ -214,6 +219,7 @@ class PipelineResult:
             "signal_id": self.signal_id,
             "fanout": self.fanout,
             "final_order": self.final_order,
+            "canonical_decision": self.canonical_decision,
         }
 
 
@@ -652,8 +658,34 @@ class TradingPipeline:
                 result.committee_record.setdefault("signal_id", str(analysis["signal_id"]))
             result.committee_narrative = str(analysis.get("committee_narrative") or "")
 
+        # ── Step A2: Canonical decision chain (Phase 2) ─────────────────
+        # Build MarketAssessment -> SetupCandidate -> DecisionState from the
+        # SAME agent evidence the supervisor already produced. Additive and
+        # fail-safe: a failure to build never blocks the cycle.
+        result.canonical_decision = (
+            build_decision_chain(
+                analysis,
+                symbol=result.symbol,
+                trace_id=result.trace_id,
+                strategy_version=self.strategy_version,
+            )
+            or {}
+        )
+
         # ── Extract trade proposal ──────────────────────────────────────
         proposal = self._extract_proposal(analysis)
+        if proposal is not None and self._is_actionable(proposal):
+            canonical_block = self._canonical_block_reason(result.canonical_decision)
+            if canonical_block:
+                result.decision = "WAIT"
+                result.status = STATUS_WAIT
+                result.risk_reason = canonical_block
+                result.summary = canonical_block
+                result.add_stage("canonical", STAGE_BLOCKED, canonical_block)
+                result.add_stage("risk", STAGE_SKIPPED, "canonical decision not validated")
+                result.add_stage("execution", STAGE_SKIPPED, "canonical decision not validated")
+                self._finalise(result)
+                return result
         if proposal is None or not self._is_actionable(proposal):
             # NO-TRADE path: skip risk and execution entirely.
             result.decision = self._no_trade_decision(analysis)
@@ -1208,6 +1240,32 @@ class TradingPipeline:
         except (TypeError, ValueError):
             pass
         return float(settings.min_signal_confidence)
+
+    @staticmethod
+    def _canonical_block_reason(canonical: dict[str, Any]) -> str:
+        """Phase 2: block only when canonical validation FAILED for a reason.
+
+        The canonical layer is additive: it must not veto the historic path on
+        its own. It blocks ONLY when the assessment reported an unresolved
+        HIGH/CRITICAL conflict (Phase 2 §2: an unresolved conflict must never
+        become an automatic trade). Any other state (CANDIDATE/ANALYZING) is
+        left to the existing gates, so behaviour is preserved for evidence the
+        canonical layer cannot fully classify.
+
+        Fail-safe: a malformed chain never silently approves a critical conflict.
+        """
+        if not isinstance(canonical, dict) or not canonical:
+            return ""
+        assessment = canonical.get("assessment")
+        if isinstance(assessment, dict) and assessment.get("has_critical_conflicts") is True:
+            return "canonical: unresolved HIGH/CRITICAL conflict — WAIT (no automatic trade)"
+        decision = canonical.get("decision")
+        if isinstance(decision, dict):
+            state = str(decision.get("current_state") or "").upper()
+            if state in ("REJECTED", "EXPIRED"):
+                detail = str(decision.get("rationale") or "").strip()
+                return f"canonical: state {state}" + (f" ({detail})" if detail else "")
+        return ""
 
     @staticmethod
     def _resolve_data_source() -> str:
