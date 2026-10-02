@@ -182,6 +182,10 @@ class PipelineResult:
     # -> DecisionState) built from the supervisor's agent evidence. Empty when
     # the analysis carries no usable evidence (historic behaviour preserved).
     canonical_decision: dict[str, Any] = field(default_factory=dict)
+    # Phase 7: full correlation-id chain for observability. Every id downstream
+    # can be resolved from here; a missing id is an empty string, never a
+    # fabricated value.
+    correlation: dict[str, str] = field(default_factory=dict)
 
     def add_stage(self, stage: str, status: str, detail: str = "") -> None:
         """Append a stage entry (as a plain dict) to the trace."""
@@ -221,6 +225,7 @@ class PipelineResult:
             "fanout": self.fanout,
             "final_order": self.final_order,
             "canonical_decision": self.canonical_decision,
+            "correlation": dict(self.correlation),
         }
 
 
@@ -567,6 +572,22 @@ class TradingPipeline:
         result.trace_id = str(context.get("trace_id") or event_id)
         result.symbol = self._event_symbol(event, context)
 
+        # Phase 7: seed the correlation chain. ``market_event_id`` is the
+        # triggering event; the remaining ids are filled as the cycle advances
+        # (analysis/setup/risk/execution/position/review). An id that never
+        # materialises stays empty — never fabricated.
+        result.correlation = {
+            "trace_id": result.trace_id,
+            "market_event_id": event_id,
+            "analysis_id": "",
+            "setup_id": "",
+            "decision_id": result.decision_id,
+            "risk_decision_id": "",
+            "execution_id": "",
+            "position_id": "",
+            "review_id": "",
+        }
+
         # FOKUS #5: tag the cycle with the market-data source so a synthetic
         # (MT5-not-attached) analysis is never mistaken for real intelligence.
         result.data_source = self._resolve_data_source()
@@ -672,6 +693,19 @@ class TradingPipeline:
             )
             or {}
         )
+        # Phase 7: thread the canonical ids into the correlation chain so a
+        # decision can be traced to its assessment/setup from one place.
+        try:
+            canonical = result.canonical_decision or {}
+            assessment = canonical.get("assessment") or {}
+            setup = canonical.get("setup") or {}
+            decision_block = canonical.get("decision") or {}
+            result.correlation["analysis_id"] = str(assessment.get("assessment_id") or "")
+            result.correlation["setup_id"] = str(setup.get("setup_id") or "")
+            if decision_block.get("decision_id"):
+                result.correlation["decision_id"] = str(decision_block["decision_id"])
+        except Exception as exc:  # noqa: BLE001 - observability must not break a cycle
+            logger.debug("Correlation id threading skipped: %s", exc)
 
         # ── Extract trade proposal ──────────────────────────────────────
         proposal = self._extract_proposal(analysis)
@@ -748,6 +782,8 @@ class TradingPipeline:
         result.levels = self._order_levels(validation, analysis_context) or self._indicative_levels(
             analysis, analysis_context
         )
+        # Phase 7: the risk decision gets its own id for the correlation chain.
+        result.correlation["risk_decision_id"] = _new_id("risk")
         try:
             decision: GateDecision = self.risk_gate.validate_proposal(
                 validation["proposal"],
@@ -964,6 +1000,7 @@ class TradingPipeline:
 
         result.client_order_id = request.idempotency_key
         result.execution_id = _new_id("exec")
+        result.correlation["execution_id"] = result.execution_id
 
         # ── Step C1: Canonical signal fan-out (TASK 06) ─────────────────
         # When a fan-out coordinator is wired, ONE immutable canonical signal
@@ -987,6 +1024,11 @@ class TradingPipeline:
         result.execution_result = self._serialise_execution(exec_result)
         result.executed = success
         result.status = STATUS_EXECUTED if success else STATUS_ERROR
+        if success:
+            # Phase 7: the broker ticket becomes the position id for the chain.
+            ticket = getattr(exec_result, "ticket", None)
+            if ticket is not None:
+                result.correlation["position_id"] = str(ticket)
         if not success:
             result.error = str(getattr(exec_result, "error_message", "execution failed"))
         result.add_stage(

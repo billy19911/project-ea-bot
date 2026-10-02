@@ -3,6 +3,12 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Phase 7: Observability / Dashboard (correlation chain + explainability)
+- `services/python/src/orchestration/pipeline.py`: `PipelineResult.correlation` — rantai ID lengkap `trace_id / market_event_id / analysis_id / setup_id / decision_id / risk_decision_id / execution_id / position_id / review_id`. Diisi bertahap sepanjang siklus (analysis → canonical → risk → execution → position); ID yang tidak pernah terwujud tetap kosong (tidak pernah difabrikasi). Termasuk di `to_dict()`.
+- Trace `ops` (`decision_trace`/`trade_trace`/`explain_non_trade`) sudah ada dan tetap menjadi permukaan explainability dashboard (why-enter/why-not, evidence, konflik, hasil challenge, risk calc, hasil eksekusi, timeline posisi).
+- Test baru `services/python/tests/test_phase7_observability.py` (5): blok `correlation` ada dengan 9 kunci; ID inti terisi pada trade; `review_id`/`position_id` yang belum ada = UNKNOWN/kosong (bukan angka palsu); trace & explain mengekspos field why.
+- Verifikasi: full Python **3202 passed, 0 failed** (3197 + 5 Phase 7). Tidak ada default arm yang diubah; tidak ada order nyata dikirim.
+
 ### Added — Phase 6: Model Router & Budget
 - `services/python/src/llm/budget.py` (baru): `BudgetTree`/`BudgetNode` — anggaran token hierarkis Global → Supervisor → Department → Task → Agent → Model. Reservasi dipropagasikan ke SEMUA ancestor di bawah satu lock sehingga eksekusi konkuren tidak dapat overspend; `commit()` mencatat pemakaian aktual dari provider dan mengembalikan sisa. `should_wake_committee()` — komite (kerja LLM) hanya dibangunkan oleh event deterministik bermakna (BOS/CHOCH/sweep/OB touch/FVG/volatilitas/news/spread/invalidation/perubahan posisi), tidak pernah tiap candle.
 - `services/python/src/llm/model_router.py`: `route_task()` — routing tier deterministik (cheap/medium/strong/refused) berdasarkan kompleksitas, risk tier, konflik, dan sisa budget. Konflik / task berisiko tinggi / CHALLENGE / SUPERVISOR_SYNTHESIS / HYPOTHESIS_GENERATION → strong; budget habis tanpa task cheap-eligible → refused (tidak pernah overspend).
