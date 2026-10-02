@@ -40,6 +40,7 @@ from trading.level_plan import (
 from trading.market_freshness import evaluate_freshness
 from trading.market_snapshot import get_latest_snapshot
 
+from . import entry_stage as entry_stage_mod
 from .decision_chain import build_decision_chain
 from .signal_registry import get_signal_registry, is_pending_guard_enabled
 
@@ -893,6 +894,12 @@ class TradingPipeline:
             if plan is None:
                 result.status = STATUS_BLOCKED
                 result.risk_reason = f"entry OB/FVG: {zone_reason}"
+                result.add_stage(
+                    "entry_stage",
+                    STAGE_BLOCKED,
+                    f"{entry_stage_mod.STAGE_SETUP_VALID} → "
+                    f"{entry_stage_mod.STAGE_ENTRY_ARMED} pending: {zone_reason}",
+                )
                 result.add_stage("zone_entry", STAGE_BLOCKED, result.risk_reason)
                 result.add_stage("execution", STAGE_SKIPPED, "menunggu zona entry")
                 self._mark_signal(result, "skipped", f"menunggu zona OB/FVG: {zone_reason}")
@@ -905,6 +912,12 @@ class TradingPipeline:
                 proposal["stop_loss"] = plan["stop_loss"]
                 proposal["take_profit"] = plan["take_profit"]
                 result.add_stage("zone_entry", STAGE_OK, "harga di zona OB/FVG")
+                result.add_stage(
+                    "entry_stage",
+                    STAGE_OK,
+                    f"{entry_stage_mod.STAGE_ENTRY_ARMED} → "
+                    f"{entry_stage_mod.STAGE_ENTRY_TRIGGERED} (trigger terkonfirmasi)",
+                )
             except Exception as exc:  # noqa: BLE001 - never block on a notes error
                 logger.debug("Zone entry plan apply skipped: %s", exc)
 

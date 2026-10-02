@@ -3,6 +3,12 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Phase 4: Entry Engine (staged Setup → Zone → Trigger)
+- `services/python/src/orchestration/entry_stage.py` (baru): satu sumber kebenaran untuk tiga tahap entry deterministik — `SETUP_VALID` (Stage A), `ENTRY_ARMED` (Stage B), `ENTRY_TRIGGERED` (Stage C). Hanya Stage C yang executable; stage tak dikenal fail-closed (tidak executable). Helper `stage_for_zone_state()` + `describe()`.
+- `services/python/src/orchestration/pipeline.py`: jalur zone-entry kini mencatat tahap eksplisit di trace — `entry_stage` melaporkan `SETUP_VALID → ENTRY_ARMED` pending (dengan alasan) atau `ENTRY_ARMED → ENTRY_TRIGGERED` saat trigger terkonfirmasi. Zone touch tanpa konfirmasi trigger tetap tidak eksekusi.
+- Test baru `services/python/tests/test_phase4_entry_engine.py` (7): vocabulary tahap eksplisit & berurutan; hanya TRIGGER executable; zone touch saja tidak pernah `ENTRY_READY`; idempotency `(setup_id, trigger_id, candle_ts)` memblokir duplikat dan mengizinkan candle baru; matematika R:R konsisten (1.5 ATR SL / 4.5 ATR TP = 3R); level `EntryPlan` deterministik.
+- Verifikasi: full Python **3183 passed, 0 failed** (3176 + 7 Phase 4). Tidak mengubah default arm; tidak ada order nyata dikirim.
+
 ### Added — Phase 3: Committee & Debate (role-based specialists + bounded debate)
 - `services/python/src/orchestration/decision_chain.py`: menjalankan `DebateEngine` (bounded, `max_rounds=2`) untuk konflik unresolved sebelum `DecisionState` dibangun. Hasil debate diekspos di `canonical_decision["debate"]` (outcome/rounds/records/unresolved_conflicts). Konflik HIGH/CRITICAL yang gagal/tak tuntas menandai setup `INVALID`/`CHALLENGED` (fail-closed → tidak ada trade otomatis); konflik yang lolos challenge ditandai `RESOLVED` sehingga keputusan dapat maju. Challenger deterministik via `ChallengerRole` (injectable).
 - Test baru `services/python/tests/test_phase3_debate_flow.py` (6): debate dibatasi `max_rounds`; hanya spesialis pada domain konflik yang dikonsultasi (bukan seluruh komite); konflik HIGH unresolved → WAIT/INVALID; konflik yang resolved → boleh maju; `canonical_decision["debate"]` terekspos; challenge yang lolos tidak menyisakan konflik kritis.
