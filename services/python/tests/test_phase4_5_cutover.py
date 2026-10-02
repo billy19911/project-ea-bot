@@ -312,7 +312,13 @@ def test_canonical_levels_pass_risk_gate():
             "margin_call_level": 500.0,
         },
         [],
-        {"spread_pips": 1.0, "bid": 100.0, "ask": 100.0, "price": 100.0},
+        {
+            "spread_pips": 1.0,
+            "bid": 100.0,
+            "ask": 100.0,
+            "price": 100.0,
+            "contract_size": 1.0,
+        },
     )
     assert d.approved is True
 

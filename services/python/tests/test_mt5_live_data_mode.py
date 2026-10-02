@@ -135,23 +135,69 @@ class TestExecuteOrderGuard:
 
 
 class TestModeEndpoint:
-    def test_paper_mode_report(self):
-        from mt5.endpoints import get_mode
+    def test_paper_mode_report(self, monkeypatch):
+        from mt5 import endpoints
 
-        result = _run(get_mode())
+        monkeypatch.setattr(
+            endpoints.terminal_manager,
+            "list_terminals",
+            lambda: {"terminals": []},
+        )
+
+        result = _run(endpoints.get_mode())
         assert result["live_data"] is False
+        assert result["data_source"] == "SIMULATED"
+        assert result["account_mode"] is None
+        assert result["account_verified"] is False
         assert result["execution"] == "paper"
         # Run 24: the response carries the execution arm switch state.
         assert result["execution_armed"] is False
 
-    def test_live_mode_report(self):
-        from mt5.endpoints import get_mode
+    def test_live_mode_report(self, monkeypatch):
+        from mt5 import endpoints
+
+        monkeypatch.setattr(
+            endpoints.terminal_manager,
+            "list_terminals",
+            lambda: {"terminals": []},
+        )
 
         connector._live_mode = True
-        result = _run(get_mode())
+        result = _run(endpoints.get_mode())
         assert result["live_data"] is True
+        assert result["data_source"] == "LIVE"
         assert result["execution"] == "disabled (read-only)"
         assert result["execution_armed"] is False
+
+    def test_reports_attached_account_mode_not_global_arm_mode(self, monkeypatch):
+        from mt5 import endpoints
+
+        monkeypatch.setattr(
+            endpoints.terminal_manager,
+            "list_terminals",
+            lambda: {
+                "terminals": [
+                    {
+                        "id": "bil2",
+                        "attached": True,
+                        "account_verified": True,
+                        "account": {"mode": "DEMO"},
+                    },
+                    {
+                        "id": "live",
+                        "attached": False,
+                        "account_verified": True,
+                        "account": {"mode": "LIVE"},
+                    },
+                ]
+            },
+        )
+
+        result = _run(endpoints.get_mode())
+
+        assert result["account_mode"] == "DEMO"
+        assert result["account_verified"] is True
+        assert result["attached_terminal_id"] == "bil2"
 
 
 def _run(coro):
@@ -364,6 +410,11 @@ class TestLiveTickAndSymbol:
             digits=5,
             trade_contract_size=100000.0,
             point=0.00001,
+            volume_min=0.01,
+            volume_max=200.0,
+            volume_step=0.001,
+            trade_tick_size=0.00001,
+            trade_tick_value=1.0,
             trade_mode=4,
             currency_profit="USD",
             currency_margin="USD",
@@ -378,6 +429,9 @@ class TestLiveTickAndSymbol:
         assert info is not None
         assert info.symbol == "EURUSDc"
         assert info.spread == 16
+        assert info.tick_size == 0.00001
+        assert info.tick_value == 1.0
+        assert info.volume_step == 0.001
 
     def test_symbol_info_none_returns_none(self, monkeypatch):
         fake_mt5 = types.ModuleType("MetaTrader5")

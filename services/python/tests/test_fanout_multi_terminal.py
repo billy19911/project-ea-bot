@@ -85,6 +85,12 @@ def test_fanout_targets_require_running_armed(monkeypatch, tmp_path):
     terminals._state_for("a")["armed"] = True
     terminals._state_for("b")["armed"] = True  # armed but not running
     terminals._state_for("c")["armed"] = True  # execution:false but running → included
+    for index, folder in enumerate((r"C:\mt\A", r"C:\mt\C"), start=1):
+        terminals._account_cache[terminals._norm(folder)] = {
+            "login": 4000 + index,
+            "server": "Broker-Demo",
+            "mode": "DEMO",
+        }
     targets = terminals.get_fanout_targets()
     assert [t["id"] for t in targets] == ["a", "c"]
 

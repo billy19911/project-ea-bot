@@ -16,7 +16,7 @@ type NavKey = string;
 type AccountMode = 'LIVE' | 'DEMO' | 'CONTEST';
 
 type TerminalState = { label: string; running: boolean; armed: boolean };
-type AccountState = { login: number | null; server: string; mode: AccountMode | null };
+type AccountState = { login: number | string | null; server: string; mode: AccountMode | null };
 
 function mapTradeMode(raw: unknown): AccountMode | null {
   // MetaTrader5 ACCOUNT_TRADE_MODE enum (returned by the connector as a string):
@@ -391,32 +391,31 @@ export default function AppShell({
         if (res.ok) {
           const data = await res.json();
           const list: Record<string, unknown>[] = Array.isArray(data?.terminals) ? data.terminals : [];
-          const selected = list.find(t => t?.selected) ?? list[0];
+          const selected = list.find(t => t?.selected);
           if (!cancelled) {
             setTerminalKnown(true);
             if (selected) {
               setTerminal({
                 label: String(selected.label ?? selected.id ?? 'MT5'),
                 running: selected.running === true,
-                armed: data?.execution_armed === true,
+                armed: selected.armed === true,
               });
+              const rawAccount = selected.account as Record<string, unknown> | null | undefined;
+              if (selected.account_verified === true && rawAccount) {
+                setAccount({
+                  login: typeof rawAccount.login === 'number' || typeof rawAccount.login === 'string'
+                    ? rawAccount.login
+                    : null,
+                  server: typeof rawAccount.server === 'string' ? rawAccount.server : '',
+                  mode: mapTradeMode(rawAccount.mode),
+                });
+              } else {
+                setAccount(null);
+              }
             } else {
               setTerminal(null);
+              setAccount(null);
             }
-          }
-        }
-      } catch {}
-      if (!getAuthToken()) return;
-      try {
-        const res = await apiFetch('/mt5/accounts/info');
-        if (res.ok) {
-          const data = await res.json();
-          if (!cancelled) {
-            setAccount({
-              login: typeof data?.login === 'number' ? data.login : null,
-              server: typeof data?.server === 'string' ? data.server : '',
-              mode: mapTradeMode(data?.trade_mode),
-            });
           }
         }
       } catch {}

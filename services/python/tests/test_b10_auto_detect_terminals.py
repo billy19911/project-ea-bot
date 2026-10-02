@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""B-10 — auto-detect active terminals: running is the only arm gate.
+"""B-10 — auto-detect active terminals and verify identity before arming.
 
-Proves: arm works for execution:false + auto-detected terminals, stopped
-terminals fail closed, fan-out has no execution-flag gate, execution_permitted
-still requires an attached binding, sizing falls back to the signal volume,
-and the default state is DISARMED.
+Proves: arm works for verified execution:false + auto-detected terminals,
+stopped or unverified terminals fail closed, fan-out has no execution-flag
+gate, execution_permitted still requires an attached binding, sizing falls
+back to the signal volume, and the default state is DISARMED.
 """
 
 from __future__ import annotations
@@ -89,6 +89,16 @@ def _folder_of(terminal_id: str) -> str:
     }[terminal_id]
 
 
+def _mark_verified(*folders):
+    for index, folder in enumerate(folders, start=1):
+        terminals._account_cache[terminals._norm(folder)] = {
+            "login": 2000 + index,
+            "server": "Broker-Demo",
+            "mode": "DEMO",
+            "trade_mode": "0",
+        }
+
+
 # ---------------------------------------------------------------------------
 # Skenario 1 — arm execution:false terminal that IS running → OK
 # ---------------------------------------------------------------------------
@@ -97,6 +107,7 @@ def test_b10_arm_execution_false_running_ok(monkeypatch, tmp_path):
     _use_config(monkeypatch, tmp_path, CONFIG_B10)
     monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\VITO2", 30))
     monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\VITO2"))
+    _mark_verified(r"C:\mt\VITO2")
 
     result = terminals.arm_terminal("vito2", True)
     assert result["ok"] is True
@@ -116,6 +127,7 @@ def test_b10_arm_auto_detected_terminal_ok(monkeypatch, tmp_path):
     _use_config(monkeypatch, tmp_path, CONFIG_B10)
     monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\Z", 2222))
     monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\Z"))
+    _mark_verified(r"C:\mt\Z")
 
     view = terminals.list_terminals()
     auto = [t for t in view["terminals"] if t["source"] == "auto"]
@@ -163,6 +175,7 @@ def test_b10_fanout_targets_ignore_execution_flag(monkeypatch, tmp_path):
         ],
     )
     monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+    _mark_verified(r"C:\mt\BIL2", r"C:\mt\VITO2")
 
     # bil2 is execution:true; vito2 is execution:false — both are running.
     assert terminals.arm_terminal("vito2", True)["ok"] is True
@@ -185,6 +198,7 @@ def test_b10_execution_permitted_still_requires_attached(monkeypatch, tmp_path):
     monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\VITO2", 30))
     # Binding attached to a DIFFERENT terminal (not vito2).
     monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\OTHER"))
+    _mark_verified(r"C:\mt\VITO2")
 
     assert terminals.arm_terminal("vito2", True)["ok"] is True
     assert terminals.execution_permitted() is False
@@ -206,6 +220,7 @@ def test_b10_armed_terminal_stops_dropped_everywhere(monkeypatch, tmp_path):
     _use_config(monkeypatch, tmp_path, CONFIG_B10)
     monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\VITO2", 30))
     monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\VITO2"))
+    _mark_verified(r"C:\mt\VITO2")
 
     assert terminals.arm_terminal("vito2", True)["ok"] is True
     assert terminals.get_armed_terminals() == ["vito2"]

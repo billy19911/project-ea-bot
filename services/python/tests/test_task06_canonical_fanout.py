@@ -456,6 +456,11 @@ def test_arm_is_explicit_and_required_for_fanout(tmp_path, monkeypatch):
     )
     # Attached so arming is permitted.
     monkeypatch.setattr(terminals, "_detect_attached_path", lambda: r"C:\mt\BIL2")
+    terminals._account_cache[terminals._norm(r"C:\mt\BIL2")] = {
+        "login": 5001,
+        "server": "Broker-Demo",
+        "mode": "DEMO",
+    }
 
     # Not armed → not a fan-out target.
     assert terminals.get_fanout_targets() == []

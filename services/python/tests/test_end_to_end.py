@@ -110,7 +110,12 @@ def _context():
             "used_margin": 100.0,
         },
         "current_positions": [],
-        "market_info": {"spread_pips": 1.0, "ask": 1.1001, "bid": 1.0999},
+        "market_info": {
+            "spread_pips": 1.0,
+            "ask": 1.1001,
+            "bid": 1.0999,
+            "contract_size": 1.0,
+        },
     }
 
 

@@ -3,6 +3,14 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Fixed — Phase 1 (P0): Risk & Execution Safety
+- `services/python/src/execution/engine.py`: hasil broker ambigu (timeout/koneksi/exception) kini disimpan `OrderState.UNKNOWN` tanpa resend; hanya penolakan broker eksplisit yang boleh retry terbatas. Locator hanya dipakai untuk adopt fill yang terbukti. Intent wajib persist sebelum send di runtime produksi (`require_durable_state=True`); store gagal tulis dilaporkan unhealthy dan send diblokir (503). Metadata order (proposal/execution/client/broker IDs, symbol/side/volume/strategy/retry/timestamp) dipersist.
+- `services/python/src/risk/engine.py` + `risk/gate.py`: exposure dan max-position memakai notional broker (`contract_size`); data lot MT5 tanpa spec ditolak (fail-closed). Sizing memakai `tick_value/tick_size` broker bila ada; monetary gate mencakup SL + spread + commission, commission unknown dengan budget aktif = tolak. Spread dinormalisasi ke price/points/ticks/ATR ratio + estimasi cost per lot.
+- `services/python/src/orchestration/pipeline.py`: lot tidak dibulatkan naik; forced risk sizing tanpa spec broker → size 0 (reject). `OrderBuilder`: snap-down ke `volume_step`, di bawah `volume_min` → 0 (reject).
+- `services/python/src/orchestration/account_context.py`: posisi MT5 (`quantity`/`price_current`) dinormalisasi ke `size`/`current_price` + notional contract-aware; spread dinormalisasi ke points/ticks/cost.
+- `services/python/src/mt5/connector.py` + `schemas.py`: `SymbolInfo` mengekspos `tick_size`/`tick_value`/`volume_min`/`volume_max`/`volume_step` broker.
+- Verifikasi: full Python **3164 passed, 0 failed**; Pylance bersih. Semua terminal tetap DISARMED; `mt5_terminals.json` tidak diubah oleh agent.
+
 ### Added — Zona OB/FVG berkualitas: overlay chart + gate entry closed-bar + bias gate
 - `services/python/src/trading/entry_zone.py`: `detect_entry_zones()` baru — deteksi OB/FVG dari closed OHLC (forming bar dikecualikan), quality gate via `ZoneConfig` (retest limit, FVG fill, invalidasi), metadata `mitigation`/`touch_count`; `build_entry_plan`/`ZoneEntryGate` menerima `zone_closes`/`zone_timeframe`/`zone_config` (fallback deteksi lama bila `zone_closes` tidak diberikan — backward compat).
 - `services/python/src/orchestration/pipeline.py`: gate entry memakai detektor berkualitas + **bias M30/H1 wajib searah sinyal** (netral → blok dengan alasan jelas); `_zone_wait_reason` memakai detektor yang sama.

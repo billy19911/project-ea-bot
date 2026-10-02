@@ -485,7 +485,7 @@ class TestDefaultDisarmed:
             return
         pytest.skip("mt5.terminals unavailable")
 
-    def test_arm_state_starts_off_in_fresh_registry(self):
+    def test_arm_state_starts_off_in_fresh_registry(self, monkeypatch):
         # A freshly-built terminal state mapping has no armed entry — proving the
         # default is DISARMED, not merely "currently disarmed".
         for mod_name in ("mt5.terminals", "src.mt5.terminals"):
@@ -493,6 +493,7 @@ class TestDefaultDisarmed:
                 terms = importlib.import_module(mod_name)
             except ImportError:
                 continue
+            monkeypatch.setattr(terms, "_terminal_states", {})
             states = terms._terminal_states  # noqa: SLF001 - asserting the default
             assert all(not bool(v.get("armed")) for v in states.values())
             return

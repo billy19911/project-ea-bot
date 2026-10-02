@@ -43,7 +43,7 @@ def proposal() -> dict[str, float | str]:
 @pytest.fixture
 def market() -> dict[str, float]:
     """Return safe market conditions."""
-    return {"spread_pips": 1.0}
+    return {"spread_pips": 1.0, "contract_size": 1.0}
 
 
 def validate(gate, proposal, account, market, positions=None) -> GateDecision:

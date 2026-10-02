@@ -298,14 +298,16 @@ def list_terminals() -> dict[str, Any]:
         if proc:
             matched_running.add(key)
         st = _terminal_states.get(t["id"]) or {}
+        account = _account_cache.get(key)
+        account_verified = _account_is_verified(account)
         entries.append(
             {
                 "id": t["id"],
                 "label": t["label"],
                 "path": t["path"],
                 "folder": folder,
-                # B-10: armable == running. The legacy "execution" config flag
-                # is deprecated and ignored for every gate.
+                # ``armable`` retains its process-discovery meaning; actual
+                # arming also requires account_verified in arm_terminal().
                 "armable": bool(proc is not None),
                 "source": "config",
                 "running": proc is not None,
@@ -313,7 +315,8 @@ def list_terminals() -> dict[str, Any]:
                 "attached": bool(attached_norm and attached_norm == key),
                 "selected": bool(st.get("selected")),
                 "armed": bool(st.get("armed")),
-                "account": _account_cache.get(key),
+                "account": account,
+                "account_verified": account_verified,
                 # Per-account sizing + fan-out participation (F1).
                 "risk_per_trade_pct": t.get("risk_per_trade_pct"),
                 "fixed_lot": t.get("fixed_lot"),
@@ -322,15 +325,16 @@ def list_terminals() -> dict[str, Any]:
             }
         )
 
-    # Running terminals that are not in the config file. B-10: they are running
-    # by definition, so they are armable and participate in fan-out once armed
-    # (no per-account sizing → the engine falls back to the signal volume).
+    # Running terminals that are not in the config file still have no sizing
+    # overrides; they use the signal volume once their account is verified.
     for r in running:
         key = _norm(r["folder"])
         if key in matched_running:
             continue
         auto_id = f"auto-{r['pid']}"
         st = _terminal_states.get(auto_id) or {}
+        account = _account_cache.get(key)
+        account_verified = _account_is_verified(account)
         entries.append(
             {
                 "id": auto_id,
@@ -344,7 +348,8 @@ def list_terminals() -> dict[str, Any]:
                 "attached": bool(attached_norm and attached_norm == key),
                 "selected": bool(st.get("selected")),
                 "armed": bool(st.get("armed")),
-                "account": _account_cache.get(key),
+                "account": account,
+                "account_verified": account_verified,
                 "risk_per_trade_pct": None,
                 "fixed_lot": None,
                 "max_lot_per_trade": None,
@@ -463,6 +468,21 @@ def restore_saved_selection() -> Optional[str]:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _account_is_verified(account: Any) -> bool:
+    """Return whether a probed account has a usable, recognized identity."""
+    if not isinstance(account, dict):
+        return False
+    login = account.get("login")
+    server = account.get("server")
+    mode = account.get("mode")
+    return (
+        login not in (None, "")
+        and isinstance(server, str)
+        and bool(server.strip())
+        and mode in {"DEMO", "CONTEST", "LIVE"}
+    )
 
 
 def _read_account_summary() -> Optional[dict[str, Any]]:
@@ -739,12 +759,11 @@ def is_execution_armed() -> bool:
 
 
 def get_armed_terminals() -> list[str]:
-    """Return terminal ids armed AND running.
+    """Return armed terminal ids that are running and account-verified.
 
-    B-10: running is the only eligibility condition; the ``execution`` config
-    flag is ignored. Fail-closed: a terminal whose process stopped is dropped
-    from the list (the operator armed it, but it is no longer running). The
-    execution engine loops this list.
+    The legacy ``execution`` config flag is ignored. Fail-closed: a terminal
+    whose process stopped or whose account identity is unknown is dropped from
+    the list. The execution engine loops this list.
     """
     view = list_terminals()
     by_id = {t["id"]: t for t in view["terminals"]}
@@ -755,7 +774,7 @@ def get_armed_terminals() -> list[str]:
         entry = by_id.get(tid)
         if entry is None:
             continue
-        if not entry.get("running"):
+        if not entry.get("running") or not entry.get("account_verified"):
             continue
         armed.append(tid)
     return armed
@@ -827,6 +846,7 @@ def get_fanout_targets() -> list[dict[str, Any]]:
     A fan-out target must satisfy ALL of:
     - currently running,
     - ARMED by the operator (per-terminal on/off switch),
+    - account login, server, and mode verified by a probe,
     - ``fanout_target`` true (operator has not excluded it)
       (B-10: no execution flag gate).
 
@@ -841,6 +861,8 @@ def get_fanout_targets() -> list[dict[str, Any]]:
             continue
         if not entry.get("armed"):
             continue
+        if not entry.get("account_verified"):
+            continue
         if not entry.get("fanout_target", True):
             continue
         targets.append(entry)
@@ -850,10 +872,9 @@ def get_fanout_targets() -> list[dict[str, Any]]:
 def arm_terminal(terminal_id: str, armed: bool) -> dict[str, Any]:
     """Arm or disarm a SPECIFIC terminal (multi-terminal B-9).
 
-    Arming requires the terminal to exist in the registry and be currently
-    running. Any running terminal (demo or live) can be armed — the
-    per-terminal arm switch is the ONLY execution control (B-10). An attached
-    binding is NOT required.
+    Arming requires the terminal to exist in the registry, be running, and
+    have a verified login/server/account mode. Any verified account (demo or
+    live) can be armed. An attached binding is NOT required.
 
     The process-wide MetaTrader5 binding is a DATA pointer only; the execution
     engine re-attaches to each armed account right before sending that
@@ -894,6 +915,16 @@ def arm_terminal(terminal_id: str, armed: bool) -> dict[str, Any]:
             "terminal_id": terminal_id,
             "armed": False,
             "message": f"Terminal '{terminal_id}' is not running.",
+        }
+    if not _account_is_verified(entry.get("account")):
+        return {
+            "ok": False,
+            "terminal_id": terminal_id,
+            "armed": False,
+            "message": (
+                f"Akun terminal '{terminal_id}' belum terverifikasi. "
+                "Disarm semua terminal, klik Cek akun, lalu arm kembali."
+            ),
         }
 
     _state_for(terminal_id)["armed"] = True

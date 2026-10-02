@@ -6,7 +6,7 @@ Covers the safety model end to end, without a real MT5 terminal:
 - config parsing (missing/malformed files degrade safely),
 - terminal listing merged with auto-detected running processes,
 - selection re-attaches the binding but does NOT change any arm state (B-9),
-- arming requires: running only (attach NOT required; execution flag ignored, B-10),
+- arming requires: running + verified account (attach NOT required; execution flag ignored),
 - ``execution_permitted()`` is the final gate consulted by the engine,
 - ``/mt5/terminals`` endpoints report the registry honestly.
 
@@ -71,6 +71,16 @@ def _fake_running(folder: str, pid: int = 1111):
 def _fake_attached(folder):
     """Return a _detect_attached_path replacement pointing at ``folder``."""
     return lambda: folder
+
+
+def _mark_verified(*folders):
+    for index, folder in enumerate(folders, start=1):
+        terminals._account_cache[terminals._norm(folder)] = {
+            "login": 1000 + index,
+            "server": "Broker-Demo",
+            "mode": "DEMO",
+            "trade_mode": "0",
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +308,7 @@ class TestArmExecution:
         monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\A"))
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\A"))
         terminals._selected_id = "a"
+        _mark_verified(r"C:\mt\A")
 
         result = terminals.arm_execution(True)
         assert result["ok"] is True
@@ -327,6 +338,7 @@ class TestArmExecution:
         monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\C", 3333))
         monkeypatch.setattr(terminals, "_detect_attached_path", lambda: r"C:\mt\OTHER")
         terminals._selected_id = "c"
+        _mark_verified(r"C:\mt\C")
 
         result = terminals.arm_execution(True)
         assert result["ok"] is True
@@ -337,6 +349,7 @@ class TestArmExecution:
         monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\C", 3333))
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\C"))
         terminals._selected_id = "c"
+        _mark_verified(r"C:\mt\C")
 
         result = terminals.arm_execution(True)
         assert result["ok"] is True
@@ -358,6 +371,7 @@ class TestArmExecution:
         monkeypatch.setattr(terminals, "scan_running_terminals", _fake_running(r"C:\mt\A"))
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\A"))
         terminals._selected_id = "a"
+        _mark_verified(r"C:\mt\A")
 
         # Flag is still false in the file — arm succeeds regardless.
         assert terminals.arm_execution(True)["ok"] is True
@@ -386,6 +400,7 @@ class TestExecutionPermitted:
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\C"))
         terminals._selected_id = "c"
         terminals._execution_armed = True
+        _mark_verified(r"C:\mt\C")
 
         assert terminals.execution_permitted() is True
 
@@ -427,6 +442,17 @@ def _two_running():
 
 
 class TestArmTerminal:
+    def test_arm_requires_verified_account(self, monkeypatch, tmp_path):
+        _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
+        monkeypatch.setattr(terminals, "scan_running_terminals", _two_running())
+        monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+
+        result = terminals.arm_terminal("bil2", True)
+
+        assert result["ok"] is False
+        assert "cek akun" in result["message"].lower()
+        assert terminals.get_armed_terminals() == []
+
     def test_arm_single_terminal(self, monkeypatch, tmp_path):
         _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
         monkeypatch.setattr(
@@ -435,6 +461,7 @@ class TestArmTerminal:
             lambda: [{"pid": 10, "exe": r"C:\mt\BIL2\terminal64.exe", "folder": r"C:\mt\BIL2"}],
         )
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+        _mark_verified(r"C:\mt\BIL2")
 
         result = terminals.arm_terminal("bil2", True)
         assert result["ok"] is True
@@ -450,6 +477,7 @@ class TestArmTerminal:
         # Binding can only be attached to one terminal at a time; both are
         # "running" so arming each succeeds independently.
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+        _mark_verified(r"C:\mt\BIL2", r"C:\mt\DEMO2")
 
         assert terminals.arm_terminal("bil2", True)["ok"] is True
 
@@ -465,6 +493,7 @@ class TestArmTerminal:
         _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
         monkeypatch.setattr(terminals, "scan_running_terminals", _two_running())
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+        _mark_verified(r"C:\mt\BIL2", r"C:\mt\DEMO2")
 
         assert terminals.arm_terminal("bil2", True)["ok"] is True
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\DEMO2"))
@@ -489,6 +518,7 @@ class TestArmTerminal:
             lambda: [{"pid": 30, "exe": r"C:\mt\VITO2\terminal64.exe", "folder": r"C:\mt\VITO2"}],
         )
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\VITO2"))
+        _mark_verified(r"C:\mt\VITO2")
 
         result = terminals.arm_terminal("vito2", True)
         assert result["ok"] is True
@@ -527,6 +557,7 @@ class TestArmTerminal:
         _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
         monkeypatch.setattr(terminals, "scan_running_terminals", _two_running())
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+        _mark_verified(r"C:\mt\DEMO2")
 
         result = terminals.arm_terminal("demo2", True)
         assert result["ok"] is True
@@ -542,6 +573,7 @@ class TestArmTerminal:
             lambda: [{"pid": 10, "exe": r"C:\mt\BIL2\terminal64.exe", "folder": r"C:\mt\BIL2"}],
         )
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+        _mark_verified(r"C:\mt\BIL2")
         assert terminals.arm_terminal("bil2", True)["ok"] is True
         assert terminals.get_armed_terminals() == ["bil2"]
 
@@ -556,6 +588,7 @@ class TestArmTerminal:
             lambda: [{"pid": 10, "exe": r"C:\mt\BIL2\terminal64.exe", "folder": r"C:\mt\BIL2"}],
         )
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+        _mark_verified(r"C:\mt\BIL2")
         terminals.arm_terminal("bil2", True)
 
         view = terminals.list_terminals()
@@ -569,6 +602,7 @@ class TestArmTerminal:
         _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
         monkeypatch.setattr(terminals, "scan_running_terminals", _two_running())
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+        _mark_verified(r"C:\mt\BIL2", r"C:\mt\DEMO2")
         # Arm BOTH bil2 and demo2 — no attach requirement.
         assert terminals.arm_terminal("bil2", True)["ok"] is True
         assert terminals.arm_terminal("demo2", True)["ok"] is True
@@ -597,6 +631,7 @@ class TestArmTerminalEndpoint:
             lambda: [{"pid": 10, "exe": r"C:\mt\BIL2\terminal64.exe", "folder": r"C:\mt\BIL2"}],
         )
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\BIL2"))
+        _mark_verified(r"C:\mt\BIL2")
 
         result = _run(endpoint("bil2", type("R", (), {"armed": True})()))
         assert result["ok"] is True
@@ -614,6 +649,7 @@ class TestArmTerminalEndpoint:
             lambda: [{"pid": 30, "exe": r"C:\mt\VITO2\terminal64.exe", "folder": r"C:\mt\VITO2"}],
         )
         monkeypatch.setattr(terminals, "_detect_attached_path", _fake_attached(r"C:\mt\VITO2"))
+        _mark_verified(r"C:\mt\VITO2")
 
         result = _run(endpoint("vito2", type("R", (), {"armed": True})()))
         assert result["ok"] is True

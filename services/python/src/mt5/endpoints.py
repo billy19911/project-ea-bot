@@ -41,9 +41,25 @@ def _field(obj: Any, name: str) -> Any:
 
 @router.get("/mode")
 async def get_mode() -> dict:
-    """Report MT5 data mode."""
+    """Report the data source and verified identity of the attached account."""
+    view = terminal_manager.list_terminals()
+    attached = next(
+        (terminal for terminal in view["terminals"] if terminal.get("attached")),
+        None,
+    )
+    account = attached.get("account") if attached else None
+    account_verified = bool(
+        attached
+        and attached.get("account_verified")
+        and isinstance(account, dict)
+        and account.get("mode") in {"DEMO", "CONTEST", "LIVE"}
+    )
     return {
         "live_data": connector.is_live_mode(),
+        "data_source": "LIVE" if connector.is_live_mode() else "SIMULATED",
+        "account_mode": account.get("mode") if account_verified else None,
+        "account_verified": account_verified,
+        "attached_terminal_id": attached.get("id") if attached else None,
         "execution": "disabled (read-only)" if connector.is_live_mode() else "paper",
         "execution_armed": terminal_manager.is_execution_armed(),
     }
@@ -93,9 +109,8 @@ async def list_terminals() -> dict:
     """List configured + auto-detected terminals with live status.
 
     Read-only. ``armable`` reflects whether the terminal is currently running;
-    any running terminal can be armed. ``execution_armed`` reflects the
-    operator's explicit arm switch (off by default, always off after switching
-    terminals).
+    Arm additionally requires verified account identity. ``execution_armed``
+    reflects the operator's explicit per-terminal arm switch.
     """
     return terminal_manager.list_terminals()
 
@@ -119,9 +134,9 @@ async def select_terminal(request: SelectTerminalRequest):
 async def arm_terminal(request: ArmRequest):
     """Arm or disarm real order execution for the selected terminal (legacy).
 
-    Arming requires: a running selected terminal (B-10: the ``"execution"``
-    config flag is ignored). An attached binding is NOT required (B-9
-    Lanjutan). Returns 400 otherwise.
+    Arming requires: a running selected terminal with verified account
+    identity. The ``"execution"`` config flag is ignored. An attached binding
+    is NOT required (B-9 Lanjutan). Returns 400 otherwise.
     Kept for backward compat — the per-terminal endpoint below is preferred.
     """
     result = terminal_manager.arm_execution(request.armed)
@@ -135,10 +150,9 @@ async def arm_terminal(request: ArmRequest):
 async def arm_terminal_by_id(terminal_id: str, request: ArmTerminalRequest):
     """Arm or disarm ONE specific terminal (multi-terminal B-9).
 
-    Arming requires: the terminal is in the registry and currently running
-    (B-10: the ``"execution"`` config flag is ignored — any running terminal,
-    demo or live, can be armed). Returns 400 otherwise. Disarm is always
-    allowed (fail-safe).
+    Arming requires: the terminal is in the registry, running, and has a
+    verified account identity. The ``"execution"`` config flag is ignored.
+    Returns 400 otherwise. Disarm is always allowed (fail-safe).
 
     Multiple terminals can be armed simultaneously; the execution engine loops
     ``get_armed_terminals()``. The process-wide MT5 binding still only

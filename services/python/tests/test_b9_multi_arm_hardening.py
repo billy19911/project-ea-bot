@@ -78,6 +78,16 @@ def _three_running():
     ]
 
 
+def _mark_verified(*folders):
+    for index, folder in enumerate(folders, start=1):
+        terminals._account_cache[terminals._norm(folder)] = {
+            "login": 3000 + index,
+            "server": "Broker-Demo",
+            "mode": "DEMO",
+            "trade_mode": "0",
+        }
+
+
 # ===========================================================================
 # 1. Multi-arm without attach
 # ===========================================================================
@@ -88,6 +98,7 @@ class TestMultiArmWithoutAttach:
         monkeypatch.setattr(terminals, "scan_running_terminals", _three_running())
         # Binding is attached to A only.
         monkeypatch.setattr(terminals, "_detect_attached_path", lambda: r"C:\mt\A")
+        _mark_verified(r"C:\mt\A", r"C:\mt\B", r"C:\mt\C")
 
         res_a = terminals.arm_terminal("a", True)
         res_b = terminals.arm_terminal("b", True)
@@ -105,6 +116,7 @@ class TestSelectDoesNotDisarm:
         _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
         monkeypatch.setattr(terminals, "scan_running_terminals", _three_running())
         monkeypatch.setattr(terminals, "_detect_attached_path", lambda: r"C:\mt\A")
+        _mark_verified(r"C:\mt\A", r"C:\mt\B", r"C:\mt\C")
         assert terminals.arm_terminal("a", True)["ok"] is True
         assert terminals.arm_terminal("b", True)["ok"] is True
 
@@ -309,6 +321,7 @@ class TestExecutionPermittedGate:
         _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
         monkeypatch.setattr(terminals, "scan_running_terminals", _three_running())
         monkeypatch.setattr(terminals, "_detect_attached_path", lambda: r"C:\mt\A")
+        _mark_verified(r"C:\mt\A", r"C:\mt\B", r"C:\mt\C")
         assert terminals.arm_terminal("a", True)["ok"] is True
         assert terminals.arm_terminal("b", True)["ok"] is True
         # Binding attached to A (armed) → permitted even though B is armed too.
@@ -319,6 +332,7 @@ class TestExecutionPermittedGate:
         monkeypatch.setattr(terminals, "scan_running_terminals", _three_running())
         # Attach to C BEFORE arming; then arm A/B and point attachment at C.
         monkeypatch.setattr(terminals, "_detect_attached_path", lambda: r"C:\mt\C")
+        _mark_verified(r"C:\mt\A", r"C:\mt\B", r"C:\mt\C")
         assert terminals.arm_terminal("a", True)["ok"] is True
         # C is NOT armed → the gate must fail closed.
         assert terminals.execution_permitted() is False
@@ -327,6 +341,7 @@ class TestExecutionPermittedGate:
         _use_config(monkeypatch, tmp_path, CONFIG_MULTI)
         monkeypatch.setattr(terminals, "scan_running_terminals", _three_running())
         monkeypatch.setattr(terminals, "_detect_attached_path", lambda: r"C:\mt\A")
+        _mark_verified(r"C:\mt\A", r"C:\mt\B", r"C:\mt\C")
         assert terminals.arm_terminal("a", True)["ok"] is True
         assert terminals.execution_permitted() is True
         # A stops running → dropped from the armed list → gate fails closed.

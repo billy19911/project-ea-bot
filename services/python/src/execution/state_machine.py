@@ -101,7 +101,7 @@ def get_order(intent_id: str) -> Dict:
     return _order_store[intent_id]
 
 
-def set_order(intent_id: str, state: OrderState | str, extra: Dict | None = None) -> None:
+def set_order(intent_id: str, state: OrderState | str, extra: Dict | None = None) -> bool:
     """Create or update an order record.
 
     ``extra`` can contain arbitrary metadata (e.g., timestamps, broker ticket).
@@ -113,11 +113,13 @@ def set_order(intent_id: str, state: OrderState | str, extra: Dict | None = None
     if extra:
         record.update(extra)
     _order_store[intent_id] = record
-    if _store is not None:
-        try:
-            _store.set_order(intent_id, state_value, extra=extra)
-        except Exception:  # noqa: BLE001 - persistence must never break state machine
-            pass
+    if _store is None:
+        return False
+    try:
+        result = _store.set_order(intent_id, state_value, extra=extra)
+        return result is not False
+    except Exception:  # noqa: BLE001 - caller may use result to fail closed
+        return False
 
 
 def reset_store() -> None:

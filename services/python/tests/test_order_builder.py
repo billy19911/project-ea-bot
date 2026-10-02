@@ -132,6 +132,31 @@ class TestOrderBuilderBuild:
         req = builder.build_order_request(proposal)
         assert req.volume == 0.75
 
+    def test_build_preserves_durable_execution_metadata(self) -> None:
+        builder = OrderBuilder()
+        req = builder.build_order_request(
+            {
+                "symbol": "EURUSD",
+                "side": "buy",
+                "size": 0.1,
+                "idempotency_key": "client-1",
+                "proposal_id": "proposal-1",
+                "execution_id": "execution-1",
+                "strategy_version": "v2.4",
+                "signal_id": "signal-1",
+                "account_id": "account-1",
+                "terminal_id": "bil2",
+            }
+        )
+
+        assert req.idempotency_key == "client-1"
+        assert req.proposal_id == "proposal-1"
+        assert req.execution_id == "execution-1"
+        assert req.strategy_version == "v2.4"
+        assert req.signal_id == "signal-1"
+        assert req.account_id == "account-1"
+        assert req.terminal_id == "bil2"
+
     def test_build_autopopulates_price_from_ask_for_buy(self) -> None:
         """BUY market order autopopulates price from ask when price missing."""
         builder = OrderBuilder()

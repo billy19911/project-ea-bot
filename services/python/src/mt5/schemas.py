@@ -127,6 +127,11 @@ class SymbolInfo(BaseModel):
     digits: int
     contract_size: float
     point: float
+    volume_min: float = 0.0
+    volume_max: float = 0.0
+    volume_step: float = 0.0
+    tick_size: float = 0.0
+    tick_value: float = 0.0
     trade_mode: str
     currency_profit: str
     currency_margin: str

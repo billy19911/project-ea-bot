@@ -30,6 +30,7 @@ class OrderStateStore:
     def __init__(self, path: Optional[str] = None) -> None:
         self.path = str(path or os.getenv("ORDER_STATE_PATH") or _DEFAULT_PATH)
         self._orders: dict[str, dict[str, Any]] = {}
+        self._healthy = True
         # Guards the read-modify-append sequence so a concurrent close/update
         # cannot interleave a stale record into the jsonl (LEDGER-SLTP T1).
         self._lock = threading.RLock()
@@ -46,6 +47,7 @@ class OrderStateStore:
                     try:
                         entry = json.loads(line)
                     except json.JSONDecodeError:
+                        self._healthy = False
                         logger.warning("Skipping corrupt order state line in %s", self.path)
                         continue
                     if isinstance(entry, dict) and "intent_id" in entry:
@@ -53,9 +55,15 @@ class OrderStateStore:
         except FileNotFoundError:
             pass
         except OSError as exc:
+            self._healthy = False
             logger.warning("Could not read order state store %s: %s", self.path, exc)
 
-    def set_order(self, intent_id: str, state: str, extra: Optional[dict[str, Any]] = None) -> None:
+    @property
+    def healthy(self) -> bool:
+        """Whether reads and writes still support durable duplicate protection."""
+        return self._healthy
+
+    def set_order(self, intent_id: str, state: str, extra: Optional[dict[str, Any]] = None) -> bool:
         """Create or update an order record and persist it."""
         from datetime import datetime, timezone
 
@@ -70,7 +78,7 @@ class OrderStateStore:
             if extra:
                 entry.update(extra)
             self._orders[intent_id] = entry
-            self._append_line(entry)
+            return self._append_line(entry)
 
     def mark_closed(
         self,
@@ -174,18 +182,23 @@ class OrderStateStore:
         except OSError as exc:
             logger.warning("Could not truncate order state store %s: %s", self.path, exc)
 
-    def _append_line(self, entry: dict[str, Any]) -> None:
-        """Persist one entry; a write failure degrades to cache-only."""
+    def _append_line(self, entry: dict[str, Any]) -> bool:
+        """Persist one entry and report whether restart-safe durability held."""
         with self._lock:
+            if not self._healthy:
+                return False
             try:
                 parent = os.path.dirname(self.path)
                 if parent:
                     os.makedirs(parent, exist_ok=True)
                 with open(self.path, "a", encoding="utf-8") as handle:
                     handle.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+                return True
             except OSError as exc:
+                self._healthy = False
                 logger.warning(
                     "Could not persist order state to %s (cache kept): %s",
                     self.path,
                     exc,
                 )
+                return False

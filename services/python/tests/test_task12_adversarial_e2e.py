@@ -991,6 +991,11 @@ class TestScenarioLLiveDisarmed:
             r"C:\mt\VITO2",
         )
         monkeypatch.setattr(terminals_mod, "_detect_attached_path", lambda: None)
+        terminals_mod._account_cache[terminals_mod._norm(r"C:\mt\VITO2")] = {
+            "login": 6001,
+            "server": "Broker-Live",
+            "mode": "LIVE",
+        }
         res = terminals_mod.arm_terminal("vito2", True)
         assert res["ok"] is True  # running + execution:true → arm allowed
         assert terminals_mod.get_armed_terminals() == ["vito2"]
@@ -1027,6 +1032,11 @@ class TestScenarioMDemoArmed:
             lambda: [{"pid": 2, "exe": r"C:\mt\BIL2\terminal64.exe", "folder": r"C:\mt\BIL2"}],
         )
         monkeypatch.setattr(terminals_mod, "_detect_attached_path", lambda: r"C:\mt\BIL2")
+        terminals_mod._account_cache[terminals_mod._norm(r"C:\mt\BIL2")] = {
+            "login": 6002,
+            "server": "Broker-Demo",
+            "mode": "DEMO",
+        }
 
         # Not armed by default.
         assert terminals_mod.get_fanout_targets() == []
@@ -1068,6 +1078,11 @@ class TestScenarioMDemoArmed:
             lambda: [{"pid": 2, "exe": r"C:\mt\BIL2\terminal64.exe", "folder": r"C:\mt\BIL2"}],
         )
         monkeypatch.setattr(terminals_mod, "_detect_attached_path", lambda: r"C:\mt\BIL2")
+        terminals_mod._account_cache[terminals_mod._norm(r"C:\mt\BIL2")] = {
+            "login": 6003,
+            "server": "Broker-Demo",
+            "mode": "DEMO",
+        }
         terminals_mod.arm_terminal("bil2", True)
 
         # Targets come from the REAL terminals module (armed + eligible).

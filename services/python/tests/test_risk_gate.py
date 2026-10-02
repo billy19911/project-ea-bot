@@ -69,7 +69,7 @@ def test_drawdown_check_pass(risk_gate):
             "entry_price": 1.0850,
             "stop_loss": 1.0750,
             "take_profit": 1.1050,
-            "size": 1.0,
+            "size": 0.001,
             "risk_pct": 0.02,
         },
         account_state=account_state,
@@ -102,7 +102,7 @@ def test_drawdown_check_fail(risk_gate):
             "entry_price": 1.0850,
             "stop_loss": 1.0750,
             "take_profit": 1.1050,
-            "size": 1.0,
+            "size": 0.001,
             "risk_pct": 0.02,
         },
         account_state=account_state,
@@ -135,7 +135,7 @@ def test_daily_loss_check_fail(risk_gate):
             "entry_price": 1.0850,
             "stop_loss": 1.0750,
             "take_profit": 1.1050,
-            "size": 1.0,
+            "size": 0.001,
             "risk_pct": 0.02,
         },
         account_state=account_state,
@@ -202,7 +202,15 @@ def test_all_checks_pass(risk_gate):
         "free_margin": 9500.0,
     }
     current_positions = [
-        {"symbol": "EURUSD", "volume": 0.5, "side": "BUY"},
+        {
+            "symbol": "EURUSD",
+            "volume": 0.5,
+            "size": 0.5,
+            "current_price": 1.27,
+            "notional_value": 635.0,
+            "_notional_valid": True,
+            "side": "BUY",
+        },
     ]
     decision = risk_gate.validate_proposal(
         proposal={
@@ -211,7 +219,7 @@ def test_all_checks_pass(risk_gate):
             "entry_price": 1.2700,
             "stop_loss": 1.2650,
             "take_profit": 1.2850,
-            "size": 1.0,
+            "size": 0.001,
             "risk_pct": 0.02,
         },
         account_state=account_state,

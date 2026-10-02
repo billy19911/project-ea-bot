@@ -81,11 +81,16 @@ def test_monetary_risk_uses_market_info_contract_size():
             "take_profit": 2510.0,
             "size": 0.1,  # lots
             "risk_pct": 0.01,
+            "commission_per_lot": 0.0,
         },
         _account(10_000.0),
         [],
         # Broker-supplied contract size: XAUUSD = 100 oz/lot.
-        {"spread_pips": 1.0, "contract_size": 100.0, "point_value": 0.01},
+        {
+            "spread_pips": 1.0,
+            "contract_size": 100.0,
+            "point_value": 0.01,
+        },
     )
     assert decision.checks_passed["monetary_risk"] is True
     # 5 * 100 * 0.1 = 50
@@ -106,10 +111,15 @@ def test_monetary_risk_blocks_when_over_budget():
             "take_profit": 2530.0,
             "size": 0.2,  # 10 * 100 * 0.2 = 200 > 100
             "risk_pct": 0.02,
+            "commission_per_lot": 0.0,
         },
         _account(10_000.0),
         [],
-        {"spread_pips": 1.0, "contract_size": 100.0, "point_value": 0.01},
+        {
+            "spread_pips": 1.0,
+            "contract_size": 100.0,
+            "point_value": 0.01,
+        },
     )
     assert decision.checks_passed["monetary_risk"] is False
     assert decision.approved is False
@@ -138,6 +148,7 @@ def test_monetary_risk_fails_closed_when_contract_size_missing(monkeypatch):
             "take_profit": 2510.0,
             "size": 0.1,
             "risk_pct": 0.01,
+            "commission_per_lot": 0.0,
         },
         _account(10_000.0),
         [],
@@ -199,6 +210,7 @@ def test_monetary_risk_uses_broker_symbol_spec_when_not_supplied(monkeypatch):
             "take_profit": 2510.0,
             "size": 0.1,
             "risk_pct": 0.01,
+            "commission_per_lot": 0.0,
         },
         _account(10_000.0),
         [],
@@ -207,6 +219,26 @@ def test_monetary_risk_uses_broker_symbol_spec_when_not_supplied(monkeypatch):
     assert decision.checks_passed["monetary_risk"] is True
     assert decision.metrics_snapshot["risk_contract_source"] == "broker"
     assert decision.metrics_snapshot["risk_money"] == pytest.approx(50.0)
+
+
+def test_monetary_risk_fails_closed_when_commission_unknown():
+    gate = _gate_with_budget(max_risk_pct=0.02)
+    decision = gate.validate_proposal(
+        {
+            "symbol": "XAUUSD",
+            "direction": "BUY",
+            "entry_price": 2500.0,
+            "stop_loss": 2495.0,
+            "take_profit": 2510.0,
+            "size": 0.1,
+        },
+        _account(10_000.0),
+        [],
+        {"spread_pips": 1.0, "contract_size": 100.0},
+    )
+
+    assert decision.checks_passed["monetary_risk"] is False
+    assert decision.metrics_snapshot["risk_commission_known"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +269,7 @@ def test_projected_exposure_includes_proposed_trade():
         },
         _account(10_000.0),
         positions,
-        {"spread_pips": 1.0, "contract_size": 100.0, "point_value": 0.01},
+        {"spread_pips": 1.0, "contract_size": 1.0, "point_value": 0.01},
     )
     assert decision.checks_passed["max_exposure"] is False
     assert decision.approved is False
@@ -269,7 +301,7 @@ def test_projected_exposure_within_limit_passes():
         },
         _account(10_000.0),
         positions,
-        {"spread_pips": 1.0, "contract_size": 100.0, "point_value": 0.01},
+        {"spread_pips": 1.0, "contract_size": 1.0, "point_value": 0.01},
     )
     assert decision.checks_passed["max_exposure"] is True
     assert decision.metrics_snapshot["projected_exposure_pct"] == pytest.approx(0.15)
@@ -300,11 +332,11 @@ def test_lot_rounds_up_to_broker_step():
     req = builder.build_order_request(
         {"symbol": "EURUSD", "order_type": "BUY", "volume": 0.136, "price": 1.1}
     )
-    assert req.volume == pytest.approx(0.14)
+    assert req.volume == pytest.approx(0.13)
 
 
-def test_lot_snapped_up_is_the_volume_risk_checked_by_fanout():
-    """The FINAL (rounded-up) volume is the one the per-account gate sees."""
+def test_lot_snapped_down_is_the_volume_risk_checked_by_fanout():
+    """The final snap-down volume is the one the per-account gate sees."""
     fanout_mod.set_fanout_ledger(fanout_mod.FanoutLedger())
 
     class RecordingGate:
@@ -348,13 +380,13 @@ def test_lot_snapped_up_is_the_volume_risk_checked_by_fanout():
         strategy_version="v1",
         signal_id="sig1",
     )
-    # raw 0.136 lots → rounds UP to 0.14 at the broker step.
+    # raw 0.136 lots → snaps DOWN to 0.13 at the broker step.
     coord.fan_out(signal, raw_proposal={"volume": 0.136})
 
-    # The gate must have seen the FINAL, rounded volume (0.14), and the sent
+    # The gate must have seen the FINAL, snapped volume (0.13), and the sent
     # order must match it byte-for-byte.
-    assert 0.14 in [round(v, 4) for v in gate.seen]
-    assert engine.sent[0].volume == pytest.approx(0.14)
+    assert 0.13 in [round(v, 4) for v in gate.seen]
+    assert engine.sent[0].volume == pytest.approx(0.13)
 
 
 # ---------------------------------------------------------------------------
@@ -366,11 +398,11 @@ def test_fanout_gate_rejects_final_normalized_volume():
     fanout_mod.set_fanout_ledger(fanout_mod.FanoutLedger())
 
     class FinalVolumeGate:
-        """Rejects the rounded-up final volume (0.14 > 0.136)."""
+        """Rejects the final snap-down volume to verify the gate controls send."""
 
         def validate_proposal(self, proposal, account_state, current_positions, market_info):
             vol = float(proposal.get("volume") or proposal.get("size") or 0.0)
-            ok = vol <= 0.136
+            ok = vol >= 0.136
             return types.SimpleNamespace(
                 approved=ok,
                 reason="ok" if ok else "final volume too big",
@@ -472,10 +504,10 @@ def test_fanout_sent_order_matches_approved_when_values_unchanged():
 # Pipeline — final order re-validation (single-terminal path)
 # ---------------------------------------------------------------------------
 def test_pipeline_revalidates_final_order_when_builder_rounds_volume(monkeypatch):
-    """The pipeline re-runs the gate on the FINAL (rounded) order volume."""
+    """The pipeline re-runs the gate on the FINAL (snap-down) order volume."""
     # The pipeline's own lot cap snaps DOWN to a 0.01 step (final proposal
-    # volume 0.13). The order builder then snaps to the NEAREST 0.05 step,
-    # producing a DIFFERENT final order (0.15) that must be re-validated.
+    # volume 0.13). The order builder then snaps DOWN to a 0.05 step, producing
+    # a smaller final order (0.10) that must still be re-validated.
     pipeline_spec = types.SimpleNamespace(
         source="broker",
         contract_size=100_000.0,
@@ -513,7 +545,7 @@ def test_pipeline_revalidates_final_order_when_builder_rounds_volume(monkeypatch
             calls["n"] += 1
             vol = float(proposal.get("size") or 0.0)
             calls["vols"].append(vol)
-            ok = vol < 0.15  # 0.13 (initial) ok; 0.15 (final) rejected
+            ok = vol >= 0.13  # initial proposal meets the setup minimum; final does not
             return types.SimpleNamespace(
                 approved=ok,
                 reason="ok" if ok else "final too big",
@@ -529,7 +561,7 @@ def test_pipeline_revalidates_final_order_when_builder_rounds_volume(monkeypatch
             self.sent.append(request)
             return types.SimpleNamespace(success=True, ticket=1, error_code=0, error_message="")
 
-    # Order builder uses a 0.05 step → 0.13 rounds to 0.15.
+    # Order builder uses a 0.05 step → 0.13 snaps down to 0.10.
     builder = _builder({"volume_step": 0.05, "volume_min": 0.01, "volume_max": 100.0, "digits": 5})
     engine = FakeEngine()
     pipe = pipeline_mod.TradingPipeline(
@@ -545,6 +577,7 @@ def test_pipeline_revalidates_final_order_when_builder_rounds_volume(monkeypatch
 
     # Gate was called at least twice (initial approve + final re-validation).
     assert calls["n"] >= 2, calls
+    assert calls["vols"][:2] == pytest.approx([0.13, 0.10])
     # The final order was rejected → no execution.
     assert engine.sent == []
     assert result.status == pipeline_mod.STATUS_BLOCKED
@@ -663,8 +696,11 @@ def test_pipeline_real_gate_blocks_monetary_risk_breach(monkeypatch):
             self.sent.append(request)
             return types.SimpleNamespace(success=True, ticket=1, error_code=0, error_message="")
 
+    engine_config = _engine()
+    engine_config.set_threshold(threshold_mod.RiskThreshold.MAX_EXPOSURE, 3.0)
+    engine_config.set_threshold(threshold_mod.RiskThreshold.MAX_POSITION_SIZE, 3.0)
     gate = risk_mod.RiskGate(
-        _engine(),
+        engine_config,
         mm_mod.MoneyManager(),
         max_spread_pips=50_000.0,
         min_rr=1.0,
@@ -726,6 +762,7 @@ def test_pipeline_real_gate_allows_monetary_risk_within_budget(monkeypatch):
                     "stop_loss": 2495.0,
                     "take_profit": 2510.0,
                     "size": 0.1,  # 5 * 100 * 0.1 = 50 risk <= 100 budget
+                    "commission_per_lot": 0.0,
                 },
             }
 
@@ -737,8 +774,11 @@ def test_pipeline_real_gate_allows_monetary_risk_within_budget(monkeypatch):
             self.sent.append(request)
             return types.SimpleNamespace(success=True, ticket=1, error_code=0, error_message="")
 
+    engine_config = _engine()
+    engine_config.set_threshold(threshold_mod.RiskThreshold.MAX_EXPOSURE, 3.0)
+    engine_config.set_threshold(threshold_mod.RiskThreshold.MAX_POSITION_SIZE, 3.0)
     gate = risk_mod.RiskGate(
-        _engine(),
+        engine_config,
         mm_mod.MoneyManager(),
         max_spread_pips=50_000.0,
         min_rr=1.0,
@@ -762,7 +802,12 @@ def test_pipeline_real_gate_allows_monetary_risk_within_budget(monkeypatch):
             "daily_pnl": 0.0,
             "used_margin": 0.0,
         },
-        "market_info": {"spread_pips": 1.0, "contract_size": 100.0, "point_value": 0.01},
+        "market_info": {
+            "spread_pips": 1.0,
+            "contract_size": 100.0,
+            "point_value": 0.01,
+            "commission_per_lot": 0.0,
+        },
     }
     result = pipe.run({"event_id": "e2", "event_type": "MOMENTUM"}, ctx)
 

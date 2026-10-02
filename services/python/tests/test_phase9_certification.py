@@ -168,7 +168,7 @@ def test_timeout_no_blind_retry():
         OrderRequest(symbol="X", order_type="BUY", volume=0.1, idempotency_key="p9-t")
     )
     assert res.success is False
-    assert conn.calls == 2  # initial + 1 bounded retry, locator consulted
+    assert conn.calls == 1  # unresolved broker result stays UNKNOWN; no resend
 
 
 # ── Market (§7) ─────────────────────────────────────────────────────────

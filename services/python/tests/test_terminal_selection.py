@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 
+from src import main
 from src.mt5 import terminals
 
 
@@ -78,3 +79,44 @@ def test_restore_selects_when_running(tmp_path, monkeypatch) -> None:
         lambda tid: {"ok": True, "selected_id": tid},
     )
     assert terminals.restore_saved_selection() == "bil2"
+
+
+def test_startup_uses_saved_terminal_without_generic_attach(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(terminals, "load_saved_selection", lambda: "bil2")
+    monkeypatch.setattr(terminals, "restore_saved_selection", lambda: "bil2")
+    monkeypatch.setattr(
+        main.connector,
+        "use_live_data_mode",
+        lambda path=None: calls.append(("attach", path)) or True,
+    )
+    monkeypatch.setattr(
+        terminals,
+        "sync_selection_from_attached",
+        lambda: calls.append(("sync", None)),
+    )
+
+    assert main._start_mt5_data_binding() is True
+    assert calls == [("sync", None)]
+
+
+def test_startup_does_not_fallback_when_saved_terminal_cannot_attach(monkeypatch) -> None:
+    calls = []
+    shutdown_calls = []
+    monkeypatch.setattr(terminals, "load_saved_selection", lambda: "bil2")
+    monkeypatch.setattr(terminals, "restore_saved_selection", lambda: None)
+    monkeypatch.setattr(main.connector, "shutdown", lambda: shutdown_calls.append(True))
+    monkeypatch.setattr(
+        main.connector,
+        "use_live_data_mode",
+        lambda path=None: calls.append(("attach", path)) or True,
+    )
+    monkeypatch.setattr(
+        terminals,
+        "sync_selection_from_attached",
+        lambda: calls.append(("sync", None)),
+    )
+
+    assert main._start_mt5_data_binding() is False
+    assert calls == []
+    assert shutdown_calls == [True]

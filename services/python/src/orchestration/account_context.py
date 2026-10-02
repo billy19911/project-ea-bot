@@ -89,9 +89,51 @@ def build_connector_account_context(symbol: str = "") -> dict[str, Any]:
         try:
             raw_positions = connector.get_positions() or []
             positions: list[dict[str, Any]] = []
+            specs: dict[str, dict[str, Any]] = {}
             for pos in raw_positions:
                 p = _to_dict(pos)
                 if p:
+                    symbol = str(p.get("symbol") or "")
+                    try:
+                        size = float(p.get("size", p.get("quantity", p.get("volume", 0.0))) or 0.0)
+                        current_price = float(
+                            p.get(
+                                "current_price",
+                                p.get(
+                                    "price_current", p.get("entry_price", p.get("price_open", 0.0))
+                                ),
+                            )
+                            or 0.0
+                        )
+                    except (TypeError, ValueError):
+                        p["_notional_valid"] = False
+                        positions.append(p)
+                        continue
+
+                    p["size"] = size
+                    p["current_price"] = current_price
+                    if "contract_size" not in p and symbol:
+                        if symbol not in specs:
+                            try:
+                                specs[symbol] = _to_dict(connector.get_symbol_info(symbol))
+                            except Exception as exc:  # noqa: BLE001 - missing spec blocks exposure
+                                logger.debug("Position symbol spec read failed: %s", exc)
+                                specs[symbol] = {}
+                        try:
+                            contract_size = float(specs[symbol].get("contract_size") or 0.0)
+                        except (TypeError, ValueError):
+                            contract_size = 0.0
+                        if contract_size > 0:
+                            p["contract_size"] = contract_size
+                    try:
+                        contract_size = float(p.get("contract_size") or 0.0)
+                    except (TypeError, ValueError):
+                        contract_size = 0.0
+                    if size > 0 and current_price > 0 and contract_size > 0:
+                        p["notional_value"] = size * current_price * contract_size
+                        p["_notional_valid"] = True
+                    else:
+                        p["_notional_valid"] = False
                     positions.append(p)
             context["current_positions"] = positions
         except Exception as exc:  # noqa: BLE001 - positions read is best-effort
@@ -116,18 +158,46 @@ def build_connector_account_context(symbol: str = "") -> dict[str, Any]:
                         # read a key nobody populated — dead code).
                         point = 0.0
                         contract_size = 0.0
+                        tick_size = 0.0
+                        tick_value = 0.0
+                        volume_step = 0.0
+                        volume_min = 0.0
+                        volume_max = 0.0
                         try:
                             spec = _to_dict(connector.get_symbol_info(symbol))
                             point = float(spec.get("point", 0.0) or 0.0)
                             contract_size = float(spec.get("contract_size", 0.0) or 0.0)
+                            tick_size = float(spec.get("tick_size", 0.0) or 0.0)
+                            tick_value = float(spec.get("tick_value", 0.0) or 0.0)
+                            volume_step = float(spec.get("volume_step", 0.0) or 0.0)
+                            volume_min = float(spec.get("volume_min", 0.0) or 0.0)
+                            volume_max = float(spec.get("volume_max", 0.0) or 0.0)
                         except Exception as exc:  # noqa: BLE001 - spec is best-effort
                             logger.debug("Symbol spec read failed: %s", exc)
                         if point <= 0:
                             point = 0.00001
+                        if tick_size <= 0:
+                            tick_size = point
                         pip_size = point * 10.0
                         market_info["point_value"] = point
+                        market_info["tick_size"] = tick_size
+                        market_info["tick_value"] = tick_value
+                        market_info["spread_points"] = spread_price / point
+                        market_info["spread_ticks"] = spread_price / tick_size
+                        market_info["spread_atr"] = None
+                        if volume_step > 0:
+                            market_info["volume_step"] = volume_step
+                        if volume_min > 0:
+                            market_info["volume_min"] = volume_min
+                        if volume_max > 0:
+                            market_info["volume_max"] = volume_max
                         if contract_size > 0:
                             market_info["contract_size"] = contract_size
+                            market_info["spread_cost_per_lot"] = (
+                                spread_price / tick_size * tick_value
+                                if tick_value > 0
+                                else spread_price * contract_size
+                            )
                         market_info["spread_pips"] = (
                             spread_price / pip_size if pip_size > 0 else 0.0
                         )

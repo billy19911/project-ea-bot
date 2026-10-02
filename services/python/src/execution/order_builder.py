@@ -162,6 +162,17 @@ class OrderBuilder:
         }
         if idempotency_key:
             kwargs["idempotency_key"] = idempotency_key
+        for metadata_field in (
+            "signal_id",
+            "account_id",
+            "terminal_id",
+            "proposal_id",
+            "execution_id",
+            "strategy_version",
+        ):
+            metadata_value = proposal.get(metadata_field)
+            if metadata_value not in (None, ""):
+                kwargs[metadata_field] = str(metadata_value)
 
         return OrderRequest(**kwargs)
 
@@ -192,20 +203,22 @@ class OrderBuilder:
         if not isinstance(spec, dict) or not spec:
             return volume, price, sl, tp
 
-        # ── Volume: clamp to [min, max] and snap to the nearest step ────────
+        # ── Volume: cap, snap down, and reject below broker minimum ─────────
         try:
+            import math
+
             step = float(spec.get("volume_step") or 0.0)
             vmin = float(spec.get("volume_min") or 0.0)
             vmax = float(spec.get("volume_max") or 0.0)
             new_volume = float(volume)
+            if vmax > 0:
+                new_volume = min(new_volume, vmax)
             if step > 0:
-                new_volume = round(new_volume / step) * step
+                new_volume = math.floor((new_volume + step * 1e-12) / step) * step
                 # Avoid floating-point artefacts (e.g. 0.30000000000000004).
                 new_volume = round(new_volume, 8)
             if vmin > 0 and new_volume < vmin:
-                new_volume = vmin
-            if vmax > 0 and new_volume > vmax:
-                new_volume = vmax
+                new_volume = 0.0
             if new_volume != volume:
                 logger.info(
                     "Volume normalised for %s: %s → %s (step=%s, min=%s, max=%s)",

@@ -800,33 +800,28 @@ class OrchestrationRuntime:
         # Risk Gate is enforced by the executor itself (fail-closed for any
         # direct/ungated caller), not merely by the pipeline's calling discipline.
         # Phase 1 Item #5: inject an order_locator so a lost broker response is
-        # ADOPTED (matched by symbol/volume/magic) instead of blindly retried —
-        # prevents duplicate live orders on timeout/uncertain sends.
+        # adopted when a matching position can be confirmed. If lookup is
+        # inconclusive, ExecutionEngine preserves UNKNOWN and does not resend.
         def _order_locator_for_request(request: Any) -> Optional[dict]:
-            try:
-                from mt5 import connector
+            from mt5 import connector
 
-                want_vol = float(getattr(request, "volume", 0.0) or 0.0)
-                if want_vol <= 0:
-                    return None
-                for pos in connector.positions() or []:
-                    p_d = dict(pos) if not isinstance(pos, dict) else pos
-                    sym_match = str(p_d.get("symbol") or "").upper() == str(request.symbol).upper()
-                    vol_match = abs(float(p_d.get("volume") or 0.0) - want_vol) < 1e-6
-                    magic_match = int(p_d.get("magic") or 0) == int(
-                        getattr(request, "magic", 0) or 0
-                    )
-                    if sym_match and vol_match and magic_match:
-                        return {"ticket": int(p_d.get("ticket"))}
+            want_vol = float(getattr(request, "volume", 0.0) or 0.0)
+            if want_vol <= 0:
                 return None
-            except Exception as exc:  # noqa: BLE001 - locator error → retry normally
-                logger.debug("order_locator lookup failed: %s", exc)
-                return None
+            for pos in connector.positions() or []:
+                p_d = dict(pos) if not isinstance(pos, dict) else pos
+                sym_match = str(p_d.get("symbol") or "").upper() == str(request.symbol).upper()
+                vol_match = abs(float(p_d.get("volume") or 0.0) - want_vol) < 1e-6
+                magic_match = int(p_d.get("magic") or 0) == int(getattr(request, "magic", 0) or 0)
+                if sym_match and vol_match and magic_match:
+                    return {"ticket": int(p_d.get("ticket"))}
+            return None
 
         execution_engine = ExecutionEngine(
             mt5_connector=None,
             simulation_mode=True,
             require_approval=True,
+            require_durable_state=True,
             order_locator=_order_locator_for_request,
         )
         # Audit P1-4: normalise volume to the broker's lot step and round prices

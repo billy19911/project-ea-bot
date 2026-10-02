@@ -135,12 +135,12 @@ class RiskEngine:
                 "total_notional": 0.0,
                 "projected_exposure_pct": 0.0,
                 "projected_exposure_if_added": 0.0,
+                "exposure_valid": account_equity > 0,
             }
 
-        total_notional = sum(
-            float(p.get("size", 0.0)) * float(p.get("current_price", p.get("entry_price", 0.0)))
-            for p in positions
-        )
+        notionals = [self._position_notional(position) for position in positions]
+        exposure_valid = all(value is not None for value in notionals)
+        total_notional = sum(value or 0.0 for value in notionals)
 
         total_exposure_pct = 0.0
         total_exposure_pct = total_notional / account_equity
@@ -166,7 +166,53 @@ class RiskEngine:
             "total_notional": total_notional,
             "projected_exposure_pct": total_exposure_pct,  # Current without proposal
             "projected_exposure_if_added": total_exposure_pct,  # Will be updated by caller
+            "exposure_valid": exposure_valid,
         }
+
+    @staticmethod
+    def _position_notional(position: dict[str, Any]) -> float | None:
+        """Return a position's verified notional, or None when its units are unknown.
+
+        Legacy ``size`` inputs represent units and retain a contract-size of 1.
+        Broker-shaped ``quantity``/``volume`` inputs are lots and require an
+        explicit broker contract size or precomputed notional value.
+        """
+        if position.get("_notional_valid") is False:
+            return None
+        explicit = position.get("notional_value")
+        if explicit is not None:
+            try:
+                value = float(explicit)
+            except (TypeError, ValueError):
+                return None
+            return value if value >= 0 else None
+
+        size_value = position.get("size")
+        is_broker_volume = size_value is None and ("quantity" in position or "volume" in position)
+        if size_value is None:
+            size_value = position.get("quantity", position.get("volume", 0.0))
+        try:
+            size = float(size_value or 0.0)
+            price = float(
+                position.get(
+                    "current_price",
+                    position.get(
+                        "price_current",
+                        position.get("entry_price", position.get("price_open", 0.0)),
+                    ),
+                )
+                or 0.0
+            )
+            contract_size = float(position.get("contract_size") or 0.0)
+        except (TypeError, ValueError):
+            return None
+        if size < 0 or price < 0:
+            return None
+        if is_broker_volume and contract_size <= 0:
+            return None
+        if contract_size <= 0:
+            contract_size = 1.0
+        return size * price * contract_size
 
     def check_projected_exposure(
         self,
@@ -197,17 +243,23 @@ class RiskEngine:
 
         # Calculate current exposure
         current_result = self.calculate_portfolio_risk(positions, equity)
+        if not current_result.get("exposure_valid", False):
+            return False, 0.0, 0.0
         current_exposure = current_result["total_exposure_pct"]
 
         # Calculate projected exposure if a new trade is added
         projected_exposure = current_exposure
-        if proposed_trade is not None and float(proposed_trade.get("size", 0)) > 0:
-            proposed_size = float(proposed_trade.get("size", 0))
-            proposed_price = float(
-                proposed_trade.get("current_price", proposed_trade.get("entry_price", 0))
+        if proposed_trade is not None:
+            proposed_size = float(
+                proposed_trade.get(
+                    "size", proposed_trade.get("quantity", proposed_trade.get("volume", 0))
+                )
+                or 0.0
             )
-            if proposed_price > 0:
-                proposed_notional = proposed_size * proposed_price
+            if proposed_size > 0:
+                proposed_notional = self._position_notional(proposed_trade)
+                if proposed_notional is None or proposed_notional <= 0:
+                    return False, current_exposure, current_exposure
                 projected_exposure = (current_result["total_notional"] + proposed_notional) / equity
 
         within_limits = projected_exposure <= max_exposure

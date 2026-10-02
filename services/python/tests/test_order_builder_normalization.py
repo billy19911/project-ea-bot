@@ -27,12 +27,12 @@ def test_volume_snapped_to_step() -> None:
     assert req.price == 2000.57  # rounded to 2 digits
 
 
-def test_volume_clamped_to_min() -> None:
+def test_volume_below_minimum_is_rejected() -> None:
     builder = OrderBuilder(symbol_spec_provider=_spec)
     req = builder.build_order_request(
         {"symbol": "XAUUSD", "order_type": "BUY", "volume": 0.001, "price": 2000.0}
     )
-    assert req.volume == 0.01
+    assert req.volume == 0.0
 
 
 def test_volume_clamped_to_max() -> None:

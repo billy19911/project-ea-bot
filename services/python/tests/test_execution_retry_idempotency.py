@@ -9,6 +9,7 @@ before resending; a match means the fill is adopted instead of duplicated.
 from __future__ import annotations
 
 from execution import ExecutionEngine, OrderRequest
+from execution.state_machine import get_order
 
 
 class _LostResponseConnector:
@@ -77,8 +78,8 @@ def test_lost_response_is_adopted_not_duplicated():
     assert connector.send_calls == 1  # no duplicate send
 
 
-def test_without_locator_retry_would_resend():
-    """Control: with no locator, the engine retries (documents the gap)."""
+def test_without_locator_keeps_uncertain_send_unknown_without_retry():
+    """An ambiguous broker result without reconciliation must not resend."""
     conn = _LostResponseConnector()
     engine = ExecutionEngine(
         mt5_connector=conn,
@@ -89,9 +90,9 @@ def test_without_locator_retry_would_resend():
     req = OrderRequest(symbol="EURUSD", order_type="BUY", volume=1.0, idempotency_key="lost-2")
     result = engine.execute_order(req)
 
-    # Without a locator the retry cannot know the order landed → it re-sends.
     assert result.success is False
-    assert conn.send_calls == 3  # initial + 2 retries
+    assert conn.send_calls == 1
+    assert get_order("lost-2")["state"] == "unknown"
 
 
 def test_locator_error_does_not_break_retry():
@@ -107,8 +108,9 @@ def test_locator_error_does_not_break_retry():
     )
     req = OrderRequest(symbol="EURUSD", order_type="BUY", volume=1.0, idempotency_key="lost-3")
     result = engine.execute_order(req)
-    # Still fails safely (no crash), and the retry proceeded.
     assert result.success is False
+    assert conn.send_calls == 1
+    assert get_order("lost-3")["state"] == "unknown"
 
 
 def test_no_match_proceeds_with_retry():
@@ -127,6 +129,8 @@ def test_no_match_proceeds_with_retry():
     req = OrderRequest(symbol="EURUSD", order_type="BUY", volume=1.0, idempotency_key="lost-4")
     result = engine.execute_order(req)
     assert result.success is False
+    assert conn.send_calls == 1
+    assert get_order("lost-4")["state"] == "unknown"
 
 
 if __name__ == "__main__":  # pragma: no cover

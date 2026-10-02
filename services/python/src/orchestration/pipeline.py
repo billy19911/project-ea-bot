@@ -1515,20 +1515,35 @@ class TradingPipeline:
         lot, so a bad computation falls back to the existing value. Every lot is
         finally capped via :meth:`MoneyManager.cap_lot_size`.
         """
+        proposal.pop("risk_sizing_verified", None)
         size = float(proposal.get("size") or 0.0)
         recompute = self.force_risk_sizing or size <= 0
-        if recompute and sl > 0 and entry > 0:
+        if recompute:
+            if sl <= 0 or entry <= 0:
+                proposal["size"] = 0.0
+                self._cap_lot(proposal)
+                return
             risk_pct = self._risk_fraction()
             equity = float(account_state.get("equity") or account_state.get("balance") or 0.0)
             point_value, contract_size = self._resolve_point_contract(proposal, market_info)
             sl_distance = abs(entry - sl)
-            sl_pips = sl_distance / point_value if point_value > 0 else 0.0
+            tick_size = float(market_info.get("tick_size") or 0.0)
+            tick_value = float(market_info.get("tick_value") or 0.0)
+            if tick_size > 0 and tick_value > 0:
+                # Broker tick value is already denominated in account currency.
+                # Convert it to value per price unit instead of assuming the
+                # contract's quote currency equals the account currency.
+                point_value = 1.0
+                contract_size = tick_value / tick_size
+                sl_pips = sl_distance
+            else:
+                sl_pips = sl_distance / point_value if point_value > 0 else 0.0
             # Phase 1 Item #3: include spread + commission cost allowances so the
             # expected loss at SL (INCLUDING costs) stays within the risk budget.
             spread_cost_per_lot, commission_per_lot = self._cost_allowances(
                 proposal, market_info, entry, sl_pips, point_value, contract_size
             )
-            if sl_pips > 0 and equity > 0:
+            if sl_pips > 0 and equity > 0 and contract_size > 0:
                 try:
                     sizing = self.money_manager.calculate_lot_size(
                         balance=equity,
@@ -1542,10 +1557,18 @@ class TradingPipeline:
                     )
                     lot = float(getattr(sizing, "lot_size", 0.0) or 0.0)
                     if lot > 0:
-                        proposal["size"] = round(lot, 2)
+                        proposal["size"] = lot
                         proposal["risk_pct"] = risk_pct
+                        proposal["risk_sizing_verified"] = True
+                    else:
+                        proposal["size"] = 0.0
                 except Exception as exc:  # noqa: BLE001 - sizing is best-effort
                     logger.debug("Position sizing skipped: %s", exc)
+                    proposal["size"] = 0.0
+            else:
+                # Never retain an AI-provided volume when deterministic sizing
+                # cannot prove its monetary loss at the stop.
+                proposal["size"] = 0.0
 
         # Safety cap: never exceed the per-trade lot cap (fail-safe).
         self._cap_lot(proposal)
@@ -1626,6 +1649,9 @@ class TradingPipeline:
                 proposal.get("symbol") or market_info.get("symbol") or "?",
             )
         proposal["commission_source"] = source
+        proposal["commission_per_lot"] = commission
+        proposal["commission_known"] = source in ("BROKER", "CONFIG")
+        proposal["spread_cost_per_lot"] = spread_cost
         return spread_cost, commission
 
     def _cap_lot(self, proposal: dict[str, Any]) -> None:
@@ -1663,14 +1689,14 @@ class TradingPipeline:
             capped = self._apply_broker_volume_constraints(
                 float(capped or 0.0), str(proposal.get("symbol") or "")
             )
-            proposal["size"] = round(float(capped or 0.0), 2)
+            proposal["size"] = float(capped or 0.0)
         except Exception as exc:  # noqa: BLE001 - fail-CLOSED, never uncapped
             logger.warning(
                 "Lot cap computation failed (%s) — forcing size to cap %.4f (fail-closed)",
                 exc,
                 self.max_lot_per_trade,
             )
-            proposal["size"] = round(min(raw_size, float(self.max_lot_per_trade)), 2)
+            proposal["size"] = min(raw_size, float(self.max_lot_per_trade))
 
     def _apply_broker_volume_constraints(self, lot: float, symbol: str) -> float:
         """Snap ``lot`` down to broker min/max/step (hardening §2, fail-safe).

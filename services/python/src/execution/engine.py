@@ -57,6 +57,11 @@ TRANSIENT_KEYWORDS = (
     "temporary",
 )
 
+# These errors do not prove that the broker rejected the request. A timeout,
+# lost connection, or exception may happen after the broker accepted the order.
+AMBIGUOUS_RETCODES = {10012, 10031}
+AMBIGUOUS_KEYWORDS = ("timeout", "connection", "network", "offline", "lost reply")
+
 
 @dataclass
 class OrderRequest:
@@ -100,6 +105,9 @@ class OrderRequest:
     signal_id: Optional[str] = None
     account_id: Optional[str] = None
     terminal_id: Optional[str] = None
+    proposal_id: Optional[str] = None
+    execution_id: Optional[str] = None
+    strategy_version: Optional[str] = None
     broker_order_ticket: Optional[int] = None
     broker_deal_ticket: Optional[int] = None
     broker_position_ticket: Optional[int] = None
@@ -189,6 +197,7 @@ class ExecutionEngine:
         simulation_mode: bool = False,
         order_locator: Optional[Callable[[OrderRequest], Optional[dict[str, Any]]]] = None,
         require_approval: bool = False,
+        require_durable_state: bool = False,
     ) -> None:
         """Initialize the Execution Engine.
 
@@ -217,6 +226,8 @@ class ExecutionEngine:
                 the deterministic Risk Gate becomes an *executor-enforced*
                 boundary, not merely a caller convention. Defaults to **False**
                 to preserve existing direct/test usage.
+            require_durable_state: When True, broker dispatch requires a healthy
+                durable order store and a successfully persisted intent.
         """
         self.mt5_connector = mt5_connector
         self.max_retries = max(0, max_retries)
@@ -227,6 +238,7 @@ class ExecutionEngine:
         self.simulation_mode = bool(simulation_mode)
         self.order_locator = order_locator
         self.require_approval = bool(require_approval)
+        self.require_durable_state = bool(require_durable_state)
 
         # In-memory tracking for pending and completed orders
         self._pending_orders: dict[str, float] = {}
@@ -249,11 +261,27 @@ class ExecutionEngine:
         ``intent_id`` is the request's idempotency key (durable across restarts).
         """
         fields: dict[str, Any] = {"intent_id": request.idempotency_key}
+        fields.update(
+            {
+                "client_order_id": request.idempotency_key,
+                "proposal_id": request.proposal_id or request.idempotency_key,
+                "execution_id": request.execution_id or request.idempotency_key,
+                "symbol": request.symbol,
+                "side": request.order_type,
+                "volume": request.volume,
+                "strategy_version": request.strategy_version or "unknown",
+            }
+        )
         for name in ("signal_id", "account_id", "terminal_id"):
             value = getattr(request, name, None)
             if value not in (None, ""):
                 fields[name] = value
-        for name in ("broker_order_ticket", "broker_deal_ticket", "broker_position_ticket"):
+        for name in (
+            "broker_order_id",
+            "broker_order_ticket",
+            "broker_deal_ticket",
+            "broker_position_ticket",
+        ):
             value = getattr(request, name, None)
             if value not in (None, ""):
                 fields[name] = value
@@ -516,6 +544,28 @@ class ExecutionEngine:
         # Ensure idempotency key exists
         if not request.idempotency_key:
             request.idempotency_key = str(uuid.uuid4())
+        if not request.execution_id:
+            request.execution_id = str(uuid.uuid4())
+        if not request.proposal_id:
+            request.proposal_id = request.idempotency_key
+
+        from .state_machine import get_store
+
+        durable_store = get_store()
+        if self.require_durable_state and (
+            durable_store is None or getattr(durable_store, "healthy", True) is False
+        ):
+            return ExecutionResult(
+                success=False,
+                ticket=None,
+                error_code=503,
+                error_message=(
+                    "Execution blocked: the required durable order-state store "
+                    "is unavailable or unhealthy."
+                ),
+                retries=0,
+                position_opened=None,
+            )
 
         # Audit B-3: make the deterministic Risk Gate an executor-enforced
         # boundary. When the engine is configured to require approval, an order
@@ -557,7 +607,22 @@ class ExecutionEngine:
             )
 
         # Durable execution lifecycle (Phase 34): seed the order state machine.
-        set_order(request.idempotency_key, OrderState.INTENT_CREATED)
+        if (
+            not set_order(
+                request.idempotency_key,
+                OrderState.INTENT_CREATED,
+                {**self._identity_fields(request), "retry_count": 0},
+            )
+            and self.require_durable_state
+        ):
+            return ExecutionResult(
+                success=False,
+                ticket=None,
+                error_code=503,
+                error_message="Execution blocked: order intent could not be persisted.",
+                retries=0,
+                position_opened=None,
+            )
 
         # Pre-flight order validation
         is_valid, validation_errors = self.validate_order(request)
@@ -581,7 +646,20 @@ class ExecutionEngine:
 
         # Record pending state
         set_order(request.idempotency_key, OrderState.RISK_APPROVED)
-        set_order(request.idempotency_key, OrderState.SUBMITTING)
+        submitting_persisted = set_order(
+            request.idempotency_key,
+            OrderState.SUBMITTING,
+            {**self._identity_fields(request), "retry_count": 0},
+        )
+        if self.require_durable_state and not submitting_persisted:
+            return ExecutionResult(
+                success=False,
+                ticket=None,
+                error_code=503,
+                error_message="Execution blocked: submitting intent could not be persisted.",
+                retries=0,
+                position_opened=None,
+            )
         self._record_pending(request.idempotency_key)
 
         retries = 0
@@ -590,6 +668,25 @@ class ExecutionEngine:
 
         try:
             for attempt in range(self.max_retries + 1):
+                if attempt > 0 and self.require_durable_state:
+                    retry_persisted = set_order(
+                        request.idempotency_key,
+                        OrderState.SUBMITTING,
+                        {**self._identity_fields(request), "retry_count": attempt},
+                    )
+                    if not retry_persisted:
+                        self._clear_pending(request.idempotency_key)
+                        return ExecutionResult(
+                            success=False,
+                            ticket=None,
+                            error_code=503,
+                            error_message=(
+                                "Execution stopped before retry: retry state could not "
+                                "be persisted. Reconcile the prior broker attempt."
+                            ),
+                            retries=attempt - 1,
+                            position_opened=None,
+                        )
                 try:
                     send_started = time.monotonic()
                     send_res = self._send_to_mt5(request)
@@ -604,7 +701,13 @@ class ExecutionEngine:
                         set_order(
                             request.idempotency_key,
                             OrderState.SUBMITTED,
-                            {"ticket": ticket, **identity, "broker_order_ticket": ticket},
+                            {
+                                "ticket": ticket,
+                                **identity,
+                                "broker_order_id": ticket,
+                                "broker_order_ticket": ticket,
+                                "retry_count": retries,
+                            },
                         )
                         set_order(
                             request.idempotency_key,
@@ -680,6 +783,46 @@ class ExecutionEngine:
                     last_error_message = f"Execution exception: {exc}"
                     logger.warning("Attempt %d raised exception: %s", attempt + 1, exc)
 
+                if self._is_ambiguous_execution(last_error_code, last_error_message):
+                    adopted = self._adopt_lost_response(request)
+                    if adopted is not None:
+                        self._record_adopted_lost_response(request, adopted)
+                        return adopted
+
+                    self._clear_pending(request.idempotency_key)
+                    unknown_message = (
+                        "Execution state UNKNOWN after an ambiguous broker response; "
+                        "no confirmed fill was found. Reconcile before any retry. "
+                        f"Broker response: {last_error_message}"
+                    )
+                    set_order(
+                        request.idempotency_key,
+                        OrderState.UNKNOWN,
+                        {
+                            "error_code": last_error_code,
+                            "error_message": last_error_message,
+                            "reconciliation": "inconclusive",
+                            "retry_count": retries,
+                            **self._identity_fields(request),
+                        },
+                    )
+                    unknown_result = ExecutionResult(
+                        success=False,
+                        ticket=None,
+                        error_code=last_error_code,
+                        error_message=unknown_message,
+                        retries=retries,
+                        position_opened=None,
+                    )
+                    self._completed_orders[request.idempotency_key] = unknown_result
+                    logger.error(
+                        "%s (key=%s, broker_error=%s)",
+                        unknown_message,
+                        request.idempotency_key,
+                        last_error_message,
+                    )
+                    return unknown_result
+
                 is_transient = self._is_transient_error(last_error_code, last_error_message)
                 if not is_transient or attempt >= self.max_retries:
                     break
@@ -690,23 +833,7 @@ class ExecutionEngine:
                 # of sending a duplicate order.
                 adopted = self._adopt_lost_response(request)
                 if adopted is not None:
-                    self._clear_pending(request.idempotency_key)
-                    set_order(
-                        request.idempotency_key,
-                        OrderState.POSITION_CONFIRMED,
-                        {
-                            "ticket": adopted.ticket,
-                            "adopted": True,
-                            "symbol": request.symbol,
-                            "volume": request.volume,
-                            "magic": request.magic,
-                            **self._identity_fields(request),
-                            "broker_order_ticket": adopted.ticket,
-                            "broker_deal_ticket": adopted.ticket,
-                            "broker_position_ticket": adopted.ticket,
-                        },
-                    )
-                    self._completed_orders[request.idempotency_key] = adopted
+                    self._record_adopted_lost_response(request, adopted)
                     logger.warning(
                         "Adopted a landed order for idempotency key %s (retry avoided "
                         "to prevent a duplicate position).",
@@ -860,14 +987,15 @@ class ExecutionEngine:
         caller stops retrying and never sends a duplicate.
 
         Returns ``None`` when no locator is configured, the locator errors, or
-        no matching order is found (i.e. the retry should proceed normally).
+        no matching order is found. For an ambiguous send, ``None`` is
+        inconclusive and the caller must preserve UNKNOWN rather than retry.
         """
         if self.order_locator is None:
             return None
         try:
             found = self.order_locator(request)
         except Exception as exc:  # noqa: BLE001 - locator must never break retry
-            logger.warning("Order locator failed (retry proceeds): %s", exc)
+            logger.warning("Order locator failed; execution remains UNKNOWN: %s", exc)
             return None
         if not found:
             return None
@@ -880,6 +1008,32 @@ class ExecutionEngine:
             retries=0,
             position_opened=self.sync_position(request.symbol),
         )
+
+    def _record_adopted_lost_response(
+        self, request: OrderRequest, adopted: ExecutionResult
+    ) -> None:
+        """Persist a broker-confirmed fill adopted after a lost response."""
+        from .state_machine import OrderState, set_order
+
+        self._clear_pending(request.idempotency_key)
+        set_order(
+            request.idempotency_key,
+            OrderState.POSITION_CONFIRMED,
+            {
+                "ticket": adopted.ticket,
+                "adopted": True,
+                "broker_order_id": adopted.ticket,
+                "symbol": request.symbol,
+                "volume": request.volume,
+                "magic": request.magic,
+                **self._identity_fields(request),
+                "broker_order_ticket": adopted.ticket,
+                "broker_deal_ticket": adopted.ticket,
+                "broker_position_ticket": adopted.ticket,
+                "retry_count": adopted.retries,
+            },
+        )
+        self._completed_orders[request.idempotency_key] = adopted
 
     def _get_armed_terminal_ids(self) -> list[str]:
         """Return the terminal ids explicitly armed by the operator (B-9).
@@ -1331,11 +1485,23 @@ class ExecutionEngine:
         Returns:
             True if the error is transient and retryable.
         """
+        msg_lower = (message or "").lower()
+        if "order not sent" in msg_lower or "no fabricated fill" in msg_lower:
+            return False
         if code in TRANSIENT_RETCODES:
             return True
 
-        msg_lower = (message or "").lower()
         return any(kw in msg_lower for kw in TRANSIENT_KEYWORDS)
+
+    @staticmethod
+    def _is_ambiguous_execution(code: int, message: str) -> bool:
+        """Whether an error leaves broker acceptance uncertain."""
+        msg_lower = (message or "").lower()
+        if "order not sent" in msg_lower or "no fabricated fill" in msg_lower:
+            return False
+        if code in AMBIGUOUS_RETCODES or code == -1:
+            return True
+        return any(kw in msg_lower for kw in AMBIGUOUS_KEYWORDS)
 
     def _send_to_mt5(self, request: OrderRequest) -> dict[str, Any]:
         """Send order request payload to the MT5 connector or module.

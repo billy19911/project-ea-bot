@@ -64,7 +64,13 @@ def test_arm_state_shared_across_spellings(monkeypatch) -> None:
     fake_view = {
         "terminals": [
             # B-10: armable mirrors running; execution_allowed is gone.
-            {"id": "demo-x", "armable": True, "running": True, "attached": True}
+            {
+                "id": "demo-x",
+                "armable": True,
+                "running": True,
+                "attached": True,
+                "account_verified": True,
+            }
         ]
     }
     monkeypatch.setattr(bare, "list_terminals", lambda: fake_view)

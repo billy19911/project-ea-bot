@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 
 from execution.engine import ExecutionEngine, OrderRequest
-from execution.state_machine import OrderState, reset_store, set_order, set_store
+from execution.state_machine import OrderState, get_order, reset_store, set_order, set_store
 from persistence import OrderStateStore
 from risk.base import RiskThreshold
 from risk.engine import RiskEngine
@@ -53,6 +53,34 @@ def test_projected_exposure_single_and_multiple() -> None:
     assert current == pytest.approx(0.03)
     assert projected == pytest.approx(0.04)
     assert ok is True
+
+
+def test_projected_exposure_uses_broker_contract_notional() -> None:
+    engine = RiskEngine(max_exposure=0.30)
+    current = [
+        {
+            "size": 0.01,
+            "current_price": 2510.0,
+            "contract_size": 100.0,
+            "notional_value": 2510.0,
+            "_notional_valid": True,
+        }
+    ]
+    ok, current_pct, projected_pct = engine.check_projected_exposure(
+        positions=current,
+        account_state={"equity": 10_000.0},
+        proposed_trade={
+            "size": 0.01,
+            "current_price": 2510.0,
+            "contract_size": 100.0,
+            "notional_value": 2510.0,
+        },
+        max_exposure=0.30,
+    )
+
+    assert current_pct == pytest.approx(0.251)
+    assert projected_pct == pytest.approx(0.502)
+    assert ok is False
 
 
 def test_projected_exposure_over_limit_rejected() -> None:
@@ -120,7 +148,7 @@ def test_gate_uses_real_equity_not_position_derived() -> None:
             "used_margin": 0.0,
         },
         positions,
-        {"spread_pips": 1.0, "bid": 100.0, "ask": 100.0},
+        {"spread_pips": 1.0, "bid": 100.0, "ask": 100.0, "contract_size": 1.0},
     )
     assert "projected_exposure_pct" in decision.metrics_snapshot
     assert decision.metrics_snapshot["projected_exposure_pct"] == pytest.approx(0.02)
@@ -182,9 +210,41 @@ def test_gate_accepts_size_under_ceiling() -> None:
         },
         _safe_account(),
         [],
-        {"spread_pips": 1.0, "bid": 100.0, "ask": 100.0, "price": 100.0},
+        {
+            "spread_pips": 1.0,
+            "bid": 100.0,
+            "ask": 100.0,
+            "price": 100.0,
+            "contract_size": 1.0,
+        },
     )
     assert decision.checks_passed.get("max_position_size") is True
+
+
+def test_gate_max_position_size_uses_broker_contract_size() -> None:
+    gate = _base_gate()
+    decision = gate.validate_proposal(
+        {
+            "symbol": "XAUUSD",
+            "direction": "BUY",
+            "entry_price": 2510.0,
+            "stop_loss": 2500.0,
+            "take_profit": 2530.0,
+            "size": 0.01,
+        },
+        _safe_account(),
+        [],
+        {
+            "spread_pips": 1.0,
+            "bid": 2510.0,
+            "ask": 2510.1,
+            "price": 2510.0,
+            "contract_size": 100.0,
+        },
+    )
+
+    assert decision.metrics_snapshot["position_size_pct"] == pytest.approx(0.251)
+    assert decision.checks_passed["max_position_size"] is False
 
 
 # ── Item #3: cost-aware sizing ──────────────────────────────────────────
@@ -226,6 +286,94 @@ def test_pipeline_cost_allowances_helper() -> None:
     )
     assert spread == pytest.approx(30.0)
     assert commission == pytest.approx(7.0)
+
+
+def test_risk_sizing_does_not_round_volume_up() -> None:
+    from types import SimpleNamespace
+
+    from orchestration.pipeline import TradingPipeline
+
+    pipeline = TradingPipeline(
+        supervisor=None,
+        risk_gate=None,
+        execution_engine=None,
+        default_risk_pct=0.01,
+        max_lot_per_trade=1.0,
+        force_risk_sizing=True,
+    )
+    pipeline._resolve_point_contract = lambda proposal, market: (1.0, 1.0)
+    pipeline.money_manager.calculate_lot_size = lambda **kwargs: SimpleNamespace(lot_size=0.009)
+    proposal = {"symbol": "EURUSD", "size": 0.5}
+
+    pipeline._size_proposal(
+        proposal,
+        entry=1.0,
+        sl=0.9,
+        account_state={"equity": 10_000.0},
+        market_info={},
+    )
+
+    assert proposal["size"] <= 0.009
+
+
+def test_risk_sizing_uses_broker_tick_value_in_account_currency() -> None:
+    from orchestration.pipeline import TradingPipeline
+
+    pipeline = TradingPipeline(
+        supervisor=None,
+        risk_gate=None,
+        execution_engine=None,
+        default_risk_pct=0.01,
+        max_lot_per_trade=1.0,
+        force_risk_sizing=True,
+    )
+    pipeline._apply_broker_volume_constraints = lambda lot, symbol: lot
+    proposal = {"symbol": "XAUUSD", "direction": "BUY", "size": 1.0}
+    market_info = {
+        "point_value": 0.01,
+        "contract_size": 100.0,
+        "tick_size": 0.05,
+        "tick_value": 2.0,
+        "spread_price": 0.1,
+    }
+
+    pipeline._size_proposal(
+        proposal,
+        entry=2510.0,
+        sl=2505.0,
+        account_state={"equity": 10_000.0},
+        market_info=market_info,
+    )
+
+    # 100 risk budget / (5 price units * 40 account-currency/price + 4 spread cost).
+    assert proposal["size"] == pytest.approx(100.0 / 204.0)
+
+
+def test_forced_risk_sizing_clears_size_when_broker_spec_is_missing() -> None:
+    from orchestration.pipeline import TradingPipeline
+
+    pipeline = TradingPipeline(
+        supervisor=None,
+        risk_gate=None,
+        execution_engine=None,
+        default_risk_pct=0.01,
+        max_lot_per_trade=1.0,
+        force_risk_sizing=True,
+    )
+    pipeline._resolve_point_contract = lambda proposal, market: (0.0, 0.0)
+    pipeline._apply_broker_volume_constraints = lambda lot, symbol: lot
+    proposal = {"symbol": "XAUUSD", "direction": "BUY", "size": 0.1}
+
+    pipeline._size_proposal(
+        proposal,
+        entry=2510.0,
+        sl=2505.0,
+        account_state={"equity": 10_000.0},
+        market_info={},
+    )
+
+    assert proposal["size"] == 0.0
+    assert proposal.get("risk_sizing_verified") is not True
 
 
 # ── Item #4: symbol-aware spread ────────────────────────────────────────
@@ -281,6 +429,40 @@ def test_symbol_spread_limits() -> None:
     assert bad_fx.checks_passed["spread"] is False
 
 
+def test_gate_records_normalized_spread_metrics() -> None:
+    gate = _base_gate()
+    decision = gate.validate_proposal(
+        {
+            "symbol": "XAUUSD",
+            "direction": "BUY",
+            "entry_price": 2510.0,
+            "stop_loss": 2500.0,
+            "take_profit": 2540.0,
+            "size": 0.001,
+        },
+        _safe_account(),
+        [],
+        {
+            "bid": 2510.0,
+            "ask": 2510.1,
+            "spread_price": 0.1,
+            "spread_pips": 1.0,
+            "point_value": 0.01,
+            "tick_size": 0.05,
+            "tick_value": 2.0,
+            "contract_size": 100.0,
+            "atr": 2.0,
+            "spread_cost_per_lot": 4.0,
+        },
+    )
+
+    assert decision.metrics_snapshot["spread_price"] == pytest.approx(0.1)
+    assert decision.metrics_snapshot["spread_points"] == pytest.approx(10.0)
+    assert decision.metrics_snapshot["spread_ticks"] == pytest.approx(2.0)
+    assert decision.metrics_snapshot["spread_atr"] == pytest.approx(0.05)
+    assert decision.metrics_snapshot["spread_cost_per_lot"] == pytest.approx(4.0)
+
+
 # ── Item #5: UNKNOWN-state duplicate safety ────────────────────────────
 
 
@@ -331,7 +513,7 @@ def test_timeout_plus_exists_adopts_not_duplicates() -> None:
     assert conn.calls == 1  # adopted, not re-sent
 
 
-def test_timeout_plus_missing_retries_then_fails_honestly() -> None:
+def test_timeout_plus_missing_stays_unknown_without_retry() -> None:
     class _DeadConnector:
         def __init__(self) -> None:
             self.calls = 0
@@ -347,11 +529,17 @@ def test_timeout_plus_missing_retries_then_fails_honestly() -> None:
     engine = ExecutionEngine(
         mt5_connector=conn, max_retries=2, retry_delay=0.0, order_locator=lambda req: None
     )
-    result = engine.execute_order(
-        OrderRequest(symbol="EURUSD", order_type="BUY", volume=1.0, idempotency_key="p1-5-missing")
+    request = OrderRequest(
+        symbol="EURUSD", order_type="BUY", volume=1.0, idempotency_key="p1-5-missing"
     )
+    result = engine.execute_order(request)
     assert result.success is False
-    assert conn.calls == 3  # initial + 2 retries, nothing landed
+    assert conn.calls == 1
+    assert get_order("p1-5-missing")["state"] == OrderState.UNKNOWN.value
+
+    duplicate = engine.execute_order(request)
+    assert duplicate.error_code == 409
+    assert conn.calls == 1
 
 
 # ── Item #6: persistent idempotency across restart ──────────────────────
@@ -375,6 +563,127 @@ def test_restart_does_not_forget_submitted_order(tmp_path) -> None:
 
         # Fresh key is not blocked.
         assert engine2._is_duplicate("never-seen") is False
+    finally:
+        set_store(None)
+        reset_store()
+
+
+def test_execution_refuses_when_durable_intent_cannot_be_written() -> None:
+    from execution.state_machine import set_store
+
+    class _FailedStore:
+        def all_orders(self):
+            return {}
+
+        def get_order(self, intent_id):
+            return None
+
+        def set_order(self, intent_id, state, extra=None):
+            return False
+
+    class _RecordingConnector:
+        def __init__(self):
+            self.send_calls = 0
+
+        def order_send(self, payload):
+            self.send_calls += 1
+            return {"success": True, "ticket": 1}
+
+        def get_symbol_info(self, symbol):
+            return {"symbol": symbol, "volume_min": 0.01, "volume_max": 100.0}
+
+    connector = _RecordingConnector()
+    set_store(_FailedStore())
+    try:
+        engine = ExecutionEngine(
+            mt5_connector=connector,
+            require_approval=True,
+            require_durable_state=True,
+        )
+        result = engine.execute_order(
+            OrderRequest(
+                symbol="EURUSD",
+                order_type="BUY",
+                volume=0.1,
+                idempotency_key="p1-store-failure",
+                approval_token="risk-approved",
+            )
+        )
+
+        assert result.success is False
+        assert result.error_code == 503
+        assert connector.send_calls == 0
+    finally:
+        set_store(None)
+        reset_store()
+
+
+def test_execution_persists_required_identity_before_and_after_send() -> None:
+    from datetime import datetime, timezone
+
+    from execution.state_machine import set_store
+
+    class _Store:
+        healthy = True
+
+        def __init__(self):
+            self.orders = {}
+
+        def all_orders(self):
+            return dict(self.orders)
+
+        def get_order(self, intent_id):
+            return self.orders.get(intent_id)
+
+        def set_order(self, intent_id, state, extra=None):
+            record = self.orders.setdefault(intent_id, {"intent_id": intent_id})
+            record.update({"state": state, "timestamp": datetime.now(timezone.utc).isoformat()})
+            record.update(extra or {})
+            return True
+
+    class _Connector:
+        def order_send(self, payload):
+            return {"success": True, "ticket": 777}
+
+        def get_symbol_info(self, symbol):
+            return {"symbol": symbol, "volume_min": 0.01, "volume_max": 100.0}
+
+        def get_positions(self):
+            return []
+
+    store = _Store()
+    reset_store()
+    set_store(store)
+    try:
+        engine = ExecutionEngine(
+            mt5_connector=_Connector(),
+            require_approval=True,
+            require_durable_state=True,
+        )
+        request = OrderRequest(
+            symbol="EURUSD",
+            order_type="BUY",
+            volume=0.1,
+            idempotency_key="p1-durable-metadata",
+            approval_token="risk-approved",
+            proposal_id="proposal-1",
+            execution_id="execution-1",
+            strategy_version="v2.4",
+        )
+        result = engine.execute_order(request)
+
+        assert result.success is True
+        record = store.get_order("p1-durable-metadata")
+        assert record["proposal_id"] == "proposal-1"
+        assert record["execution_id"] == "execution-1"
+        assert record["client_order_id"] == "p1-durable-metadata"
+        assert record["broker_order_id"] == 777
+        assert record["symbol"] == "EURUSD"
+        assert record["side"] == "BUY"
+        assert record["volume"] == pytest.approx(0.1)
+        assert record["strategy_version"] == "v2.4"
+        assert record["retry_count"] == 0
+        assert record["timestamp"]
     finally:
         set_store(None)
         reset_store()

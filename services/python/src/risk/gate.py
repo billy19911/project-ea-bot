@@ -176,6 +176,11 @@ class RiskGate:
         metrics["position_count"] = len(current_positions)
         metrics["max_positions"] = max_pos
 
+        prop_sym = proposal.get("symbol") or market_info.get("symbol", "")
+        contract_size, contract_source = self._broker_contract_size(prop_sym, market_info)
+        metrics["risk_contract_size"] = contract_size
+        metrics["risk_contract_source"] = contract_source
+
         # ── 4. Max exposure breached ────────────────────────────────────────
         max_exp = self._engine.get_threshold(RiskThreshold.MAX_EXPOSURE)
         prop_dir = str(proposal.get("direction", "")).upper()
@@ -186,16 +191,28 @@ class RiskGate:
         )
         prop_size = float(proposal.get("size") or 0.0)
         real_equity = float(account_state.get("equity", account_state.get("balance", 0.0)))
+        proposed_notional = (
+            prop_size * prop_price * contract_size
+            if prop_size > 0 and prop_price > 0 and contract_size > 0
+            else None
+        )
         ok, cur_pct, proj_pct = self._engine.check_projected_exposure(
             positions=current_positions,
             account_state={"equity": real_equity},
             proposed_trade=(
-                {"size": prop_size, "current_price": prop_price}
-                if prop_size > 0 and prop_price > 0
+                {
+                    "size": prop_size,
+                    "current_price": prop_price,
+                    "contract_size": contract_size,
+                    "notional_value": proposed_notional,
+                }
+                if prop_size > 0 and prop_price > 0 and proposed_notional is not None
                 else None
             ),
             max_exposure=max_exp,
         )
+        if prop_size > 0 and prop_price > 0 and proposed_notional is None:
+            ok = False
         exp_check = ok
         checks["max_exposure"] = exp_check
         portfolio_risk = self._engine.calculate_portfolio_risk(current_positions, real_equity)
@@ -218,7 +235,6 @@ class RiskGate:
         # missing spread_pips is DERIVED from bid/ask + point when possible —
         # never silently treated as 0 (safe-looking). Missing bid/ask with no
         # usable spread → fail-closed (blocked), because spread is unknowable.
-        prop_sym = proposal.get("symbol") or market_info.get("symbol", "")
         max_spread_for_this_symbol = self._max_spread_for_symbol(prop_sym)
         spread_pips_raw = market_info.get("spread_pips")
         try:
@@ -244,6 +260,35 @@ class RiskGate:
         else:
             spread_check = False  # unknown spread → fail-closed
         checks["spread"] = spread_check
+        try:
+            spread_price = float(market_info.get("spread_price") or 0.0)
+            if spread_price <= 0:
+                bid = float(market_info.get("bid") or 0.0)
+                ask = float(market_info.get("ask") or 0.0)
+                spread_price = max(0.0, ask - bid) if ask >= bid else 0.0
+            point = float(market_info.get("point_value") or 0.0)
+            tick_size = float(market_info.get("tick_size") or 0.0)
+            tick_value = float(market_info.get("tick_value") or 0.0)
+            atr = float(market_info.get("atr") or 0.0)
+            spread_points = spread_price / point if point > 0 else None
+            spread_ticks = spread_price / tick_size if tick_size > 0 else None
+            spread_atr = spread_price / atr if atr > 0 else None
+            spread_cost_per_lot = float(market_info.get("spread_cost_per_lot") or 0.0)
+            if spread_cost_per_lot <= 0 and tick_size > 0 and tick_value > 0:
+                spread_cost_per_lot = spread_price / tick_size * tick_value
+            elif spread_cost_per_lot <= 0 and contract_size > 0:
+                spread_cost_per_lot = spread_price * contract_size
+        except (TypeError, ValueError):
+            spread_price = 0.0
+            spread_points = None
+            spread_ticks = None
+            spread_atr = None
+            spread_cost_per_lot = 0.0
+        metrics["spread_price"] = spread_price
+        metrics["spread_points"] = spread_points
+        metrics["spread_ticks"] = spread_ticks
+        metrics["spread_atr"] = spread_atr
+        metrics["spread_cost_per_lot"] = spread_cost_per_lot
         metrics["spread_pips"] = spread_pips
         metrics["max_spread_pips"] = max_spread_for_this_symbol
         metrics["symbol_specific_max_spread"] = max_spread_for_this_symbol
@@ -278,16 +323,62 @@ class RiskGate:
         # the broker spec is unavailable (no invented fallback contract size).
         prop_volume = float(proposal.get("size") or proposal.get("volume") or 0.0)
         risk_price_distance = abs(entry - sl) if (entry > 0 and sl > 0) else 0.0
-        contract_size, contract_source = self._broker_contract_size(prop_sym, market_info)
-        risk_money = risk_price_distance * contract_size * prop_volume
+        tick_size = float(market_info.get("tick_size") or 0.0)
+        tick_value = float(market_info.get("tick_value") or 0.0)
+        spread_price = float(market_info.get("spread_price") or 0.0)
+        if spread_price <= 0:
+            try:
+                bid = float(market_info.get("bid") or 0.0)
+                ask = float(market_info.get("ask") or 0.0)
+                spread_price = max(0.0, ask - bid) if ask >= bid else 0.0
+            except (TypeError, ValueError):
+                spread_price = 0.0
+        if tick_size > 0 and tick_value > 0:
+            sl_cost_per_lot = risk_price_distance / tick_size * tick_value
+            spread_cost_per_lot = (
+                float(market_info.get("spread_cost_per_lot") or 0.0)
+                or spread_price / tick_size * tick_value
+            )
+        else:
+            sl_cost_per_lot = risk_price_distance * contract_size
+            spread_cost_per_lot = (
+                float(market_info.get("spread_cost_per_lot") or 0.0) or spread_price * contract_size
+            )
+        raw_commission = market_info.get("commission_per_lot")
+        if raw_commission is None:
+            raw_commission = proposal.get("commission_per_lot")
+        try:
+            commission_per_lot = max(float(raw_commission or 0.0), 0.0)
+        except (TypeError, ValueError):
+            commission_per_lot = 0.0
+        commission_known = (
+            raw_commission is not None and proposal.get("commission_known") is not False
+        )
+        risk_money = (sl_cost_per_lot + spread_cost_per_lot + commission_per_lot) * prop_volume
         equity_for_risk = float(account_state.get("equity", account_state.get("balance", 0.0)))
         metrics["risk_price_distance"] = risk_price_distance
         metrics["risk_contract_size"] = contract_size
         metrics["risk_contract_source"] = contract_source
         metrics["risk_money"] = risk_money
-        metrics["max_risk_pct"] = self._max_risk_pct
-        if self._max_risk_pct and self._max_risk_pct > 0:
-            risk_budget = equity_for_risk * self._max_risk_pct
+        metrics["risk_sl_cost_per_lot"] = sl_cost_per_lot
+        metrics["risk_spread_cost_per_lot"] = spread_cost_per_lot
+        metrics["risk_commission_per_lot"] = commission_per_lot
+        metrics["risk_commission_known"] = commission_known
+        risk_budget_pct = self._max_risk_pct
+        risk_budget_source = "config" if risk_budget_pct and risk_budget_pct > 0 else None
+        if (risk_budget_pct is None or risk_budget_pct <= 0) and proposal.get(
+            "risk_sizing_verified"
+        ) is True:
+            try:
+                risk_budget_pct = float(proposal.get("risk_pct") or 0.0)
+            except (TypeError, ValueError):
+                risk_budget_pct = 0.0
+            if risk_budget_pct > 0:
+                risk_budget_source = "deterministic_sizing"
+        metrics["max_risk_pct"] = risk_budget_pct
+        metrics["risk_budget_source"] = risk_budget_source
+        if risk_budget_pct and risk_budget_pct > 0:
+            risk_budget = equity_for_risk * risk_budget_pct
             metrics["risk_budget"] = risk_budget
             if contract_size <= 0 or risk_price_distance <= 0 or prop_volume <= 0:
                 # Cannot prove monetary risk is safe → fail closed.
@@ -295,7 +386,7 @@ class RiskGate:
             elif equity_for_risk <= 0:
                 monetary_ok = False
             else:
-                monetary_ok = risk_money <= risk_budget
+                monetary_ok = risk_money <= risk_budget and commission_known
         else:
             # No budget configured → informational only (never blocks).
             monetary_ok = True
@@ -309,8 +400,8 @@ class RiskGate:
         proposed_size = float(proposal.get("size") or 0.0)
         proposed_price = float(proposal.get("entry_price") or market_info.get("price") or 0.0)
         equity_for_size = float(account_state.get("equity", account_state.get("balance", 0.0)))
-        if equity_for_size > 0 and proposed_price > 0 and proposed_size > 0:
-            position_pct = (proposed_size * proposed_price) / equity_for_size
+        if equity_for_size > 0 and proposed_price > 0 and proposed_size > 0 and contract_size > 0:
+            position_pct = (proposed_size * proposed_price * contract_size) / equity_for_size
             size_ok = position_pct <= max_pos_size
         else:
             # Missing data → fail-closed (cannot prove size is safe).

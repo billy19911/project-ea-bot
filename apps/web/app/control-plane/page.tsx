@@ -351,7 +351,20 @@ export default function ControlPlanePage() {
     }
   };
 
-  const mt5Mode = data.mt5Mode as { live_data?: boolean; execution?: string } | undefined;
+  const mt5Mode = data.mt5Mode as {
+    live_data?: boolean;
+    data_source?: string;
+    account_mode?: string | null;
+    account_verified?: boolean;
+    execution?: string;
+  } | undefined;
+  const environmentLabel = !mt5Mode
+    ? 'MT5 STATUS UNKNOWN'
+    : mt5Mode.account_verified && mt5Mode.account_mode
+      ? `${mt5Mode.account_mode} ACCOUNT`
+      : mt5Mode.live_data
+        ? 'ACCOUNT UNVERIFIED'
+        : 'SIMULATED DATA';
 
   // Symbols available for the manual cycle scan. Prefer the live market list;
   // always include the primary instrument + the current pick so the operator
@@ -373,7 +386,9 @@ export default function ControlPlanePage() {
       title={TAB_LABEL[tab] ?? 'Control Panel'}
       actions={
         <>
-          <span className={styles.envBadge}>{mt5Mode?.live_data ? 'LIVE DATA · READ-ONLY' : 'PAPER'}</span>
+          <span className={styles.envBadge} title="Mode akun mengikuti terminal MT5 yang attached dan telah diverifikasi">
+            {environmentLabel}
+          </span>
           <select
             className={styles.tab}
             value={cycleSymbol}
@@ -1182,6 +1197,7 @@ type TerminalEntry = {
   selected?: boolean;
   armed?: boolean;
   account?: TerminalAccount | null;
+  account_verified?: boolean;
   // F1/F3: per-account sizing + fan-out participation.
   risk_per_trade_pct?: number | null;
   fixed_lot?: number | null;
@@ -1240,6 +1256,7 @@ function TerminalPanel({
   const list = showStopped ? all : all.filter((t) => t.running || t.selected);
   const hiddenCount = all.length - list.length;
   const armed = terminals?.execution_armed === true;
+  const armedCount = all.filter((t) => t.armed).length;
   const selected = all.find((t) => t.selected);
   const probedAt = terminals?.accounts_probed_at ?? null;
 
@@ -1321,7 +1338,7 @@ function TerminalPanel({
 
   const fmtBalance = (t: TerminalEntry) => {
     const acc = t.account;
-    if (!acc || acc.balance == null) return '—';
+    if (t.account_verified !== true || !acc || acc.balance == null) return '—';
     const n = typeof acc.balance === 'number' ? acc.balance.toLocaleString('id-ID') : acc.balance;
     return acc.currency ? `${n} ${acc.currency}` : String(n);
   };
@@ -1331,7 +1348,9 @@ function TerminalPanel({
       <h2>
         Terminal MT5{' '}
         {armed ? (
-          <span className={`${s.badge} ${s.danger}`}>EXECUTION ARMED</span>
+          <span className={`${s.badge} ${s.danger}`}>
+            {armedCount > 0 ? `${armedCount} AKUN ARMED` : 'ARMED · CEK TERMINAL'}
+          </span>
         ) : (
           <span className={`${s.badge} ${s.muted}`}>eksekusi OFF</span>
         )}
@@ -1382,15 +1401,17 @@ function TerminalPanel({
                     {t.selected && <span className={`${s.badge} ${s.info}`}>SELECTED</span>}
                     {t.running && t.pid ? <small>PID {t.pid}</small> : null}
                   </td>
-                  <td className={s.mono}>{t.account?.login != null ? String(t.account.login) : '—'}</td>
-                  <td className={s.mono}>{t.account?.server ?? '—'}</td>
+                  <td className={s.mono}>{t.account_verified && t.account?.login != null ? String(t.account.login) : '—'}</td>
+                  <td className={s.mono}>{t.account_verified ? t.account?.server ?? '—' : '—'}</td>
                   <td>
-                    {t.account?.mode ? (
+                    {t.account_verified && t.account?.mode ? (
                       <span className={`${s.badge} ${t.account.mode === 'LIVE' ? s.danger : t.account.mode === 'DEMO' ? s.success : s.warning}`}>
                         {t.account.mode}
                       </span>
                     ) : (
-                      <span className={`${s.badge} ${s.muted}`}>—</span>
+                      <span className={`${s.badge} ${s.muted}`}>
+                        {t.account ? 'UNVERIFIED' : 'NOT CHECKED'}
+                      </span>
                     )}
                   </td>
                   <td className={s.mono}>{fmtBalance(t)}</td>
@@ -1468,18 +1489,19 @@ function TerminalPanel({
                   </td>
                   <td>
                     {t.armed && <span className={`${s.badge} ${s.danger}`}>ARMED</span>}{' '}
-                    {/* B-9: toggle arm per terminal (banyak terminal bisa armed
-                        sekaligus). B-10: nonaktif hanya bila terminal tidak berjalan (execution flag diabaikan). */}
+                    {/* Arm per akun; beberapa akun dapat aktif sekaligus setelah identitas masing-masing terverifikasi. */}
                     <button
                       className={s.tab}
-                      disabled={busy || !hasToken || !t.running}
+                      disabled={busy || !hasToken || (!t.armed && (!t.running || t.account_verified !== true))}
                       title={
                         !hasToken
                           ? 'Membutuhkan token di localStorage (ea-bot-token)'
-                          : !t.running
+                          : t.armed
+                            ? `Matikan arm untuk terminal ${t.id}`
+                            : !t.running
                             ? 'Terminal tidak berjalan'
-                            : t.armed
-                              ? `Matikan arm untuk terminal ${t.id}`
+                            : t.account_verified !== true
+                              ? 'Klik Cek akun sebelum meng-arm terminal ini'
                               : `Izinkan eksekusi order nyata untuk terminal ${t.id}`
                       }
                       onClick={() =>
@@ -1522,8 +1544,8 @@ function TerminalPanel({
       <div className={s.actions}>
         <button
           className={s.tab}
-          disabled={!hasToken || probing || list.length === 0}
-          title={!hasToken ? 'Membutuhkan token di localStorage (ea-bot-token)' : 'Baca akun tiap terminal yang berjalan (read-only, binding dipulihkan otomatis)'}
+          disabled={!hasToken || probing || list.length === 0 || armed}
+          title={!hasToken ? 'Membutuhkan token di localStorage (ea-bot-token)' : armed ? 'Disarm semua terminal sebelum mengecek akun' : 'Baca akun tiap terminal yang berjalan (read-only, binding dipulihkan otomatis)'}
           onClick={probe}
         >
           {probing ? '⏳ Mengecek…' : 'Cek akun'}
@@ -1534,9 +1556,9 @@ function TerminalPanel({
           {probedAt ? `akun dicek ${formatClock(probedAt)}` : 'akun belum dicek'}
         </span>
       </div>
-      {list.some((t) => t.running && t.account == null) && (
+      {list.some((t) => t.running && t.account_verified !== true) && (
         <div className={`${s.mono} ${s.mt1} ${s.mutedText}`}>
-          Terminal yang berjalan tapi kolom akun masih —: klik <strong>Cek akun</strong> untuk membacanya (read-only).
+          Arm tersedia setelah login, server, dan mode tiap akun terverifikasi lewat <strong>Cek akun</strong>.
         </div>
       )}
 
@@ -1546,13 +1568,15 @@ function TerminalPanel({
           <strong>Zona berbahaya</strong>
           <button
             className={s.tab}
-            disabled={busy || !hasToken || armed}
+            disabled={busy || !hasToken || armed || selected.account_verified !== true}
             title={
               !hasToken
                 ? 'Membutuhkan token di localStorage (ea-bot-token)'
                 : armed
                   ? 'Sudah armed'
-                  : 'Izinkan eksekusi order nyata untuk terminal terpilih'
+                  : selected.account_verified !== true
+                    ? 'Klik Cek akun sebelum meng-arm terminal ini'
+                    : 'Izinkan eksekusi order nyata untuk terminal terpilih'
             }
             onClick={() => post('/mt5/terminals/arm', { armed: true }, 'Execution ARMED.')}
           >

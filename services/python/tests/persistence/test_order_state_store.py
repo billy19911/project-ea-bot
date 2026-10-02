@@ -30,7 +30,8 @@ def test_order_state_unwritable_degrades_cache_only(tmp_path):
     blocker = tmp_path / "blocker"
     blocker.write_text("x")
     store = OrderStateStore(str(blocker / "sub" / "order.jsonl"))
-    store.set_order("i1", "submitted")
+    assert store.set_order("i1", "submitted") is False
+    assert store.healthy is False
     assert store.get_order("i1")["state"] == "submitted"
 
 

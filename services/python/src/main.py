@@ -64,6 +64,35 @@ async def _risk_monitor_wrapper(monitor: Any) -> None:
 _STARTED_AT = time.time()
 
 
+def _start_mt5_data_binding() -> bool:
+    """Attach to the saved MT5 terminal, or use the default when none is saved."""
+    from .mt5 import terminals as terminal_manager
+
+    saved_selection = terminal_manager.load_saved_selection()
+    if saved_selection:
+        try:
+            restored = terminal_manager.restore_saved_selection()
+        except Exception:  # noqa: BLE001 - a failed restore must not pick another account
+            logger.exception("Could not restore saved MT5 terminal %s", saved_selection)
+            connector.shutdown()
+            return False
+        if not restored:
+            connector.shutdown()
+            logger.error(
+                "Saved MT5 terminal %s could not be restored; leaving the connector detached",
+                saved_selection,
+            )
+            return False
+        terminal_manager.sync_selection_from_attached()
+        logger.info("Re-attached to saved terminal: %s", restored)
+        return True
+
+    live_data_started = connector.use_live_data_mode()
+    if live_data_started:
+        terminal_manager.sync_selection_from_attached()
+    return live_data_started
+
+
 def _persist_review_and_ledger(record: Any) -> None:
     """Persist an auto-triggered review to ReviewStore + update TradeLedger.
 
@@ -654,27 +683,11 @@ async def lifespan(app: FastAPI):
     price_watch_task = asyncio.create_task(_signal_price_watch())
 
     if settings.mt5_live_data:
-        live_data_started = connector.use_live_data_mode()
+        live_data_started = _start_mt5_data_binding()
+        # Arm-state is IN-MEMORY and always starts OFF after a restart. Make
         if live_data_started:
-            # Run 24: reflect the attached terminal as the initial selection so
-            # the dashboard immediately shows which terminal is active. The
-            # arm switch itself always starts OFF.
             from .mt5 import terminals as terminal_manager
 
-            # Prefer the operator's LAST selected terminal (persisted); falls
-            # back to whatever MT5 attached to. This prevents the "charts /
-            # backtests empty after restart" issue where the binding lands on a
-            # different broker whose symbols are suffixed (XAUUSDc vs XAUUSD).
-            restored = None
-            try:
-                restored = terminal_manager.restore_saved_selection()
-            except Exception:  # noqa: BLE001 - startup must never fail here
-                logger.warning("Could not restore saved terminal selection")
-            if restored:
-                logger.info("Re-attached to saved terminal: %s", restored)
-            terminal_manager.sync_selection_from_attached()
-
-            # Arm-state is IN-MEMORY and always starts OFF after a restart. Make
             # this loud so an operator who just restarted is not left wondering
             # why orders/SL modifications are "stuck" (fail-closed 403s). This
             # is the single most common post-restart gotcha.
