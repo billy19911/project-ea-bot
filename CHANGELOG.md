@@ -3,6 +3,12 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Phase 5: Learning & Research (setup identity, quality dimensions, regime matrix)
+- `services/python/src/learning/review_store.py`: `build_setup_identity()` — identitas setup terstruktur & stabil `SYMBOL/TF_SETUP/TF_ZONE/TF_TRIGGER/SETUP_TYPE/REGIME/SESSION`; `regime_matrix()` — agregasi deterministik `setup × regime × session` dengan `sample_size`, `total_pnl`, `win_rate`. `ReviewBuilder` kini meloloskan `setup_identity` pada kedua review.
+- `services/python/src/learning/canonical.py`: `TradeReview.setup_identity` dan `DecisionReview.setup_identity` ditambahkan (default kosong → backward compatible). Dimensi kualitas (`decision/entry/risk/execution_quality`) tetap terpisah — tidak pernah digabung menjadi satu angka.
+- Test baru `services/python/tests/test_phase5_audit_learning.py` (6): identitas setup terstruktur; `TradeReview` membawa identitas + 4 dimensi kualitas terpisah + MAE/MFE; kerugian tidak otomatis dianggap proses buruk (`GOOD_DECISION_LOSS`); keputusan WAIT di-bridge sebagai `DecisionReview` (counterfactual); `DecisionReview` membawa identitas setup; regime matrix mengelompokkan dengan sample size.
+- Verifikasi: full Python **3189 passed, 0 failed** (3183 + 6 Phase 5). Tidak ada default arm yang diubah; tidak ada order nyata dikirim.
+
 ### Added — Phase 4: Entry Engine (staged Setup → Zone → Trigger)
 - `services/python/src/orchestration/entry_stage.py` (baru): satu sumber kebenaran untuk tiga tahap entry deterministik — `SETUP_VALID` (Stage A), `ENTRY_ARMED` (Stage B), `ENTRY_TRIGGERED` (Stage C). Hanya Stage C yang executable; stage tak dikenal fail-closed (tidak executable). Helper `stage_for_zone_state()` + `describe()`.
 - `services/python/src/orchestration/pipeline.py`: jalur zone-entry kini mencatat tahap eksplisit di trace — `entry_stage` melaporkan `SETUP_VALID → ENTRY_ARMED` pending (dengan alasan) atau `ENTRY_ARMED → ENTRY_TRIGGERED` saat trigger terkonfirmasi. Zone touch tanpa konfirmasi trigger tetap tidak eksekusi.

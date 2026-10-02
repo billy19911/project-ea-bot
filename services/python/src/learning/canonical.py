@@ -133,6 +133,7 @@ class TradeReview:
     review_id: str
     trade_id: str
     setup_id: str = ""
+    setup_identity: str = ""
     trigger_id: str = ""
     strategy_version: str = ""
     entry_timestamp: str = ""
@@ -184,6 +185,7 @@ class DecisionReview:
     decision_state: str  # WAIT / NO_TRADE / REJECTED / EXPIRED / INVALIDATED
     direction: str = ""
     setup_id: str = ""
+    setup_identity: str = ""
     zone_type: str = ""
     trigger_type: str = ""
     reason_codes: list[str] = field(default_factory=list)

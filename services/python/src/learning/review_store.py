@@ -24,7 +24,68 @@ __all__ = [
     "ReviewBuilder",
     "ResearchQueue",
     "MIN_PATTERN_SAMPLE",
+    "build_setup_identity",
+    "regime_matrix",
 ]
+
+
+def build_setup_identity(
+    *,
+    symbol: str = "",
+    setup_timeframe: str = "",
+    zone_timeframe: str = "",
+    trigger_timeframe: str = "",
+    setup_type: str = "",
+    regime: str = "",
+    session: str = "",
+) -> str:
+    """Structured, stable setup identity (Phase 5 §"Setup identity").
+
+    Format: ``SYMBOL / TF_SETUP / TF_ZONE / TF_TRIGGER / SETUP_TYPE / REGIME / SESSION``
+    Empty parts are kept as placeholders so the shape is stable and comparable.
+    """
+
+    def _clean(value: Any) -> str:
+        return str(value or "").strip().upper().replace("/", "_")
+
+    return "/".join(
+        _clean(part)
+        for part in (
+            symbol,
+            setup_timeframe,
+            zone_timeframe,
+            trigger_timeframe,
+            setup_type,
+            regime,
+            session,
+        )
+    )
+
+
+def regime_matrix(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Aggregate ``setup × regime × session`` performance with sample size.
+
+    Groups by ``setup_identity`` (which already encodes symbol/timeframes/
+    setup_type/regime/session). Deterministic; never raises on malformed rows.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("setup_identity") or "").strip() or "UNKNOWN"
+        bucket = out.setdefault(key, {"sample_size": 0, "total_pnl": 0.0, "wins": 0})
+        try:
+            pnl = float(row.get("net_pnl", row.get("pnl", 0.0)) or 0.0)
+        except (TypeError, ValueError):
+            pnl = 0.0
+        bucket["sample_size"] += 1
+        bucket["total_pnl"] = round(bucket["total_pnl"] + pnl, 4)
+        if pnl > 0:
+            bucket["wins"] += 1
+    for bucket in out.values():
+        size = bucket["sample_size"] or 1
+        bucket["win_rate"] = round(bucket["wins"] / size, 4)
+    return out
 
 
 def _new_id(prefix: str) -> str:
@@ -188,6 +249,7 @@ class ReviewBuilder:
         allowed = {
             "trade_id",
             "setup_id",
+            "setup_identity",
             "trigger_id",
             "strategy_version",
             "entry_timestamp",
@@ -241,6 +303,7 @@ class ReviewBuilder:
             "decision_state",
             "direction",
             "setup_id",
+            "setup_identity",
             "zone_type",
             "trigger_type",
             "reason_codes",
