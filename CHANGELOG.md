@@ -3,6 +3,15 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Auto-detect akun MT5 (tanpa klik "Cek akun")
+- `services/python/src/mt5/terminals.py`: `list_terminals()` kini otomatis membaca identitas akun sehingga operator tidak perlu menekan **Cek akun** dulu:
+  - `_refresh_attached_account()` — selalu membaca `account_info()` dari terminal yang SEDANG attached (gratis, tidak memindahkan binding, tidak mengubah arm).
+  - `_auto_probe_if_idle()` — saat TIDAK ada terminal yang armed, menjalankan probe penuh satu kali untuk mengisi akun terminal running lainnya (BIL2/VITO2 terisi sendiri). Saat ada yang armed, probe dilewati (fail-closed: probe memindahkan binding dan tidak boleh berjalan di samping order live).
+  - Guard re-entrancy `_auto_probe_running` mencegah rekursi `list_terminals → probe_accounts → list_terminals`.
+- `apps/web/app/control-plane/page.tsx`: teks panel Terminal MT5 diperbarui — deteksi otomatis dijelaskan; tombol **Cek akun** tetap ada sebagai pemaksa baca ulang. Tidak mengubah kontrol Arm/Disarm.
+- Test baru `services/python/tests/test_mt5_auto_detect_accounts.py` (4): akun terminal attached terbaca otomatis tanpa probe; probe penuh berjalan saat idle dan mengisi VITO2 LIVE; probe dilewati saat ada yang armed; tidak ada rekursi.
+- Verifikasi: full Python suite + lint web bersih. Tidak ada default arm yang diubah; tidak ada order nyata dikirim.
+
 ### Added — Phase 7: Observability / Dashboard (correlation chain + explainability)
 - `services/python/src/orchestration/pipeline.py`: `PipelineResult.correlation` — rantai ID lengkap `trace_id / market_event_id / analysis_id / setup_id / decision_id / risk_decision_id / execution_id / position_id / review_id`. Diisi bertahap sepanjang siklus (analysis → canonical → risk → execution → position); ID yang tidak pernah terwujud tetap kosong (tidak pernah difabrikasi). Termasuk di `to_dict()`.
 - Trace `ops` (`decision_trace`/`trade_trace`/`explain_non_trade`) sudah ada dan tetap menjadi permukaan explainability dashboard (why-enter/why-not, evidence, konflik, hasil challenge, risk calc, hasil eksekusi, timeline posisi).

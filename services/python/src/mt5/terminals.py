@@ -69,6 +69,10 @@ _account_cache_ts: Optional[str] = None
 # operation that MOVES it (select, arm, probe) takes this lock — one binding
 # operation at a time, and a probe can never interleave with a switch.
 _binding_lock = threading.Lock()
+# Re-entrancy guard: list_terminals() triggers a best-effort auto-probe, and
+# probe_accounts() calls list_terminals() internally — without this flag the
+# two would recurse forever.
+_auto_probe_running = False
 
 
 # ---------------------------------------------------------------------------
@@ -278,11 +282,64 @@ def _detect_attached_path() -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
+def _refresh_attached_account() -> None:
+    """Auto-read the CURRENTLY attached terminal's account (no re-bind).
+
+    Zero-cost and side-effect free: it only calls ``account_info()`` on the
+    binding that is already active, so it can run on every registry refresh
+    without moving MT5 or touching arm state. Fail-safe: any error is ignored
+    and the existing cache is kept.
+    """
+    global _account_cache
+    try:
+        folder = _detect_attached_path()
+        if not folder:
+            return
+        summary = _read_account_summary()
+        if summary is None:
+            return
+        key = _norm(folder)
+        _account_cache = {**_account_cache, key: summary}
+    except Exception:  # noqa: BLE001 - auto-refresh must never break the view
+        return
+
+
+def auto_probe_accounts() -> bool:
+    """Best-effort auto-probe of running terminals when nothing is armed.
+
+    Called by the ``/mt5/terminals`` endpoint (a real operator request), NOT by
+    ``list_terminals`` itself: the full probe temporarily moves the process-wide
+    binding, so it must never run as a side effect of a pure read (tests, metrics,
+    internal callers). Fail-closed: skipped while any terminal is armed. Never raises.
+    """
+    global _auto_probe_running
+    try:
+        if _execution_armed or is_execution_armed():
+            return False
+        if _auto_probe_running:
+            return False  # already inside a probe — avoid infinite recursion
+        _auto_probe_running = True
+        try:
+            view = list_terminals()
+            if not any(t.get("running") for t in view.get("terminals", [])):
+                return False
+            result = probe_accounts()
+        finally:
+            _auto_probe_running = False
+        return bool(result.get("ok"))
+    except Exception:  # noqa: BLE001 - auto-probe must never break the view
+        return False
+
+
 def list_terminals() -> dict[str, Any]:
     """Return the terminal registry merged with live process/attach status."""
     # Pull any direct external writes to the legacy globals into the canonical
     # state before building the view (legacy single-switch compat).
     _reconcile_globals()
+    # Auto-detect the ATTACHED account for free on every read (no re-bind, no arm
+    # change) so the dashboard shows identity without clicking "Cek akun". The
+    # full multi-terminal probe runs separately via ``auto_probe_accounts()``.
+    _refresh_attached_account()
     config = load_config()
     running = scan_running_terminals()
     running_by_folder = {_norm(r["folder"]): r for r in running}

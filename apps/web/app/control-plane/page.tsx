@@ -1545,7 +1545,7 @@ function TerminalPanel({
         <button
           className={s.tab}
           disabled={!hasToken || probing || list.length === 0 || armed}
-          title={!hasToken ? 'Membutuhkan token di localStorage (ea-bot-token)' : armed ? 'Disarm semua terminal sebelum mengecek akun' : 'Baca akun tiap terminal yang berjalan (read-only, binding dipulihkan otomatis)'}
+          title={!hasToken ? 'Membutuhkan token di localStorage (ea-bot-token)' : armed ? 'Disarm semua terminal sebelum mengecek akun' : 'Deteksi akun berjalan otomatis; klik untuk memaksa baca ulang akun semua terminal (read-only)'}
           onClick={probe}
         >
           {probing ? '⏳ Mengecek…' : 'Cek akun'}
@@ -1553,12 +1553,13 @@ function TerminalPanel({
         <span className={s.mono}>
           {selected ? `Terpilih: ${selected.label || selected.id}` : 'Belum ada terminal terpilih'}
           {' · '}
-          {probedAt ? `akun dicek ${formatClock(probedAt)}` : 'akun belum dicek'}
+          {probedAt ? `akun dicek otomatis ${formatClock(probedAt)}` : 'akun belum terbaca'}
         </span>
       </div>
       {list.some((t) => t.running && t.account_verified !== true) && (
         <div className={`${s.mono} ${s.mt1} ${s.mutedText}`}>
-          Arm tersedia setelah login, server, dan mode tiap akun terverifikasi lewat <strong>Cek akun</strong>.
+          Akun terdeteksi otomatis saat terminal berjalan & tidak ada yang armed. Bila masih kosong,
+          pastikan terminal sudah login lalu klik <strong>Cek akun</strong>.
         </div>
       )}
 
@@ -1575,7 +1576,7 @@ function TerminalPanel({
                 : armed
                   ? 'Sudah armed'
                   : selected.account_verified !== true
-                    ? 'Klik Cek akun sebelum meng-arm terminal ini'
+                    ? 'Akun belum terbaca — pastikan terminal login lalu klik Cek akun'
                     : 'Izinkan eksekusi order nyata untuk terminal terpilih'
             }
             onClick={() => post('/mt5/terminals/arm', { armed: true }, 'Execution ARMED.')}

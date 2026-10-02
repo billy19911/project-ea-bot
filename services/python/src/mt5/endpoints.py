@@ -111,7 +111,13 @@ async def list_terminals() -> dict:
     Read-only. ``armable`` reflects whether the terminal is currently running;
     Arm additionally requires verified account identity. ``execution_armed``
     reflects the operator's explicit per-terminal arm switch.
+
+    Auto-detect: the attached terminal's account is refreshed on every read for
+    free, and (only while no terminal is armed) a one-shot full probe fills in
+    the other running terminals — so the operator does NOT have to click
+    "Cek akun" first. The probe is fail-closed around armed terminals.
     """
+    terminal_manager.auto_probe_accounts()
     return terminal_manager.list_terminals()
 
 
