@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-"""Model routing policy — PRD_V2 §22 Model Routing.
+﻿# -*- coding: utf-8 -*-
+"""Model routing policy â€” PRD_V2 Â§22 Model Routing.
 
 The :class:`ModelRouter` picks a primary model and a fallback chain from the
 :class:`~llm.registry.ModelRegistry` using a deterministic policy derived from:
@@ -40,11 +40,13 @@ __all__ = [
     "RiskLevel",
     "RoutingDecision",
     "ModelRouter",
+    "TaskTierDecision",
+    "route_task",
 ]
 
 
 class Complexity(str, Enum):
-    """Task complexity tiers that drive the base model tier (§22)."""
+    """Task complexity tiers that drive the base model tier (Â§22)."""
 
     LOW = "LOW"
     MEDIUM = "MEDIUM"
@@ -52,7 +54,7 @@ class Complexity(str, Enum):
 
 
 class Priority(str, Enum):
-    """Event priority tiers (§15 / §22)."""
+    """Event priority tiers (Â§15 / Â§22)."""
 
     CRITICAL = "CRITICAL"
     HIGH = "HIGH"
@@ -64,7 +66,7 @@ class Priority(str, Enum):
 class RiskLevel(str, Enum):
     """Risk level attached to a routing request.
 
-    A ``HIGH`` risk level forbids free/cheap models — the routing policy prefers
+    A ``HIGH`` risk level forbids free/cheap models â€” the routing policy prefers
     a capable paid model even when a free model is available (safety over cost).
     """
 
@@ -123,7 +125,7 @@ class RoutingDecision:
         }
 
 
-# Latency budgets (ms) per complexity — placeholders for observability (§22).
+# Latency budgets (ms) per complexity â€” placeholders for observability (Â§22).
 _LATENCY_BUDGET_MS: dict[Complexity, int] = {
     Complexity.LOW: 2_000,
     Complexity.MEDIUM: 5_000,
@@ -132,7 +134,7 @@ _LATENCY_BUDGET_MS: dict[Complexity, int] = {
 
 
 class ModelRouter:
-    """Deterministic model selection policy (§22).
+    """Deterministic model selection policy (Â§22).
 
     Args:
         registry: The :class:`ModelRegistry` describing available models.
@@ -165,14 +167,14 @@ class ModelRouter:
         """Choose a model + fallback chain for a single task.
 
         The selection is a pure function of the arguments and the current
-        registry contents / health — repeated calls with the same inputs return
+        registry contents / health â€” repeated calls with the same inputs return
         the same model (deterministic).
 
         Args:
             complexity: Task complexity tier.
             priority: Event priority tier.
             risk_level: Risk level; ``HIGH`` forbids free models.
-            conflict_severity: 0.0–1.0 conflict intensity (higher favors strong).
+            conflict_severity: 0.0â€“1.0 conflict intensity (higher favors strong).
             budget_remaining_usd: Hard cost ceiling for the call; ``None``
                 means unbounded.
             expected_tokens: Expected total tokens for a cost estimate.
@@ -202,7 +204,7 @@ class ModelRouter:
             primary = affordable[0].name
             chain = [m.name for m in affordable[1:]]
         elif free_forbidden:
-            # HIGH risk and nothing affordable → deterministic refusal: pick the
+            # HIGH risk and nothing affordable â†’ deterministic refusal: pick the
             # cheapest paid model (never a free model) so the caller must decide
             # to abort rather than silently downgrade safety.
             paid = self._candidates("strong", free_forbidden=True)
@@ -212,7 +214,7 @@ class ModelRouter:
             chain = [m.name for m in paid[1:]] if paid else []
             reason += " | budget exhausted; high-risk forbids free models"
         else:
-            # Over budget but free models are allowed → degrade to a free model
+            # Over budget but free models are allowed â†’ degrade to a free model
             # (fail-safe: cheapest routing that still fits the ceiling).
             free = [m for m in self.registry.list_models() if m.is_free]
             if free:
@@ -314,7 +316,7 @@ class ModelRouter:
         )
 
     def _record(self, decision: RoutingDecision, tokens: int, role: Optional[str]) -> None:
-        """Append a structured, loggable routing record (§22 logging)."""
+        """Append a structured, loggable routing record (Â§22 logging)."""
         entry = {
             "model": decision.model,
             "reason": decision.reason,
@@ -337,3 +339,81 @@ class ModelRouter:
             decision.cost_estimate,
             decision.latency_ms_budget,
         )
+
+
+@dataclass
+class TaskTierDecision:
+    """Deterministic tier routing result (Phase 6).
+
+    ``tier`` is one of ``cheap`` / ``medium`` / ``strong`` / ``refused``;
+    ``allowed`` is False only when the budget cannot fund even the cheapest
+    tier. This is a pure policy layer â€” it never calls a model.
+    """
+
+    tier: str
+    allowed: bool
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"tier": self.tier, "allowed": self.allowed, "reason": self.reason}
+
+
+#: Complexity â†’ base tier.
+_COMPLEXITY_TIER = {"LOW": "cheap", "MEDIUM": "medium", "HIGH": "strong", "CRITICAL": "strong"}
+#: Only these tasks may run on the cheapest tier.
+_CHEAP_TASKS = {"FAST_CLASSIFICATION", "MARKET_SUMMARY", "RESEARCH_SUMMARY"}
+#: Tasks that always need a strong model regardless of complexity.
+_STRONG_TASKS = {"CHALLENGE", "SUPERVISOR_SYNTHESIS", "HYPOTHESIS_GENERATION"}
+
+
+def route_task(
+    *,
+    task_type: str = "",
+    complexity: str = "LOW",
+    risk_tier: str = "T0",
+    conflict: bool = False,
+    budget_remaining: Optional[int] = None,
+) -> TaskTierDecision:
+    """Choose a deterministic model tier for a task (Phase 6 Â§routing).
+
+    Escalation rules (highest wins):
+    * conflicting evidence â†’ ``strong`` (synthesis/challenge must be capable);
+    * high-risk tasks (``T3``/``T4``) â†’ at least ``strong``;
+    * ``CHALLENGE``/``SUPERVISOR_SYNTHESIS``/``HYPOTHESIS_GENERATION`` â†’ ``strong``;
+    * high complexity â†’ ``strong``; medium â†’ ``medium``;
+    * only pure classification/summary tasks may use ``cheap``.
+
+    Budget: with no remaining budget, only the cheapest tier is allowed; if
+    the caller forbids even that (``budget_remaining`` explicitly 0 and no
+    cheap-friendly task) â†’ ``refused``.
+    """
+    task = str(task_type or "").strip().upper()
+    tier = _COMPLEXITY_TIER.get(str(complexity or "LOW").upper(), "medium")
+    reasons: list[str] = []
+
+    if conflict:
+        tier = "strong"
+        reasons.append("conflict")
+    if str(risk_tier or "").upper() in ("T3", "T4"):
+        tier = "strong"
+        reasons.append("high-risk")
+    if task in _STRONG_TASKS:
+        tier = "strong"
+        reasons.append("task-requires-strong")
+    if task in _CHEAP_TASKS and tier != "strong":
+        tier = "cheap"
+        reasons.append("cheap-eligible-task")
+
+    allowed = True
+    if budget_remaining is not None and budget_remaining <= 0:
+        # Budget exhausted â†’ degrade to the cheapest tier if the task permits,
+        # otherwise refuse (never overspend on a strong model).
+        if task in _CHEAP_TASKS or tier == "cheap":
+            tier = "cheap"
+            reasons.append("budget-exhausted-cheap-only")
+        else:
+            tier = "refused"
+            allowed = False
+            reasons.append("budget-exhausted")
+
+    return TaskTierDecision(tier=tier, allowed=allowed, reason=", ".join(reasons))

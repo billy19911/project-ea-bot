@@ -3,6 +3,12 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Phase 6: Model Router & Budget
+- `services/python/src/llm/budget.py` (baru): `BudgetTree`/`BudgetNode` — anggaran token hierarkis Global → Supervisor → Department → Task → Agent → Model. Reservasi dipropagasikan ke SEMUA ancestor di bawah satu lock sehingga eksekusi konkuren tidak dapat overspend; `commit()` mencatat pemakaian aktual dari provider dan mengembalikan sisa. `should_wake_committee()` — komite (kerja LLM) hanya dibangunkan oleh event deterministik bermakna (BOS/CHOCH/sweep/OB touch/FVG/volatilitas/news/spread/invalidation/perubahan posisi), tidak pernah tiap candle.
+- `services/python/src/llm/model_router.py`: `route_task()` — routing tier deterministik (cheap/medium/strong/refused) berdasarkan kompleksitas, risk tier, konflik, dan sisa budget. Konflik / task berisiko tinggi / CHALLENGE / SUPERVISOR_SYNTHESIS / HYPOTHESIS_GENERATION → strong; budget habis tanpa task cheap-eligible → refused (tidak pernah overspend).
+- Test baru `services/python/tests/test_phase6_router_budget.py` (8): routing cheap/strong/escalation; budget 0 → cheap atau refused; hierarki 6 tingkat mencatat reservasi ke seluruh ancestor; 5 thread konkuren tidak melewati budget (3×30 dari 100); pemakaian aktual provider tercatat; event bermakna membangunkan komite; candle rutin tidak.
+- Verifikasi: full Python **3197 passed, 0 failed** (3189 + 8 Phase 6); suite router lama (`test_phase6_router.py`) tetap hijau. Tidak ada default arm yang diubah; tidak ada order nyata dikirim.
+
 ### Added — Phase 5: Learning & Research (setup identity, quality dimensions, regime matrix)
 - `services/python/src/learning/review_store.py`: `build_setup_identity()` — identitas setup terstruktur & stabil `SYMBOL/TF_SETUP/TF_ZONE/TF_TRIGGER/SETUP_TYPE/REGIME/SESSION`; `regime_matrix()` — agregasi deterministik `setup × regime × session` dengan `sample_size`, `total_pnl`, `win_rate`. `ReviewBuilder` kini meloloskan `setup_identity` pada kedua review.
 - `services/python/src/learning/canonical.py`: `TradeReview.setup_identity` dan `DecisionReview.setup_identity` ditambahkan (default kosong → backward compatible). Dimensi kualitas (`decision/entry/risk/execution_quality`) tetap terpisah — tidak pernah digabung menjadi satu angka.
