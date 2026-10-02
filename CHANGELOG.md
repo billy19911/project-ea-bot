@@ -3,6 +3,11 @@ Semua perubahan penting pada project ini dicatat di dokumen ini.
 Format mengikuti [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dan versi menggunakan prinsip [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added — Phase 3: Committee & Debate (role-based specialists + bounded debate)
+- `services/python/src/orchestration/decision_chain.py`: menjalankan `DebateEngine` (bounded, `max_rounds=2`) untuk konflik unresolved sebelum `DecisionState` dibangun. Hasil debate diekspos di `canonical_decision["debate"]` (outcome/rounds/records/unresolved_conflicts). Konflik HIGH/CRITICAL yang gagal/tak tuntas menandai setup `INVALID`/`CHALLENGED` (fail-closed → tidak ada trade otomatis); konflik yang lolos challenge ditandai `RESOLVED` sehingga keputusan dapat maju. Challenger deterministik via `ChallengerRole` (injectable).
+- Test baru `services/python/tests/test_phase3_debate_flow.py` (6): debate dibatasi `max_rounds`; hanya spesialis pada domain konflik yang dikonsultasi (bukan seluruh komite); konflik HIGH unresolved → WAIT/INVALID; konflik yang resolved → boleh maju; `canonical_decision["debate"]` terekspos; challenge yang lolos tidak menyisakan konflik kritis.
+- Verifikasi: full Python **3176 passed, 0 failed** (3170 + 6 Phase 3). Tidak ada default arm yang diubah; tidak ada order nyata dikirim.
+
 ### Added — Phase 2 (P1): Canonical Decision Architecture
 - `services/python/src/orchestration/decision_chain.py` (baru): membangun rantai canonical dari bukti agen supervisor — `MarketAssessment -> SetupCandidate -> DecisionState`. Aditif & fail-safe (error → tidak memblokir siklus); `SetupCandidate` tidak dibuat bila assessment punya konflik HIGH/CRITICAL unresolved.
 - `services/python/src/orchestration/pipeline.py`: memanggil `build_decision_chain` setelah analisis supervisor; hasilnya dipublikasikan di `PipelineResult.canonical_decision` (+ `to_dict()`). Eksekusi diblokir hanya saat canonical melaporkan konflik HIGH/CRITICAL unresolved atau state `REJECTED`/`EXPIRED` — jalur historis tetap utuh (default perilaku tidak berubah). Tahap baru `canonical` muncul di trace.

@@ -94,9 +94,9 @@ def build_decision_chain(
             direction = str(proposal.get("direction", "")).upper()
         else:
             direction = ""
-        critical_conflict = bool(assessment.has_critical_conflicts())
         setup: Optional[SetupCandidate] = None
-        if direction in _ACTIONABLE and not critical_conflict:
+        debate: Optional[dict[str, Any]] = None
+        if direction in _ACTIONABLE:
             setup = SetupCandidate(
                 setup_id=_new_id("setup"),
                 assessment_id=assessment.assessment_id,
@@ -105,6 +105,13 @@ def build_decision_chain(
                 setup_type=str(analysis.get("setup_type") or "CONTINUATION"),
                 timeframe=str(analysis.get("timeframe") or "M15"),
             )
+            # Phase 3: run the bounded debate for unresolved conflicts BEFORE
+            # the decision is built. A failed/unresolved HIGH/CRITICAL debate
+            # invalidates the setup (fail-closed); a resolved one clears the
+            # conflicts so the decision can progress.
+            debate = _run_debate(setup, assessment, symbol=symbol)
+            if debate is not None and debate.get("outcome") in ("INVALID", "WAIT"):
+                setup.status = "INVALID" if debate.get("outcome") == "INVALID" else "CHALLENGED"
 
         decision = coordinator.build_decision(
             assessment,
@@ -115,7 +122,45 @@ def build_decision_chain(
             "assessment": assessment.to_dict(),
             "setup": setup.to_dict() if setup is not None else None,
             "decision": decision.to_dict(),
+            "debate": debate,
         }
     except Exception as exc:  # noqa: BLE001 - observability must never break a cycle
         logger.debug("Canonical decision chain skipped: %s", exc)
+        return None
+
+
+def _debate_challenger() -> Any:
+    """Return the deterministic challenger role for the debate (injectable)."""
+    try:
+        from agents.roles import ChallengerRole
+    except Exception:  # noqa: BLE001 - alternate import identity
+        from src.agents.roles import ChallengerRole  # type: ignore
+    return ChallengerRole()
+
+
+def _run_debate(setup: Any, assessment: Any, *, symbol: str = "") -> Optional[dict[str, Any]]:
+    """Run the bounded debate for unresolved conflicts (Phase 3, fail-safe).
+
+    Returns the serialised debate outcome, or ``None`` when there is nothing
+    to debate (no unresolved conflicts) or the debate modules are unavailable.
+    Never raises.
+    """
+    try:
+        conflicts = [c for c in (assessment.conflicts or []) if c.resolution_status != "RESOLVED"]
+        if not conflicts:
+            return None
+        try:
+            from agents.debate import DebateEngine
+        except Exception:  # noqa: BLE001 - alternate import identity
+            from src.agents.debate import DebateEngine  # type: ignore
+        engine = DebateEngine(challenger=_debate_challenger())
+        outcome = engine.run(
+            setup,
+            conflicts,
+            hypothesis_direction=str(getattr(setup, "direction", "") or ""),
+            context={"symbol": symbol},
+        )
+        return outcome.to_dict()
+    except Exception as exc:  # noqa: BLE001 - debate must never break a cycle
+        logger.debug("Debate skipped: %s", exc)
         return None
